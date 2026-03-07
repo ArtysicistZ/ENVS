@@ -16,7 +16,7 @@ Rollout config
 """
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 @dataclass
@@ -40,6 +40,8 @@ class RolloutConfig:
     tensor_parallel_size: int = 2
     max_num_batched_tokens: int = 8192
     max_num_seqs: int = 1024
+    kv_cache_memory_bytes: Optional[int] = None
+    old_logprob_source: str = "auto"
     disable_log_stats: bool = True
     val_override_config: Dict[str, Any] = field(default_factory=dict)
     """auto keys"""

@@ -2,8 +2,8 @@
 # For GPU cluster with Docker support
 
 data:
-  train_files: evaluation_examples/test_smoke_4.json  # 4 tasks only
-  val_files: evaluation_examples/test_smoke_4.json
+  train_files: OSWorld/evaluation_examples/test_smoke_4.json  # 4 ARPO-tested Chrome tasks
+  val_files: OSWorld/evaluation_examples/test_smoke_4.json
   prompt_key: instruction
   answer_key: ""  # Empty string instead of null
   image_key: images

@@ -15,8 +15,8 @@
 # two trajectories per task for advantage computation.
 
 data:
-  train_files: evaluation_examples/test_smoke_4.json
-  val_files: evaluation_examples/test_smoke_4.json
+  train_files: OSWorld/evaluation_examples/test_smoke_4.json
+  val_files: OSWorld/evaluation_examples/test_smoke_4.json
   prompt_key: instruction
   answer_key: ""
   image_key: images

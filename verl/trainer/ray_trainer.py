@@ -48,6 +48,7 @@ from ..utils.dataset import collate_fn as collate_fn_raw
 from ..utils.osworld import OSWorldDataset, OSWorldTaskConfigDataset, OSWorldGRPODataset, collate_fn, collate_fn_dataproto, collate_fn_fake, GRPODatasetProcessor
 from ..utils.logger import Tracker
 from ..utils.py_functional import convert_dict_to_str
+from ..utils.rollout_logprobs import get_old_log_probs_with_fallback
 from ..utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from ..workers.fsdp_workers import FSDPWorker
 from . import core_algos
@@ -200,6 +201,43 @@ def _timer(name: str, timing_raw: Dict[str, float]):
     timing_raw[name] = timer.last
 
 
+def normalize_remote_server_urls(remote_server_url: Optional[str], remote_server_urls: Optional[List[str]]) -> List[str]:
+    urls: List[str] = []
+    if remote_server_url:
+        urls.append(remote_server_url)
+    if remote_server_urls:
+        urls.extend(url for url in remote_server_urls if url)
+
+    deduped: List[str] = []
+    seen = set()
+    for url in urls:
+        if url not in seen:
+            seen.add(url)
+            deduped.append(url)
+    return deduped
+
+
+def build_rollout_jobs(task_configs: List[dict], rollout_n: int) -> List[dict]:
+    return [task_config for task_config in task_configs for _ in range(rollout_n)]
+
+
+def chunk_rollout_jobs(rollout_jobs: List[dict], num_envs: int) -> List[List[dict]]:
+    if num_envs <= 0:
+        raise ValueError("num_envs must be positive.")
+    return [rollout_jobs[i : i + num_envs] for i in range(0, len(rollout_jobs), num_envs)]
+
+
+def merge_timing_raw(dst: Dict[str, float], src: Dict[str, float]) -> None:
+    for key, value in src.items():
+        dst[key] = dst.get(key, 0.0) + value
+
+
+def reshape_rollout_metric(values: torch.Tensor, rollout_n: int) -> torch.Tensor:
+    if rollout_n > 0 and values.numel() >= rollout_n and values.numel() % rollout_n == 0:
+        return values.reshape(-1, rollout_n)
+    return values.reshape(-1, 1)
+
+
 
 
 
@@ -255,11 +293,13 @@ class RayPPOTrainer:
         if config.algorithm.adv_estimator not in list(AdvantageEstimator):
             raise NotImplementedError(f"Unknown advantage estimator: {config.algorithm.adv_estimator}.")
 
-        use_remote_env = bool(getattr(config.env, "remote_server_url", None))
+        remote_urls = normalize_remote_server_urls(
+            getattr(config.env, "remote_server_url", None),
+            getattr(config.env, "remote_server_urls", None),
+        )
+        use_remote_env = bool(remote_urls)
         if not use_remote_env and config.data.rollout_batch_size % config.worker.actor.global_batch_size != 0:
             raise ValueError("Rollout batch size must be divisible by actor global batch size.")
-        if use_remote_env and config.data.rollout_batch_size > config.worker.actor.global_batch_size:
-            raise ValueError("With remote env, rollout batch size should be <= actor global batch size (e.g. 1 <= 4).")
 
         if (
             config.data.rollout_batch_size * config.worker.rollout.n
@@ -307,20 +347,25 @@ class RayPPOTrainer:
         print('Start to create env_worker for OSWorld Environment')
         max_steps = self.config.env.max_steps
         num_envs = self.config.env.num_envs
-        remote_url = getattr(self.config.env, 'remote_server_url', None) or None
+        remote_urls = normalize_remote_server_urls(
+            getattr(self.config.env, "remote_server_url", None),
+            getattr(self.config.env, "remote_server_urls", None),
+        )
 
-        if remote_url:
-            # Remote env (Mac/AWS): one server = one env for now; use a single worker.
-            num_remote = 1
-            if num_envs != 1:
-                print(f'Remote env: using 1 worker (server has one env); config had num_envs={num_envs}')
+        if remote_urls:
+            num_remote = len(remote_urls)
+            if num_envs != num_remote:
+                print(
+                    f"Remote env: using {num_remote} workers from remote_server_url(s); "
+                    f"config had num_envs={num_envs}"
+                )
             self.env_workers = []
-            for i in range(num_remote):
+            for i, remote_url in enumerate(remote_urls):
                 w = RemoteEnvWorker.options(name=f"remote_env_worker_{i}").remote(
                     i, max_steps, self.config, remote_url
                 )
                 self.env_workers.append(w)
-            print(f'RemoteEnvWorker created (url={remote_url}), total: {len(self.env_workers)}')
+            print(f"RemoteEnvWorker created (urls={remote_urls}), total: {len(self.env_workers)}")
         else:
             # Local Docker env workers pinned to nodes with docker resource
             all_res = ray.cluster_resources().keys()
@@ -345,7 +390,7 @@ class RayPPOTrainer:
                 self.tokenizer,
                 max_prompt_length=self.config.data.max_prompt_length
             )
-            for _ in range(num_envs)
+            for _ in range(len(self.env_workers))
         ] 
             
     def _create_dataloader(self) -> None:
@@ -376,7 +421,11 @@ class RayPPOTrainer:
             data_path=self.config.data.val_files,
         )
         # Val batch size = number of envs (env_workers not created yet; use config)
-        num_envs = 1 if getattr(self.config.env, "remote_server_url", None) else self.config.env.num_envs
+        remote_urls = normalize_remote_server_urls(
+            getattr(self.config.env, "remote_server_url", None),
+            getattr(self.config.env, "remote_server_urls", None),
+        )
+        num_envs = len(remote_urls) if remote_urls else self.config.env.num_envs
         val_batch_size = min(num_envs, len(self.val_dataset))
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
@@ -479,7 +528,9 @@ class RayPPOTrainer:
                 action_batch_output = unpad_dataproto(action_batch_output, pad_size=pad_size)
                 
                 response_texts = self.tokenizer.batch_decode(action_batch_output.batch['responses'], skip_special_tokens=True)
-                response_texts, _, _ = self._retry_invalid_actions_once(gen_batch, response_texts, pad_size)
+                response_texts, _, _, _ = self._retry_invalid_actions_once(
+                    gen_batch, action_batch_output, response_texts, pad_size
+                )
 
                 cur_valid_envs = [self.env_workers[i] for i in valid_env_idx]
 
@@ -644,23 +695,34 @@ class RayPPOTrainer:
         except Exception:
             return False
 
-    def _retry_invalid_actions_once(self, gen_batch, response_texts, pad_size: int):
+    def _retry_invalid_actions_once(self, gen_batch, action_batch_output: DataProto, response_texts, pad_size: int):
         invalid_idx = [i for i, t in enumerate(response_texts) if not self._looks_parseable_gui_action(t)]
+        metadata_entries = list(action_batch_output.non_tensor_batch.get("rollout_step_metadata", []))
+        if len(metadata_entries) < len(response_texts):
+            metadata_entries.extend({} for _ in range(len(response_texts) - len(metadata_entries)))
         if not invalid_idx:
-            return response_texts, 0, 0
+            return response_texts, metadata_entries, 0, 0
         retry_count = len(invalid_idx)
         print(f"prestep_parser_retry: invalid actions before env.step at idx={invalid_idx}; regenerating once.")
         retry_output = self.actor_rollout_wg.generate_sequences(gen_batch)
         retry_output = unpad_dataproto(retry_output, pad_size=pad_size)
         retry_texts = self.tokenizer.batch_decode(retry_output.batch['responses'], skip_special_tokens=True)
+        retry_metadata_entries = list(retry_output.non_tensor_batch.get("rollout_step_metadata", []))
         recovered = 0
         for i in invalid_idx:
             if i < len(retry_texts) and self._looks_parseable_gui_action(retry_texts[i]):
                 response_texts[i] = retry_texts[i]
+                if i < len(retry_metadata_entries):
+                    metadata_entries[i] = retry_metadata_entries[i]
                 recovered += 1
         if recovered:
             print(f"prestep_parser_retry: recovered {recovered}/{retry_count} invalid actions before env.step.")
-        return response_texts, retry_count, recovered
+        return response_texts, metadata_entries, retry_count, recovered
+
+    def _attach_rollout_step_metadata(self, process_results: List[dict], step_metadata_by_env: List[List[dict]]) -> List[dict]:
+        for process_result, step_metadata in zip(process_results, step_metadata_by_env):
+            process_result["rollout_step_metadata"] = copy.deepcopy(step_metadata)
+        return process_results
 
     def _task_family_decoding_overrides(self, task_config: Optional[dict], is_val: bool = False) -> Dict[str, Any]:
         """Minimal task-family-conditioned decoding presets (safe for smoke runs)."""
@@ -692,11 +754,20 @@ class RayPPOTrainer:
 
         return overrides
 
-    def _apply_task_family_decoding_if_single(self, gen_batch: DataProto, valid_env_idx: List[int], task_configs: List[dict], is_val: bool = False) -> None:
+    def _apply_task_family_decoding_if_single(
+        self,
+        gen_batch: DataProto,
+        valid_env_idx: List[int],
+        task_configs: List[dict],
+        is_val: bool = False,
+        env_to_task_index: Optional[Dict[int, int]] = None,
+    ) -> None:
         """Apply family-conditioned decoding only when batch maps to a single env/task (current smoke path)."""
         if len(valid_env_idx) != 1:
             return
         env_i = valid_env_idx[0]
+        if env_to_task_index is not None:
+            env_i = env_to_task_index.get(env_i, env_i)
         if env_i < 0 or env_i >= len(task_configs):
             return
         overrides = self._task_family_decoding_overrides(task_configs[env_i], is_val=is_val)
@@ -839,26 +910,155 @@ class RayPPOTrainer:
         torch.save(visual_trajs, visual_folder_path)
         action_batch_output.save_to_disk(os.path.join(self.config.trainer.save_checkpoint_path, "trajs", f"global_step_{self.global_step}_batch.pkl"))
 
-    def start_reset_envs(self, batch_dict):
-        rollout_n = self.config.worker.rollout.n
-        num_envs = len(self.env_workers)
+    def _build_rollout_chunks(self, batch_dict: List[dict]) -> List[List[dict]]:
+        rollout_jobs = build_rollout_jobs(batch_dict, self.config.worker.rollout.n)
+        return chunk_rollout_jobs(rollout_jobs, len(self.env_workers))
 
-        # With enough envs, run all rollout_n copies in parallel
-        task_configs = [x for x in batch_dict for _ in range(rollout_n)]  # interleave
-        if len(task_configs) > num_envs:
-            # Not enough envs for parallel rollouts; will do sequential rollouts later.
-            # For now, just use as many as we have envs (1 rollout per env).
-            task_configs = task_configs[:num_envs]
-        assert len(task_configs) == num_envs
-        reset_envs_object = [worker.reset.remote(task_config) for worker, task_config in zip(self.env_workers, task_configs)]
-        return task_configs, reset_envs_object
+    def _run_rollout_chunk(
+        self,
+        task_configs: List[dict],
+        timing_raw: Dict[str, float],
+        chunk_idx: int,
+        total_chunks: int,
+    ) -> Tuple[List[dict], List[float], List[float], List[dict]]:
+        active_workers = self.env_workers[: len(task_configs)]
+        local_timing: Dict[str, float] = {}
 
-    @property
-    def _needs_sequential_rollouts(self):
-        """True when we have fewer envs than rollout.n * rollout_batch_size, so GRPO
-        needs sequential rollouts on the same env to get rollout.n samples per task."""
-        rollout_n = self.config.worker.rollout.n
-        return len(self.env_workers) < rollout_n
+        format_rewards = [0.0] * len(task_configs)
+        eval_results_objects = [None] * len(task_configs)
+        rollout_step_metadata_by_job = [[] for _ in task_configs]
+        batch_skipped = False
+
+        with _timer("env_reset", local_timing):
+            reset_outputs = ray.get(
+                [worker.reset.remote(task_config) for worker, task_config in zip(active_workers, task_configs)]
+            )
+        print(
+            f"[chunk={chunk_idx + 1}/{total_chunks}] reset_time: {local_timing['env_reset']} "
+            f"| task_ids={[task_config['id'] for task_config in task_configs]}"
+        )
+
+        active_worker_by_env_idx = {output["env_idx"]: worker for output, worker in zip(reset_outputs, active_workers)}
+        slot_by_env_idx = {output["env_idx"]: slot for slot, output in enumerate(reset_outputs)}
+        env_outputs = reset_outputs
+
+        with _timer("gen", local_timing):
+            for step_idx in range(self.config.env.max_steps):
+                is_done_stats = ray.get([worker.is_done.remote() for worker in active_workers])
+                print(
+                    f"[chunk={chunk_idx + 1}/{total_chunks}] step_idx: {step_idx}, "
+                    f"finished: {sum(is_done_stats)}/{len(is_done_stats)}"
+                )
+
+                _obs = next((x["obs_messages"] for x in env_outputs if x.get("obs_messages")), None)
+                if _obs is not None and step_idx == 0:
+                    _n_msg = len(_obs)
+                    _n_img = sum(
+                        1
+                        for m in _obs
+                        for c in (m.get("content") or [])
+                        if isinstance(c, dict) and c.get("type") == "image"
+                    )
+                    _txt_len = 0
+                    for m in _obs:
+                        for c in (m.get("content") or []):
+                            if isinstance(c, dict) and "text" in c:
+                                _txt_len += len(c.get("text", ""))
+                    print(
+                        f"verify_obs: chunk={chunk_idx + 1}/{total_chunks} step={step_idx} "
+                        f"messages={_n_msg} images={_n_img} instruction_text_len={_txt_len}"
+                    )
+                elif _obs is None:
+                    _t = getattr(self, "_last_remote_fail_log", 0)
+                    if _t == 0 or time.time() - _t >= 30:
+                        print(
+                            "verify_obs: step={} obs_messages is None (reset/step failed). "
+                            "Remote env 503? (this message rate-limited to every 30s)".format(step_idx)
+                        )
+                        self._last_remote_fail_log = time.time()
+
+                world_size = self.actor_rollout_wg.world_size
+                with _timer("prepare_vllm_inputs", local_timing):
+                    vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(env_outputs)
+
+                if vllm_batch is None or not isinstance(vllm_batch, DataProto):
+                    batch_skipped = True
+                    format_rewards = [0.0] * len(task_configs)
+                    _t = getattr(self, "_last_remote_fail_log", 0)
+                    if _t == 0 or time.time() - _t >= 30:
+                        print(
+                            "prepare_vllm_inputs: no valid obs_messages (all envs returned None). "
+                            "Remote reset must return obs_messages with screenshot; check remote server. (rate-limited 30s)"
+                        )
+                        self._last_remote_fail_log = time.time()
+                    break
+
+                vllm_batch_pad, pad_size = pad_dataproto_to_divisor(vllm_batch, world_size)
+                gen_batch = vllm_batch_pad.pop(
+                    batch_keys=["input_ids", "attention_mask", "position_ids"],
+                    non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
+                )
+                self._apply_task_family_decoding_if_single(
+                    gen_batch,
+                    valid_env_idx,
+                    task_configs,
+                    is_val=False,
+                    env_to_task_index=slot_by_env_idx,
+                )
+                with _timer("actor_rollout_wg", local_timing):
+                    action_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
+                action_batch_output = unpad_dataproto(action_batch_output, pad_size=pad_size)
+
+                response_texts = self.tokenizer.batch_decode(action_batch_output.batch["responses"], skip_special_tokens=True)
+                response_texts, rollout_step_metadata, _, _ = self._retry_invalid_actions_once(
+                    gen_batch, action_batch_output, response_texts, pad_size
+                )
+                for env_idx, step_meta in zip(valid_env_idx, rollout_step_metadata):
+                    rollout_step_metadata_by_job[slot_by_env_idx[env_idx]].append(step_meta)
+
+                if response_texts and step_idx == 0:
+                    sample = (response_texts[0] or "")[:80].replace("\n", " ")
+                    print(f"[chunk={chunk_idx + 1}/{total_chunks}] on_policy output preview: {sample!r}")
+
+                cur_valid_envs = [active_worker_by_env_idx[env_idx] for env_idx in valid_env_idx]
+                with _timer("env_step", local_timing):
+                    env_outputs = ray.get(
+                        [worker.step.remote(action_text) for worker, action_text in zip(cur_valid_envs, response_texts)]
+                    )
+
+                for single_output in env_outputs:
+                    slot = slot_by_env_idx[single_output["env_idx"]]
+                    format_rewards[slot] += float(single_output.get("format_reward", 0.0))
+                    if single_output["is_done"]:
+                        eval_results_objects[slot] = active_workers[slot].evaluate.remote()
+
+                if env_outputs and all(single_output["is_done"] for single_output in env_outputs):
+                    break
+
+        if not batch_skipped:
+            missing_eval_idx = [i for i, output in enumerate(eval_results_objects) if output is None]
+            if missing_eval_idx:
+                print(
+                    f"[chunk={chunk_idx + 1}/{total_chunks}] max_steps reached before done for env_idx={missing_eval_idx}; "
+                    "scheduling evaluate at cutoff."
+                )
+                for slot in missing_eval_idx:
+                    eval_results_objects[slot] = active_workers[slot].evaluate.remote()
+
+        with _timer("evaluate_env", local_timing):
+            if batch_skipped:
+                eval_results = [0.0] * len(task_configs)
+            else:
+                eval_results = ray.get(eval_results_objects)
+        print(
+            f"[chunk={chunk_idx + 1}/{total_chunks}] evaluate_env_time: {local_timing['evaluate_env']} "
+            f"| eval_results: {eval_results} | format_rewards: {format_rewards}"
+        )
+
+        process_results = ray.get([worker.get_train_dict.remote() for worker in active_workers])
+        process_results = self._attach_rollout_step_metadata(process_results, rollout_step_metadata_by_job)
+        merge_timing_raw(timing_raw, local_timing)
+        return process_results, eval_results, format_rewards, task_configs
     
     def apply_replay(self, task_configs, batch):
         eval_results = batch.batch["eval_results"].tolist()
@@ -927,7 +1127,6 @@ class RayPPOTrainer:
             if self.config.trainer.val_only:
                 return
 
-        rollout_n = self.config.worker.rollout.n
         for _ in tqdm(range(self.config.trainer.total_episodes), desc="Episode", position=0):
             iterator = iter(tqdm(self.train_dataloader, desc="Running step", position=1))
 
@@ -943,152 +1142,43 @@ class RayPPOTrainer:
                 # batch_dict = batch_dict_next_batch
                 # task_configs, reset_envs_object = task_configs_next_batch, reset_envs_object_next_batch
 
-                task_configs, reset_envs_object = self.start_reset_envs(batch_dict)
-
                 metrics, timing_raw = {}, {}
+                rollout_chunks = self._build_rollout_chunks(batch_dict)
+                required_rollouts = len(batch_dict) * self.config.worker.rollout.n
+                print([config["id"] for config in batch_dict])
+                print(
+                    f"task_num: {len(batch_dict)}, env_num: {len(self.env_workers)}, "
+                    f"required_rollouts={required_rollouts}, rollout_chunks={len(rollout_chunks)}"
+                )
+                print([config["instruction"] for config in batch_dict])
 
-                print([config['id'] for config in task_configs])
-                print(f"task_num: {len(task_configs)}, env_num: {len(self.env_workers)}")
-                print([config['instruction'] for config in task_configs])
-
-                # Determine how many sequential rollouts are needed per env.
-                # With enough envs, rollout.n copies run in parallel (seq_rollouts=1).
-                # With fewer envs than rollout.n, run the same task multiple times sequentially.
-                seq_rollouts = max(1, rollout_n // len(self.env_workers))
-                if self._needs_sequential_rollouts:
-                    print(f"Sequential rollouts: {seq_rollouts} per env (rollout.n={rollout_n}, num_envs={len(self.env_workers)})")
-
-                all_process_results = []
-                all_eval_results = []
-                all_format_rewards = []
-                all_task_configs = []
+                all_process_results = [None] * required_rollouts
+                all_eval_results = [0.0] * required_rollouts
+                all_format_rewards = [0.0] * required_rollouts
+                all_task_configs = [None] * required_rollouts
 
                 with _timer("step", timing_raw):
-                    for seq_idx in range(seq_rollouts):
-                        if seq_idx > 0:
-                            # Re-reset envs with the same task configs for the next sequential rollout
-                            reset_envs_object = [
-                                worker.reset.remote(tc) for worker, tc in zip(self.env_workers, task_configs)
-                            ]
-                        if seq_idx == 0:
-                            self.actor_rollout_wg.prepare_generate_sequences()
-
-                        # generate a batch
-                        format_rewards = [0.] * len(task_configs)
-                        eval_results_objects = [None] * len(task_configs)
-
-                        with _timer(f"gen", timing_raw):  # wg: worker group
-
-                            with _timer("env_reset", timing_raw):
-                                reset_outputs = ray.get(reset_envs_object)
-                                
-                            print(f"[seq={seq_idx}] reset_time: {timing_raw['env_reset']}")
-
-                            env_outputs = reset_outputs
-                            batch_skipped = False  # set True when remote env fails and vllm_batch is invalid
-                            for step_idx in range(self.config.env.max_steps):
-                                is_done_stats = ray.get([worker.is_done.remote() for worker in self.env_workers])
-                                print(f'[seq={seq_idx}] step_idx: {step_idx}, finished: {sum(is_done_stats)}')
-
-                                # Verify screenshots + instructions
-                                _obs = next((x["obs_messages"] for x in env_outputs if x.get("obs_messages")), None)
-                                if _obs is not None:
-                                    _n_msg, _n_img = len(_obs), sum(1 for m in _obs for c in (m.get("content") or []) if isinstance(c, dict) and c.get("type") == "image")
-                                    _txt_len = 0
-                                    for m in _obs:
-                                        for c in (m.get("content") or []):
-                                            if isinstance(c, dict) and "text" in c:
-                                                _txt_len += len(c.get("text", ""))
-                                    if step_idx == 0:
-                                        print(f"verify_obs: seq={seq_idx} step={step_idx} messages={_n_msg} images={_n_img} instruction_text_len={_txt_len}")
-                                else:
-                                    _t = getattr(self, "_last_remote_fail_log", 0)
-                                    if _t == 0 or time.time() - _t >= 30:
-                                        print("verify_obs: step={} obs_messages is None (reset/step failed). Remote env 503? (this message rate-limited to every 30s)".format(step_idx))
-                                        self._last_remote_fail_log = time.time()
-
-                                world_size = self.actor_rollout_wg.world_size
-                                with _timer("prepare_vllm_inputs", timing_raw):
-                                    vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(env_outputs)
-
-                                if vllm_batch is None or not isinstance(vllm_batch, DataProto):
-                                    batch_skipped = True
-                                    format_rewards = [0.0] * len(task_configs)
-                                    _t = getattr(self, "_last_remote_fail_log", 0)
-                                    if _t == 0 or time.time() - _t >= 30:
-                                        print(
-                                            "prepare_vllm_inputs: no valid obs_messages (all envs returned None). "
-                                            "Remote reset must return obs_messages with screenshot; check remote server. (rate-limited 30s)"
-                                        )
-                                        self._last_remote_fail_log = time.time()
-                                    break
-                                vllm_batch_pad, pad_size = pad_dataproto_to_divisor(vllm_batch, world_size)
-
-                                gen_batch = vllm_batch_pad.pop(
-                                    batch_keys=["input_ids", "attention_mask", "position_ids"],
-                                    non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
-                                )
-                                self._apply_task_family_decoding_if_single(gen_batch, valid_env_idx, task_configs, is_val=False)
-                                # predict actions
-                                with _timer("actor_rollout_wg", timing_raw):
-                                    action_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
-                                action_batch_output = unpad_dataproto(action_batch_output, pad_size=pad_size)
-
-                                response_texts = self.tokenizer.batch_decode(action_batch_output.batch['responses'], skip_special_tokens=True)
-                                response_texts, _, _ = self._retry_invalid_actions_once(gen_batch, response_texts, pad_size)
-                                if response_texts and step_idx == 0:
-                                    sample = (response_texts[0] or "")[:80].replace("\n", " ")
-                                    print(f"[seq={seq_idx}] on_policy: model output (preview): {sample!r}")
-
-                                cur_valid_envs = [self.env_workers[i] for i in valid_env_idx]
-                                with _timer("env_step", timing_raw):
-                                    futures = [
-                                        worker.step.remote(action_text) for worker, action_text in zip(cur_valid_envs, response_texts)
-                                    ]
-                                    env_outputs = ray.get(futures)
-                                # Collect step-level format reward for every env output.
-                                # Remote env often reaches trainer max_steps without setting is_done=True,
-                                # so only taking terminal format_reward would collapse rewards to zero.
-                                for single_output in env_outputs:
-                                    cur_env_idx = single_output['env_idx']
-                                    format_rewards[cur_env_idx] += float(single_output.get('format_reward', 0.0))
-                                    if single_output['is_done']:
-                                        eval_results_objects[cur_env_idx] = self.env_workers[cur_env_idx].evaluate.remote()
-
-                                is_all_done = all([x['is_done'] for x in env_outputs])
-                                if is_all_done:
-                                    break
-
-                            if not batch_skipped:
-                                missing_eval_idx = [i for i, x in enumerate(eval_results_objects) if x is None]
-                                if missing_eval_idx:
-                                    # Some envs may never emit is_done=True before trainer max_steps.
-                                    # Trigger evaluate at rollout cutoff so training does not crash.
-                                    print(
-                                        f"[seq={seq_idx}] max_steps reached before done for env_idx={missing_eval_idx}; "
-                                        "scheduling evaluate at cutoff."
-                                    )
-                                    for i in missing_eval_idx:
-                                        eval_results_objects[i] = self.env_workers[i].evaluate.remote()
-
-                        # Collect results for this sequential rollout
-                        with _timer("evaluate_env", timing_raw):
-                            if batch_skipped:
-                                eval_results = [0.0] * len(task_configs)
-                            else:
-                                eval_results = ray.get(eval_results_objects)
-                        print(f'[seq={seq_idx}] evaluate_env_time: {timing_raw["evaluate_env"]} | eval_results: {eval_results} | format_rewards: {format_rewards}')
-
-                        process_results = ray.get([worker.get_train_dict.remote() for worker in self.env_workers])
-                        all_process_results.extend(process_results)
-                        all_eval_results.extend(eval_results)
-                        all_format_rewards.extend(format_rewards)
-                        all_task_configs.extend(task_configs)
-
-                    self.actor_rollout_wg.finish_generate_sequences()
+                    self.actor_rollout_wg.prepare_generate_sequences()
+                    try:
+                        for chunk_idx, task_configs_chunk in enumerate(rollout_chunks):
+                            process_results, eval_results, format_rewards, chunk_task_configs = self._run_rollout_chunk(
+                                task_configs_chunk, timing_raw, chunk_idx, len(rollout_chunks)
+                            )
+                            start = chunk_idx * len(self.env_workers)
+                            end = start + len(chunk_task_configs)
+                            all_process_results[start:end] = process_results
+                            all_eval_results[start:end] = eval_results
+                            all_format_rewards[start:end] = format_rewards
+                            all_task_configs[start:end] = chunk_task_configs
+                    finally:
+                        self.actor_rollout_wg.finish_generate_sequences()
 
                     # Build the training batch from all sequential rollouts
                     with _timer("prepare_grpo_inputs", timing_raw):
+                        if any(x is None for x in all_process_results):
+                            raise RuntimeError("rollout scheduler produced incomplete process results.")
+                        if any(x is None for x in all_task_configs):
+                            raise RuntimeError("rollout scheduler produced incomplete task assignments.")
                         # Some rollouts can lose image features after truncation and omit
                         # multi_modal_* keys, while others still include them. Normalize
                         # keys across samples so DataProto non-tensor lengths stay aligned.
@@ -1201,17 +1291,11 @@ class RayPPOTrainer:
                         }
                         metrics.update(reward_metrics)
 
-                        n_batch = len(batch)
-                        if n_batch % rollout_n == 0 and n_batch >= rollout_n:
-                            eval_results_global_np = batch.batch["eval_results"].reshape(-1, rollout_n)
-                            format_rewards_np = batch.batch["format_rewards"].reshape(-1, rollout_n)
-                            format_rewards_clipped_np = format_rewards_clipped.reshape(-1, rollout_n)
-                            reward_tensor_np = reward_tensor.reshape(-1, rollout_n)
-                        else:
-                            eval_results_global_np = batch.batch["eval_results"].reshape(-1, 1)
-                            format_rewards_np = batch.batch["format_rewards"].reshape(-1, 1)
-                            format_rewards_clipped_np = format_rewards_clipped.reshape(-1, 1)
-                            reward_tensor_np = reward_tensor.reshape(-1, 1)
+                        rollout_n = self.config.worker.rollout.n
+                        eval_results_global_np = reshape_rollout_metric(batch.batch["eval_results"], rollout_n)
+                        format_rewards_np = reshape_rollout_metric(batch.batch["format_rewards"], rollout_n)
+                        format_rewards_clipped_np = reshape_rollout_metric(format_rewards_clipped, rollout_n)
+                        reward_tensor_np = reshape_rollout_metric(reward_tensor, rollout_n)
                         print(
                             f'Evaluation results:\n{eval_results_global_np}\n'
                             f'Format rewards (raw):\n{format_rewards_np}\n'
@@ -1234,13 +1318,26 @@ class RayPPOTrainer:
 
                     # recompute old_log_probs
                     with _timer("old", timing_raw):
-                        old_log_probs = self.actor_rollout_wg.compute_log_probs(batch)
+                        old_log_probs, old_log_prob_stats = get_old_log_probs_with_fallback(
+                            batch=batch,
+                            source=self.config.worker.rollout.old_logprob_source,
+                            recompute_fn=lambda: self.actor_rollout_wg.compute_log_probs(batch),
+                        )
                         # Ensure old_log_probs tensor matches response_mask length (truncate if needed)
                         response_len = batch.batch["response_mask"].size(1)
                         t = old_log_probs.batch["old_log_probs"]
                         if t.size(1) != response_len:
                             old_log_probs.batch["old_log_probs"] = t[:, :response_len].contiguous()
                         batch = batch.union(old_log_probs)
+                        metrics.update(
+                            {
+                                f"perf/{key}": value
+                                for key, value in old_log_prob_stats.items()
+                                if key != "rollout_old_logprob_error"
+                            }
+                        )
+                        if "rollout_old_logprob_error" in old_log_prob_stats:
+                            print(f"rollout_old_logprob_fallback: {old_log_prob_stats['rollout_old_logprob_error']}")
 
                     # compute ref_log_probs
                     if self.use_reference_policy:

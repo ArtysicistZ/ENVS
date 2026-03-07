@@ -31,6 +31,7 @@ from vllm import LLM, RequestOutput, SamplingParams
 
 from ...protocol import DataProto
 from ...utils import torch_functional as VF
+from ...utils.rollout_logprobs import build_rollout_step_metadata, to_object_array
 from ...utils.torch_dtypes import PrecisionType
 from .base import BaseRollout
 from .config import RolloutConfig
@@ -56,6 +57,7 @@ class vLLMRollout(BaseRollout):
         self.rank = int(os.getenv("RANK", "0"))
         self.config = config
         self.pad_token_id = tokenizer.pad_token_id
+        self.assistant_prefix_token_ids = tokenizer.encode("<|im_start|>assistant\n", add_special_tokens=False)
         if config.tensor_parallel_size > torch.distributed.get_world_size():
             raise ValueError("Tensor parallelism size should be less than world size.")
 
@@ -70,6 +72,10 @@ class vLLMRollout(BaseRollout):
             vllm_init_kwargs["mm_processor_kwargs"] = {
                 "size": {"shortest_edge": config.image_min_pixels, "longest_edge": config.image_max_pixels},
             }
+        if getattr(config, "kv_cache_memory_bytes", None) is not None:
+            vllm_init_kwargs["kv_cache_memory_bytes"] = int(config.kv_cache_memory_bytes)
+        else:
+            vllm_init_kwargs["gpu_memory_utilization"] = config.gpu_memory_utilization
 
         self.inference_engine = LLM(
             model=model_path,
@@ -77,10 +83,10 @@ class vLLMRollout(BaseRollout):
             trust_remote_code=getattr(config, "trust_remote_code", True),
             tensor_parallel_size=config.tensor_parallel_size,
             dtype=PrecisionType.to_str(PrecisionType.to_dtype(config.dtype)),
-            gpu_memory_utilization=config.gpu_memory_utilization,
             enforce_eager=config.enforce_eager,
             max_model_len=config.prompt_length + config.response_length,
-            # max_num_batched_tokens=config.max_num_batched_tokens,
+            max_num_batched_tokens=config.max_num_batched_tokens,
+            max_num_seqs=config.max_num_seqs,
             enable_sleep_mode=True,
             distributed_executor_backend="external_launcher",
             disable_custom_all_reduce=True,
@@ -98,6 +104,9 @@ class vLLMRollout(BaseRollout):
         for key in config.to_dict().keys():
             if hasattr(default_sampling_params, key):
                 sampling_kwargs[key] = getattr(config, key)
+        if config.old_logprob_source != "recompute":
+            sampling_kwargs["logprobs"] = 1
+            sampling_kwargs["prompt_logprobs"] = 1
 
         print(f"Sampling params: {sampling_kwargs}.")
         self.sampling_params = SamplingParams(**sampling_kwargs)
@@ -151,6 +160,22 @@ class vLLMRollout(BaseRollout):
                 prompts=vllm_inputs, sampling_params=self.sampling_params, use_tqdm=(self.rank == 0)
             )
             response_ids = [output.token_ids for completion in completions for output in completion.outputs]
+            rollout_step_metadata = []
+            if self.config.old_logprob_source != "recompute":
+                for completion in completions:
+                    for output in completion.outputs:
+                        try:
+                            rollout_step_metadata.append(
+                                build_rollout_step_metadata(
+                                    prompt_token_ids=completion.prompt_token_ids or [],
+                                    prompt_logprobs=completion.prompt_logprobs,
+                                    response_token_ids=output.token_ids,
+                                    response_logprobs=output.logprobs,
+                                    assistant_prefix_token_ids=self.assistant_prefix_token_ids,
+                                )
+                            )
+                        except Exception as exc:
+                            rollout_step_metadata.append({"alignment_error": str(exc)})
             response_ids = VF.pad_2d_list_to_length(
                 response_ids, self.pad_token_id, max_length=self.config.response_length
             ).to(input_ids.device)
@@ -163,6 +188,10 @@ class vLLMRollout(BaseRollout):
                 if "multi_modal_inputs" in non_tensor_batch.keys():
                     non_tensor_batch["multi_modal_inputs"] = _repeat_interleave(
                         non_tensor_batch["multi_modal_inputs"], self.sampling_params.n
+                    )
+                if "rollout_step_metadata" in non_tensor_batch.keys():
+                    non_tensor_batch["rollout_step_metadata"] = _repeat_interleave(
+                        non_tensor_batch["rollout_step_metadata"], self.sampling_params.n
                     )
 
         sequence_ids = torch.cat([input_ids, response_ids], dim=-1)
@@ -194,4 +223,6 @@ class vLLMRollout(BaseRollout):
             },
             batch_size=batch_size,
         )
+        if self.config.old_logprob_source != "recompute":
+            non_tensor_batch["rollout_step_metadata"] = to_object_array(rollout_step_metadata)
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)

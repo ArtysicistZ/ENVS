@@ -95,6 +95,7 @@ class EnvConfig:
     screen_size: Tuple[int, int] = (1920, 1080)
     # Remote env (Mac/AWS): when set, EnvWorkers talk to this URL instead of local Docker.
     remote_server_url: Optional[str] = None
+    remote_server_urls: Optional[list[str]] = None
 
 @dataclass
 class PPOConfig:

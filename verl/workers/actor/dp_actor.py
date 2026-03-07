@@ -62,6 +62,10 @@ class DataParallelPPOActor(BasePPOActor):
         # For stability in PPO training (including smoke tests), always use the eager implementation.
         self.log_probs_from_logits = VF.log_probs_from_logits
 
+    def _maybe_empty_cache(self) -> None:
+        if self.config.empty_cache_policy == "aggressive":
+            torch.cuda.empty_cache()
+
     def _select_pixel_values_for_sp_rank(
         self,
         input_ids_rmpad: torch.Tensor,
@@ -410,10 +414,8 @@ class DataParallelPPOActor(BasePPOActor):
                     old_log_probs = model_inputs["old_log_probs"]
                     advantages = model_inputs["advantages"]
 
-                    # Free cached blocks before forward so CUDA has max contiguous free space
-                    # for the ~18 GiB logits tensor in the multi-turn trajectory case.
-                    torch.cuda.empty_cache()
                     # all return: (bsz, response_length)
+                    self._maybe_empty_cache()
                     log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
                     # Align shapes when log_probs and response_mask differ (e.g. variable-length VL batches / padding)
                     seq_len = min(log_probs.size(1), response_mask.size(1))
@@ -451,9 +453,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                     loss = pg_loss / gradient_accumulation
                     print(f'pg_loss: {pg_loss}')
-                    # Release fragmented cached blocks back to CUDA before backward
-                    # to avoid OOM from PyTorch allocator fragmentation.
-                    torch.cuda.empty_cache()
+                    self._maybe_empty_cache()
                     loss.backward()
 
                     batch_metrics = {

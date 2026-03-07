@@ -17,8 +17,10 @@ build/
 .env
 venv/
 .venv/
+.venv
 *.venv/
 env/
+vmware_vm_data
 
 # Large data files
 OSWorld/vmware_vm_data/
