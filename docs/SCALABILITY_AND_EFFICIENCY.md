@@ -140,6 +140,7 @@ The current smoke config is:
 - `max_prompt_length: 64000`
 - `tensor_parallel_size: 4`
 - `ulysses_sequence_parallel_size: 4`
+- `offload_optimizer: true`
 
 See [`smoke_remote_env_8gpu_a100.yaml`](/home/kevinzyz/yincheng/arpo/configs/smoke_remote_env_8gpu_a100.yaml#L7).
 
@@ -148,6 +149,7 @@ This means:
 - the context is very long
 - training runs with tiny micro-batches
 - the actor does many small forwards/backwards
+- optimizer state is moved through CPU even though `80 GB` cards still had memory headroom
 - the rollout side is not the dominant cost
 
 The two largest costs in the real run were:
@@ -155,151 +157,262 @@ The two largest costs in the real run were:
 1. `update_actor`
 2. `compute_log_probs` for old policy probabilities
 
-## 6. What To Change For Real 64-VM Efficiency
+Important design choice for the implementation plan below:
 
-### 6.1 First fix correctness of remote scheduling
+- do **not** replace the current-policy logprob kernel with a denser “standard” implementation
+- the current actor path is already using the memory-safe approach needed for long multimodal sequences
+- the real waste is the redundant old-policy pass, not the current-policy pass
 
-Before talking about throughput tuning, the trainer should support:
+## 6. Decision-Complete Implementation Plan
 
-- multiple remote server URLs
-- or another explicit remote-env pool abstraction
+This section is the implementation spec for improving immediate efficiency on the current `1 VM + 8 GPU` path while preserving an architecture that scales to `32/64 VMs` later.
 
-And the rollout scheduler must be based on:
+Default assumptions for the plan:
 
-- `required_rollouts = rollout_batch_size * rollout.n`
+- keep the current `8 GPU` topology as the foundation
+- keep `ulysses_sequence_parallel_size = 4`
+- keep `tensor_parallel_size = 4`
+- do not introduce a separate near-term 4-GPU default
+- keep `1 VM` support fully working throughout
 
-not just `rollout.n`.
+### 6.1 Make rollout memory controls real
 
-Without this, large-scale remote rollout is not correctly represented in the trainer.
+Required changes in [`vllm_rollout_spmd.py`](/home/kevinzyz/yincheng/arpo/verl/workers/rollout/vllm_rollout_spmd.py):
 
-### 6.2 Do not equate `num_envs` with `rollout_batch_size`
+- pass `max_num_batched_tokens=config.max_num_batched_tokens` into `LLM(...)`
+- pass `max_num_seqs=config.max_num_seqs` into `LLM(...)`
+- add optional `worker.rollout.kv_cache_memory_bytes: int | null`
+- precedence rule:
+  - if `kv_cache_memory_bytes` is set, pass it to `LLM(...)`
+  - otherwise rely on `gpu_memory_utilization`
 
-At large scale, it is better to treat many VMs as a concurrency pool, not as a command to update on all of them every step.
+Current code issue:
 
-Recommended approach:
-
-- keep many remote envs available, for example `64`
-- keep `rollout_batch_size` moderate, for example `4` or `8`
-- choose `rollout.n` based on GRPO quality, ideally `8`
-
-This keeps the model busy without forcing one giant PPO update every step.
-
-### 6.3 Increase micro-batch size before increasing total batch aggressively
-
-The current run has large headroom on `80 GB` cards:
-
-- `max_memory_reserved_gb` was about `45.7`
-
-So the first speed knob to test on A100 80G is:
-
-- `micro_batch_size_per_device_for_update: 2`
-- `micro_batch_size_per_device_for_experience: 2`
+- `max_num_batched_tokens` is validated but not enforced
+- `max_num_seqs` exists in config but is not used
 
 Why this matters:
 
-- it reduces gradient-accumulation steps
-- it reduces the number of tiny forward/backward launches
-- it should improve MFU significantly
+- rollout memory is the first likely GPU-side scale blocker
+- without these caps, increasing concurrency can over-allocate KV cache even when the config suggests otherwise
 
-This is a better first move than simply increasing total rollout volume.
+`enable_chunked_prefill` should remain the rollout-side knob for higher concurrency. It is part of the later `32/64-VM` plan, not mandatory for the immediate `1 VM` path.
 
-### 6.4 Consider disabling gradient checkpointing once memory is confirmed
+### 6.2 Remove the redundant old-policy logprob recompute
 
-Current config:
+Required changes across [`vllm_rollout_spmd.py`](/home/kevinzyz/yincheng/arpo/verl/workers/rollout/vllm_rollout_spmd.py) and [`ray_trainer.py`](/home/kevinzyz/yincheng/arpo/verl/trainer/ray_trainer.py):
 
-- `enable_gradient_checkpointing: true`
+- set `SamplingParams.logprobs = 1`
+- extend rollout output `DataProto` to include:
+  - generated `responses` as today
+  - per-token sampled logprobs aligned to those generated tokens
 
-Checkpointing saves memory but costs time. On `80 GB` GPUs, once micro-batch `2` is validated, the next speed experiment should be:
+Use these rollout-time logprobs as the source of `old_log_probs` whenever possible instead of calling `actor_rollout_wg.compute_log_probs(batch)`.
 
-- disable gradient checkpointing
+#### Public knob
 
-That should materially speed actor update if memory remains within budget.
+Add:
 
-### 6.5 Treat old-logprob recompute as a major optimization target
+- `worker.rollout.old_logprob_source: "auto" | "rollout" | "recompute"`
 
-`compute_log_probs` is too expensive at scale.
+Default:
 
-Medium-term optimization:
+- `"auto"`
 
-- return token log-probs directly from rollout when possible
-- avoid a separate full actor forward just to recover old policy log-probs
+Semantics:
 
-This is a larger engineering change, but it targets one of the two biggest step costs directly.
+- `"auto"`: use rollout logprobs when alignment succeeds, else fall back to recompute
+- `"rollout"`: require rollout logprobs; fail if alignment cannot be proven
+- `"recompute"`: preserve the current behavior for debugging
 
-### 6.6 Revisit `torch.cuda.empty_cache()` in the actor update loop
+#### Alignment strategy
 
-In [`dp_actor.py`](/home/kevinzyz/yincheng/arpo/verl/workers/actor/dp_actor.py#L413), `torch.cuda.empty_cache()` is called before forward and before backward for every micro-batch.
+For the first iteration:
 
-That is helpful as an OOM escape hatch, but it is expensive and can hurt allocator locality and throughput.
+- keep `RemoteEnvWorker` trajectory assembly unchanged
+- do not change how `history_messages`, `input_ids`, or `labels` are constructed
 
-Recommendation:
+Instead:
 
-- keep it only as a guarded fallback
-- do not run it unconditionally on every micro-batch in the large-scale training path
+- accumulate per-env, per-step rollout metadata in the trainer:
+  - `response_ids`
+  - sampled-token logprobs
+- after `get_train_dict()` returns the full tokenized trajectory, build dense `old_log_probs` by aligning rollout `response_ids` to assistant-labeled spans in the final trajectory
 
-### 6.7 Use env scale to hide latency, not to force huge per-step updates
+Alignment rules:
 
-With `64 VMs`, the goal should be:
+- operate only on positions where `labels != -100`
+- match left-to-right, step by step
+- support left padding and right truncation
+- fill masked-out positions with `0.0`; they are ignored by `response_mask`
+- if a step cannot be aligned exactly:
+  - `"auto"` falls back to recompute for the whole batch
+  - `"rollout"` raises an error
+  - record a counter / metric for fallback frequency
 
-- keep rollout groups fed continuously
-- keep DP groups fed continuously
-- avoid creating one gigantic PPO step with excessive accumulation
+Why this is the standard PPO path here:
 
-Good large-scale training is a balance between:
+- rollout-time sampled token logprobs are exactly the old-policy probabilities PPO needs
+- they remove one of the two dominant stage costs in the live run
 
-- enough on-policy data to keep GPUs busy
-- small enough update chunks to keep wall time reasonable
+### 6.3 Remove aggressive per-microbatch allocator churn
 
-## 7. Recommended Scaling Order
+Required changes in [`dp_actor.py`](/home/kevinzyz/yincheng/arpo/verl/workers/actor/dp_actor.py):
 
-The order below is safer than jumping directly from the current smoke run to a large `64-VM` setting.
+- remove unconditional `torch.cuda.empty_cache()` before every micro-batch forward
+- remove unconditional `torch.cuda.empty_cache()` before every micro-batch backward
+- keep cache clearing only at vLLM wake/sleep boundaries, consistent with the existing sharding-manager comment
 
-### Stage 1: single-node, correctness-first
+#### Public knob
+
+Add:
+
+- `worker.actor.empty_cache_policy: "boundary_only" | "aggressive" | "off"`
+
+Default:
+
+- `"boundary_only"`
+
+Semantics:
+
+- `"boundary_only"`: only clear cache at rollout wake/sleep boundaries
+- `"aggressive"`: preserve the current per-microbatch behavior as a fragmentation fallback
+- `"off"`: disable explicit cache clearing entirely
+
+### 6.4 Throughput profile for A100 80G
+
+The document should treat this as the first tuning profile to validate on the existing `1 VM + 8 GPU` path:
+
+- `worker.actor.micro_batch_size_per_device_for_update: 2`
+- `worker.actor.micro_batch_size_per_device_for_experience: 2`
+- `worker.actor.offload.offload_optimizer: false`
+
+Next gated experiment after that profile:
+
+- if memory remains below budget, set `enable_gradient_checkpointing: false`
+
+Why:
+
+- `offload_optimizer` is a safety setting, not a throughput setting
+- on `80 GB` cards it should not remain enabled in the high-throughput path unless memory proves it necessary
+
+### 6.5 Fix the remote-env scheduler before any 32/64-VM scale work
+
+Required changes in [`ray_trainer.py`](/home/kevinzyz/yincheng/arpo/verl/trainer/ray_trainer.py):
+
+- add `env.remote_server_urls: list[str] | null`
+- keep `env.remote_server_url` as a backward-compatible single-URL shorthand
+- normalize both into one runtime list of remote endpoints
+- create one `RemoteEnvWorker` per remote URL
+- make validation batch sizing use the actual remote worker count, not a hardcoded `1`
+
+The rollout scheduler rewrite is mandatory before scale:
+
+- compute `required_rollouts = rollout_batch_size * rollout.n`
+- chunk that full workload across available env workers
+- support all cases:
+  - `1 VM`
+  - `N VMs` where `N < required_rollouts`
+  - `N VMs` where `N >= required_rollouts`
+
+Important policy choice:
+
+- do not assume `rollout_batch_size == num_envs`
+- for future scale, env count is a concurrency pool
+- update batch should remain moderate even when env count grows
+
+### 6.6 Immediate 1-VM / 8-GPU operating mode
+
+This is the first-class operating mode to preserve while implementing the changes above.
+
+Defaults:
 
 - keep `8 GPUs`
-- keep `ulysses_sequence_parallel_size: 4`
-- keep `tensor_parallel_size: 4`
-- validate remote multi-env scheduler after patching
+- keep `SP = 4`
+- keep `TP = 4`
+- keep remote env count at `1`
+- apply the old-logprob removal
+- enforce rollout KV/cache caps
+- apply allocator cleanup
+- apply the A100 throughput profile before touching VM count
 
-### Stage 2: increase model efficiency on the same node
+Explicit non-goal:
 
-- raise `micro_batch_size_per_device_for_update` from `1` to `2`
-- raise `micro_batch_size_per_device_for_experience` from `1` to `2`
-- test with current `64K` prompt budget
-- if stable, test disabling gradient checkpointing
+- the immediate objective is not to make `1 VM` saturate all 8 GPUs perfectly
+- the objective is to remove avoidable inefficiency while keeping the same architecture that later supports `32/64 VMs`
 
-### Stage 3: moderate rollout scale
+## 7. Validation Matrix And Acceptance Criteria
 
-Recommended first large-scale target:
+### 7.1 Correctness tests
 
-- `num_envs`: `16` or `32`
-- `rollout_batch_size`: `4`
-- `rollout.n`: `4` or `8`
+Required tests:
 
-Only after that is stable should the system move toward:
+- unit test: rollout initialization passes through `max_num_batched_tokens`, `max_num_seqs`, and optional `kv_cache_memory_bytes`
+- unit test: rollout logprob extraction returns a tensor shaped like `responses`
+- unit test: dense `old_log_probs` assembly from rollout metadata aligns correctly for:
+  - text-only sequences
+  - multimodal sequences
+  - left padding
+  - right truncation
+  - multiple assistant turns
+- regression test: if alignment fails, `"auto"` falls back to recompute and logs the fallback
+- regression test: `"rollout"` mode hard-fails on alignment mismatch
+- scheduler test: with `rollout_batch_size > 1`, total collected rollouts always equal `rollout_batch_size * rollout.n`
 
-- `num_envs: 64`
-- `rollout_batch_size: 8`
+### 7.2 Performance acceptance
 
-### Stage 4: rollout memory tuning
+Use the current first-step live run as baseline.
 
-For larger rollout concurrency, tune:
+Targets:
 
-- `worker.rollout.gpu_memory_utilization`
-- `worker.rollout.max_num_batched_tokens`
-- `worker.rollout.enable_chunked_prefill`
+- `old` stage time reduced by at least `80%` in `"rollout"` mode or successful `"auto"` mode
+- actor update wall time reduced materially in the throughput profile
+  - first target: at least `25%` improvement over the current baseline
+- rollout memory caps become observable and bounded
+  - increasing concurrency must not ignore `max_num_batched_tokens`
+  - `max_num_seqs` must affect admission behavior
+- `1 VM` smoke path remains functional end-to-end
 
-These affect vLLM memory much more directly than actor update VRAM.
+### 7.3 Memory acceptance
 
-## 8. Practical Expectations For 64 VMs
+Memory rules to preserve:
 
-If the remote scheduling code is fixed, then `64 VMs` should help:
+- actor/update VRAM budget is controlled by:
+  - micro-batch size
+  - sequence length
+  - SP size
+  - checkpointing
+- rollout/KV memory budget is controlled by:
+  - `gpu_memory_utilization` or `kv_cache_memory_bytes`
+  - `max_num_batched_tokens`
+  - `max_num_seqs`
+- scaling env count alone must not be treated as a reason to increase micro-batch size
+
+## 8. Recommended Execution Order
+
+Priority order:
+
+1. Enforce rollout memory caps in vLLM init.
+2. Add rollout-time sampled token logprobs and dense `old_log_probs` assembly.
+3. Add fallback logic for alignment mismatch and keep `"recompute"` mode for debugging.
+4. Add `empty_cache_policy` and switch default behavior to boundary-only cache clearing.
+5. Validate the A100 throughput profile on the existing `1 VM + 8 GPU` path.
+6. Only after that, implement multi-URL remote env support and the full rollout scheduler rewrite.
+7. Benchmark:
+   - `num_envs = 16`
+   - `rollout_batch_size = 4`
+   - `rollout.n = 4`
+8. Only then test `num_envs = 32/64`.
+
+## 9. Practical Expectations For 32/64 VMs
+
+If the remote scheduling code is fixed, then `32/64 VMs` should help:
 
 - environment throughput
 - data freshness
 - utilization of the two rollout groups
 
-But `64 VMs` alone will **not** make the cluster proportionally faster.
+But `32/64 VMs` alone will **not** make the cluster proportionally faster.
 
 The hard limits remain:
 
@@ -315,37 +428,19 @@ So the realistic goal is:
 
 not linear speedup with the number of VMs.
 
-## 9. Recommended Next Engineering Tasks
-
-Priority order:
-
-1. Add support for multiple remote env servers in config and trainer.
-2. Rewrite remote rollout scheduling to use `rollout_batch_size * rollout.n`.
-3. Add throughput-focused profiling logs per stage:
-   - rollout generation
-   - old log-prob recompute
-   - actor update
-   - CPU memory
-4. Make per-microbatch `empty_cache()` optional.
-5. Validate `micro_batch_size = 2` on `A100 80G`.
-6. Benchmark with:
-   - `num_envs = 16`
-   - `rollout_batch_size = 4`
-   - `rollout.n = 4`
-7. Only then test `num_envs = 64`.
-
 ## 10. Bottom Line
 
-The current codebase is now functional for the 8-GPU multimodal SP smoke path, and it does achieve the main memory goal of splitting long-sequence training across `4` SP ranks.
+The current codebase is functionally correct for the 8-GPU multimodal SP smoke path, and it already achieves the core memory goal of splitting long-sequence training across `4` SP ranks.
 
-However, the path to efficient `64-VM` training still requires:
+The next work should therefore focus on:
 
-- fixing remote-env scheduling
-- feeding the two DP / TP groups with better-sized batches
-- increasing micro-batch sizes on `80 GB` cards
-- reducing actor-side overheads, especially `old_log_probs` recompute
+- making rollout memory limits real
+- removing the redundant old-policy logprob pass
+- eliminating unnecessary allocator churn
+- validating the `1 VM + 8 GPU` high-throughput profile
+- only then extending the remote scheduler for `32/64-VM` scale
 
-The main large-scale risk is not that actor VRAM will automatically scale with the number of VMs. The bigger risks are:
+The main large-scale risk is still not that actor VRAM will automatically scale with VM count. The bigger risks are:
 
 - rollout KV-cache growth
 - CPU / Ray memory pressure
