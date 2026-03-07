@@ -16,6 +16,7 @@ build/
 # Environment
 .env
 venv/
+# Repo-local symlink to the shared virtualenv in ~/hansenzuishuai/.venv
 .venv/
 .venv
 *.venv/
