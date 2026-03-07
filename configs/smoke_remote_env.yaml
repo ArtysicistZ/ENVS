@@ -1,0 +1,118 @@
+# Remote env: EXECUTIONS on AWS EC2 (xlang-ai/OSWorld, PROVIDER=aws), TRAINING on cluster.
+# Use when the cluster can reach the EC2 host (public IP + security group allows 15001).
+#
+# Architecture:
+#   - Resource (GPUs, model, rollout): cluster.
+#   - Executions (reset/step/evaluate): remote server on EC2 (PROVIDER=aws); see docs/REMOTE_ENV_SERVER_RUNBOOK.md.
+#
+# 1) On EC2 (e.g. 18.206.172.166): cd ~/arpo_remote_env && source arpo_env/bin/activate && ./scripts/start_remote_env_aws.sh
+# 2) Test from cluster (reset can take 1-5 min: VM + Chrome): curl -s -w "\\nHTTP %{http_code} time %{time_total}s\\n" -X POST http://<EC2_IP>:15001/env/reset -H "Content-Type: application/json" -d '{"task_config":{}}' --max-time 300
+#    If 500 "VM failed to become ready within timeout": on server (no KVM) set DOCKER_VM_READY_TIMEOUT=1800 and create evaluation_examples/settings/proxy/dataimpulse.json (echo '{}').
+#    Common 503 cause: server needs AWS creds + boto3. Configure on the SERVER host (18.206.172.166), NOT on the training machine:
+#    SSH to 18.206.172.166 -> in arpo_remote_env venv: pip install boto3 && aws configure (or attach IAM role to that EC2).
+#    Subnet/sg (e.g. subnet-02691b301586ea09b, sg-004fb15195b7f3715) are where to launch envs; credentials are still required to call EC2 APIs.
+# 3) In this config: env.remote_server_url must be http://<EC2_IP>:15001 (e.g. http://18.206.172.166:15001)
+# 4) On cluster: python -m verl.trainer.main config=configs/smoke_remote_env.yaml
+# Note: Config key is remote_server_url (not remote_env_url).
+
+data:
+  # Use OSWorld/evaluation_examples so dataset finds examples/<domain>/<id>.json
+  train_files: OSWorld/evaluation_examples/test_smoke_8.json
+  val_files: OSWorld/evaluation_examples/test_smoke_8.json
+  prompt_key: instruction
+  answer_key: ""
+  image_key: images
+  # Context length: 4096 keeps ~4-5 steps of history; reduces peak memory vs 8192.
+  max_prompt_length: 2048
+  max_response_length: 128
+  rollout_batch_size: 1  # 1 env on remote server (smoke_4gpu uses 4)
+  val_batch_size: -1
+  shuffle: true
+  seed: 1
+  max_pixels: 129024   # ~360x360; reduces image token count and memory
+  min_pixels: 2800
+
+algorithm:
+  adv_estimator: grpo   # ARPO: group-relative advantage (needs rollout.n > 1 and multiple samples per task)
+  disable_kl: true     # ARPO: no KL penalty
+  use_kl_loss: false
+  kl_coef: 0           # ARPO: must be 0 when disable_kl
+  enable_replay: true  # ARPO: experience replay
+
+worker:
+  actor:
+    global_batch_size: 2  # With rollout.n=2 -> effective 4, per-device = 4/4 = 1
+    micro_batch_size_per_device_for_update: 1
+    micro_batch_size_per_device_for_experience: 1
+    max_grad_norm: 1.0
+    padding_free: false
+    ulysses_sequence_parallel_size: 1
+    ppo_epochs: 1
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.3
+    model:
+      model_path: ByteDance-Seed/UI-TARS-2B-SFT
+      enable_gradient_checkpointing: true
+      trust_remote_code: true
+      freeze_vision_tower: true
+      override_config:
+        _attn_implementation: "eager"
+    optim:
+      lr: 1.0e-6
+      weight_decay: 1.0e-2
+      strategy: adamw
+      lr_warmup_ratio: 0.05
+    fsdp:
+      enable_full_shard: true
+      enable_cpu_offload: false
+      enable_rank0_init: false
+    offload:
+      offload_params: false
+      offload_optimizer: false
+
+  rollout:
+    temperature: 0.2
+    top_p: 0.8
+    top_k: 40
+    n: 2  # GRPO requires n > 1; with 1 env these run sequentially
+    gpu_memory_utilization: 0.15
+    enforce_eager: true
+    enable_chunked_prefill: false
+    tensor_parallel_size: 1
+    limit_images: 5
+    image_min_pixels: 3136
+    image_max_pixels: 2116800
+    # Must be >= max_prompt_length + max_response_length for vLLM
+    max_num_batched_tokens: 4096
+    val_override_config:
+      temperature: 0.2
+      top_p: 1.0
+      top_k: -1
+      n: 1
+
+  ref:
+    fsdp:
+      enable_full_shard: true
+      enable_cpu_offload: true
+    offload:
+      offload_params: true
+
+  reward:
+    reward_type: function
+    score_function: math
+    skip_special_tokens: true
+
+env:
+  num_envs: 1  # 1 env with sequential rollouts (rollout.n=2 -> 2 trajectories per task, run sequentially)
+  max_steps: 32
+  screen_size: [1920, 1080]
+  remote_server_url: "http://3.88.110.176:15001"
+
+trainer:
+  total_episodes: 30
+  logger: ["console", "wandb"]
+  project_name: arpo-smoke-test
+  experiment_name: uitars_2b_remote_env
+  wandb_entity: hanszhu05-university-of-pennsylvania
+  n_gpus_per_node: 1
+  nnodes: 1

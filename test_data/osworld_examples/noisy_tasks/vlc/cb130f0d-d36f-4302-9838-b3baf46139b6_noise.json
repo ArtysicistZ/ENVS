@@ -1,0 +1,46 @@
+{
+  "id": "cb130f0d-d36f-4302-9838-b3baf46139b6",
+  "snapshot": "base_setup",
+  "instruction": "Automatically adjust the brightness and contrast of this video to match my room's lighting.",
+  "source": "https://www.vlchelp.com/increase-brightness-contrast-videos/",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": "vlc"
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "gedit"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "notify-send",
+          "VPN Connection",
+          "Connected to US-West server"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "vlc"
+  ],
+  "evaluator": {
+    "func": "infeasible"
+  },
+  "noise_meta": {
+    "generated_by": "fewshot_noise_generator_openai.py",
+    "noise_level": "light",
+    "model": "gpt-4o",
+    "effort": "high",
+    "temperature": 0.2
+  }
+}

@@ -1,0 +1,47 @@
+# Weights & Biases Configuration for ARPO Training
+
+wandb:
+  enabled: true
+  entity: "hanszhu05"
+  project: "arpo-uitars-training"
+  name: "uitars-2b-128tasks-epoch1"  # Run name
+  
+  # What to log
+  log_frequency: 1  # Log every episode
+  log_models: true  # Save model checkpoints to wandb
+  log_videos: false  # Don't log videos (too large)
+  log_screenshots: false  # Don't log all screenshots (too many)
+  
+  # Tags for organizing runs
+  tags:
+    - "ui-tars-2b"
+    - "128-tasks"
+    - "colab-gpu"
+    - "arpo"
+    - "osworld"
+  
+  # Notes
+  notes: "ARPO training with UI-TARS-2B on 128 OSWorld tasks using Colab GPU"
+
+# Metrics to track
+metrics:
+  # Per step
+  - inference_time
+  - action_type
+  
+  # Per task
+  - task_reward
+  - task_success
+  - num_steps_taken
+  
+  # Per epoch
+  - average_reward
+  - success_rate
+  - replay_buffer_size
+  - replay_buffer_usage
+  
+  # Training
+  - policy_loss
+  - value_loss
+  - learning_rate
+  - gradient_norm

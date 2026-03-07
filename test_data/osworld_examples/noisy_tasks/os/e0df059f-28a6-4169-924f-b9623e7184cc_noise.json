@@ -1,0 +1,68 @@
+{
+  "id": "e0df059f-28a6-4169-924f-b9623e7184cc",
+  "snapshot": "os",
+  "instruction": "I have a directory named \"todo_list_Jan_1\". Can you help me change its name into \"todo_list_Jan_2\"?",
+  "source": "https://help.ubuntu.com/lts/ubuntu-help/files-rename.html.en",
+  "trajectory": "trajectories/",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "gedit"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": "echo 'password' | sudo -S mkdir ~/Desktop/todo_list_Jan_1",
+        "shell": true
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "python",
+          "-c",
+          "import pyautogui; import time; pyautogui.click(960, 540); time.sleep(0.5);"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "notify-send",
+          "Reminder",
+          "Don't forget to check your email!"
+        ]
+      }
+    }
+  ],
+  "related_apps": [
+    "os"
+  ],
+  "evaluator": {
+    "func": "exact_match",
+    "result": {
+      "type": "vm_command_line",
+      "command": "[ -d ~/Desktop/todo_list_Jan_2 ] && echo 'Directory exists.' || echo 'Directory does not exist.'",
+      "shell": true
+    },
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "expected": "Directory exists.\n"
+      }
+    }
+  },
+  "noise_meta": {
+    "generated_by": "fewshot_noise_generator_openai.py",
+    "noise_level": "light",
+    "model": "gpt-4o",
+    "effort": "high",
+    "temperature": 0.2
+  }
+}

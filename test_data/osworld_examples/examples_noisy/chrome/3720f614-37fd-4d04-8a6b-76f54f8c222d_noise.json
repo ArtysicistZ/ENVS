@@ -1,0 +1,68 @@
+{
+  "id": "3720f614-37fd-4d04-8a6b-76f54f8c222d",
+  "snapshot": "chrome",
+  "instruction": "I am more familiar with Korean as I am from Korea. I want to use chrome with my mother tongue. Could you help me change the Chrome interface language to Korean? ",
+  "source": "https://superuser.com/questions/984668/change-interface-language-of-chrome-to-english",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "google-chrome",
+          "--remote-debugging-port=1337"
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "gedit"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "notify-send",
+          "VPN Connection",
+          "Connected to Korea server"
+        ]
+      }
+    },
+    {
+      "type": "chrome_open_tabs",
+      "parameters": {
+        "urls_to_open": [
+          "https://www.example.com",
+          "https://www.wikipedia.org"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "notify-send",
+          "Language Settings",
+          "Language settings have been updated"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "chrome"
+  ],
+  "evaluator": {
+    "func": "infeasible"
+  },
+  "noise_meta": {
+    "generated_by": "fewshot_noise_generator_openai.py",
+    "noise_level": "light",
+    "model": "gpt-4o",
+    "effort": "high",
+    "temperature": 0.2
+  }
+}

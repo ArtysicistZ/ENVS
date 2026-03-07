@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Environment
+.env
+venv/
+.venv/
+env/
+
+# Large data files
+OSWorld/vmware_vm_data/
+OSWorld/docker_vm_data/
+OSWorld/cache/
+vmware_vm_data/
+docker_vm_data/
+cache_dirs/
+*.qcow2
+*.qcow2.zip
+Ubuntu.qcow2*
+*.vmdk
+*.vmem
+*.vmx
+*.vmxf
+*.nvram
+*.vmsd
+*.vmsn
+
+# Results and logs
+results*/
+checkpoints*/
+logs/
+*.log
+wandb/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Model cache
+.cache/
+*.safetensors
+models--*/
+
+# Temporary files
+*.tmp
+single_task_test.json
+QUICK_START.txt
+
+# Keep structure but not large files
+!.gitkeep

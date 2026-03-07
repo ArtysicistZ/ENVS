@@ -1,0 +1,60 @@
+{
+  "id": "6d72aad6-187a-4392-a4c4-ed87269c51cf",
+  "snapshot": "libreoffice_calc",
+  "instruction": "Could you please converting OpenOffice Impress presentation to video and play it with VLC?",
+  "source": "https://superuser.com/questions/923171/converting-openoffice-impress-presentation-to-video-without-screen-recording",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "libreoffice",
+          "--impress"
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "vlc"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "notify-send",
+          "Reminder",
+          "Meeting in 30 minutes"
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "gnome-calculator"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/6d72aad6-187a-4392-a4c4-ed87269c51cf",
+  "related_apps": [
+    "libreoffice_calc",
+    "libreoffice_impress",
+    "libreoffice_writer",
+    "vlc"
+  ],
+  "evaluator": {
+    "func": "infeasible"
+  },
+  "noise_meta": {
+    "generated_by": "fewshot_noise_generator_openai.py",
+    "noise_level": "light",
+    "model": "gpt-4o",
+    "effort": "high",
+    "temperature": 0.2
+  }
+}
