@@ -74,6 +74,28 @@ wait_for_health() {
 wait_for_health "http://127.0.0.1:5001/health" "reset daemon" 30
 wait_for_health "http://127.0.0.1:5000/health" "OSWorld server" 90
 
+screenshot_looks_valid() {
+  local image_path="$1"
+  "${PYTHON_BIN}" - "${image_path}" <<'PY'
+import sys
+from PIL import Image, ImageStat
+
+image_path = sys.argv[1]
+image = Image.open(image_path).convert("RGB")
+stats = ImageStat.Stat(image)
+means = stats.mean
+stddev = stats.stddev
+
+# Reject a trivially dark frame.
+if max(means) < 8:
+    raise SystemExit(1)
+
+# Reject a nearly uniform frame, which is typically the blank X root window.
+if max(stddev) < 1.0 and (max(means) - min(means)) < 2.0:
+    raise SystemExit(1)
+PY
+}
+
 wait_for_screenshot() {
   local url="$1"
   local timeout="${2:-30}"
@@ -82,7 +104,7 @@ wait_for_screenshot() {
   tmpfile="$(mktemp)"
   trap 'rm -f "${tmpfile}"' RETURN
   while [ "${SECONDS}" -lt "${deadline}" ]; do
-    if curl --max-time 8 -fsS "${url}" -o "${tmpfile}" >/dev/null 2>&1 && [ -s "${tmpfile}" ]; then
+    if curl --max-time 8 -fsS "${url}" -o "${tmpfile}" >/dev/null 2>&1 && [ -s "${tmpfile}" ] && screenshot_looks_valid "${tmpfile}"; then
       rm -f "${tmpfile}"
       trap - RETURN
       return 0

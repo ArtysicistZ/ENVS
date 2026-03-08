@@ -118,6 +118,11 @@ if [ ! -S "/tmp/.X11-unix/X${DISPLAY_INDEX}" ]; then
   exit 1
 fi
 
+# Make the managed display immediately usable and visibly non-black even before
+# the desktop session finishes painting its own background.
+DISPLAY="${DISPLAY_NUM}" xset s off -dpms s noblank >/dev/null 2>&1 || true
+DISPLAY="${DISPLAY_NUM}" xsetroot -solid "#2E3440" -cursor_name left_ptr >/dev/null 2>&1 || true
+
 runuser -u "${DESKTOP_USER}" -- env \
   DISPLAY="${DISPLAY_NUM}" \
   HOME="${DESKTOP_HOME}" \
@@ -131,5 +136,12 @@ runuser -u "${DESKTOP_USER}" -- env \
   XDG_STATE_HOME="${XDG_STATE_HOME}" \
   dbus-run-session /usr/bin/gnome-session --session=ubuntu &
 GNOME_PID=$!
+
+# GNOME on Xvfb can come up with a black root window. Re-assert a visible root
+# background after session startup so screenshots have a usable desktop surface.
+(
+  sleep 5
+  DISPLAY="${DISPLAY_NUM}" xsetroot -solid "#2E3440" -cursor_name left_ptr >/dev/null 2>&1 || true
+) &
 
 wait "${GNOME_PID}"
