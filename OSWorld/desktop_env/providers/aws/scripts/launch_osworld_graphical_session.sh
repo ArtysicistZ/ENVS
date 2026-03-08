@@ -88,13 +88,9 @@ cleanup() {
     kill "${GNOME_PID}" 2>/dev/null || true
     wait "${GNOME_PID}" 2>/dev/null || true
   fi
-  if [ -n "${OPENBOX_PID:-}" ] && kill -0 "${OPENBOX_PID}" 2>/dev/null; then
-    kill "${OPENBOX_PID}" 2>/dev/null || true
-    wait "${OPENBOX_PID}" 2>/dev/null || true
-  fi
-  if [ -n "${XVFB_PID:-}" ] && kill -0 "${XVFB_PID}" 2>/dev/null; then
-    kill "${XVFB_PID}" 2>/dev/null || true
-    wait "${XVFB_PID}" 2>/dev/null || true
+  if [ -n "${XORG_PID:-}" ] && kill -0 "${XORG_PID}" 2>/dev/null; then
+    kill "${XORG_PID}" 2>/dev/null || true
+    wait "${XORG_PID}" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT INT TERM
@@ -106,8 +102,11 @@ ensure_writable_session_home
 rm -f "/tmp/.X${DISPLAY_INDEX}-lock"
 rm -f "/tmp/.X11-unix/X${DISPLAY_INDEX}"
 
-Xvfb "${DISPLAY_NUM}" -screen 0 "${SCREEN_GEOMETRY}" -ac -nolisten tcp &
-XVFB_PID=$!
+# Use the provisioned dummy-driver Xorg display instead of Xvfb. GNOME Shell on
+# Xvfb can stay visually black even though the display and screenshot endpoint
+# are technically alive. The dummy Xorg path paints a real desktop surface.
+Xorg "${DISPLAY_NUM}" -config /etc/X11/xorg.conf -noreset -nolisten tcp &
+XORG_PID=$!
 
 deadline=$((SECONDS + 20))
 while [ "${SECONDS}" -lt "${deadline}" ]; do
@@ -118,7 +117,7 @@ while [ "${SECONDS}" -lt "${deadline}" ]; do
 done
 
 if [ ! -S "/tmp/.X11-unix/X${DISPLAY_INDEX}" ]; then
-  echo "Xvfb did not create ${DISPLAY_NUM} socket" >&2
+  echo "Xorg did not create ${DISPLAY_NUM} socket" >&2
   exit 1
 fi
 
@@ -126,14 +125,6 @@ fi
 # the desktop session finishes painting its own background.
 DISPLAY="${DISPLAY_NUM}" xset s off -dpms s noblank >/dev/null 2>&1 || true
 DISPLAY="${DISPLAY_NUM}" xsetroot -solid "#2E3440" -cursor_name left_ptr >/dev/null 2>&1 || true
-
-runuser -u "${DESKTOP_USER}" -- env \
-  DISPLAY="${DISPLAY_NUM}" \
-  HOME="${DESKTOP_HOME}" \
-  XAUTHORITY="${DESKTOP_HOME}/.Xauthority" \
-  XDG_RUNTIME_DIR="${DESKTOP_RUNTIME_DIR}" \
-  openbox --sm-disable &
-OPENBOX_PID=$!
 
 runuser -u "${DESKTOP_USER}" -- env \
   DISPLAY="${DISPLAY_NUM}" \
