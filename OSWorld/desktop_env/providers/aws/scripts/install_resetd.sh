@@ -137,11 +137,35 @@ EOF
 }
 
 detect_display_manager_unit() {
+  service_exists() {
+    local unit="$1"
+    [ -e "/etc/systemd/system/${unit}" ] || [ -e "/lib/systemd/system/${unit}" ] || [ -e "/usr/lib/systemd/system/${unit}" ]
+  }
+
   if [ -n "${OSWORLD_DISPLAY_MANAGER_SERVICE:-}" ]; then
-    if systemctl list-unit-files --type=service --all 2>/dev/null | awk '{print $1}' | grep -Fxq "${OSWORLD_DISPLAY_MANAGER_SERVICE}"; then
+    if service_exists "${OSWORLD_DISPLAY_MANAGER_SERVICE}"; then
       echo "${OSWORLD_DISPLAY_MANAGER_SERVICE}"
       return 0
     fi
+  fi
+
+  if dpkg -s gdm3 >/dev/null 2>&1; then
+    if service_exists "gdm3.service"; then
+      echo "gdm3.service"
+      return 0
+    fi
+    if service_exists "gdm.service"; then
+      echo "gdm.service"
+      return 0
+    fi
+  fi
+  if dpkg -s lightdm >/dev/null 2>&1 && service_exists "lightdm.service"; then
+    echo "lightdm.service"
+    return 0
+  fi
+  if dpkg -s sddm >/dev/null 2>&1 && service_exists "sddm.service"; then
+    echo "sddm.service"
+    return 0
   fi
 
   local candidates=(
@@ -153,7 +177,7 @@ detect_display_manager_unit() {
   )
   local unit
   for unit in "${candidates[@]}"; do
-    if systemctl list-unit-files --type=service --all 2>/dev/null | awk '{print $1}' | grep -Fxq "${unit}"; then
+    if service_exists "${unit}"; then
       echo "${unit}"
       return 0
     fi
@@ -211,7 +235,7 @@ fi
 restart_or_dump osworld-home-overlay.service
 if [ -n "${DISPLAY_MANAGER_UNIT}" ]; then
   echo "Starting display manager on top of overlay-mounted home: ${DISPLAY_MANAGER_UNIT}"
-  systemctl start "${DISPLAY_MANAGER_UNIT}" || true
+  restart_or_dump "${DISPLAY_MANAGER_UNIT}"
   if ! wait_for_x_socket 30; then
     echo "Display manager did not produce an X socket within 30s: ${DISPLAY_MANAGER_UNIT}" >&2
     fail_no_desktop
