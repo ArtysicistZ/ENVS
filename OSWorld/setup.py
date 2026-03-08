@@ -51,7 +51,6 @@ setup(
         "matplotlib~=3.7.4",
         "pynput~=1.7.6",
         "pyautogui~=0.9.54",
-        "pyxcursor",
         "psutil~=5.9.6",
         "tqdm~=4.65.0",
         "pandas>=2.2,<2.3",

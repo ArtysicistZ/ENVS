@@ -5,6 +5,16 @@ import importlib.util
 import json
 import platform
 import sys
+from pathlib import Path
+
+
+ROOT_DIR = Path(__file__).resolve().parents[4]
+SERVER_DIR = ROOT_DIR / "desktop_env" / "server"
+
+for path in (ROOT_DIR, SERVER_DIR):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
 
 
 MODULES = {
@@ -13,9 +23,10 @@ MODULES = {
         ("lxml.etree", "lxml"),
         ("PIL.Image", "Pillow"),
         ("pyautogui", "pyautogui"),
+        ("pygetwindow", "PyGetWindow"),
         ("requests", "requests"),
         ("Xlib", "python-xlib"),
-        ("pyxcursor", "pyxcursor"),
+        ("pyxcursor", "local:desktop_env/server/pyxcursor.py"),
     ],
     "Linux": [
         ("pyatspi", "python3-pyatspi"),

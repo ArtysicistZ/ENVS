@@ -153,13 +153,29 @@ ensure_accessibility_python_deps() {
     echo "[2b/6] Installing Ubuntu accessibility runtime dependency python3-pyatspi"
     apt-get install -y python3-pyatspi
   fi
+}
 
-  if "${PYTHON_BIN}" -c "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('pyxcursor') else 1)" >/dev/null 2>&1; then
+ensure_python_module() {
+  local module_name="$1"
+  local package_name="$2"
+  if PYTHONPATH="${APP_ROOT}/OSWorld:${SYSTEM_DIST_PACKAGES}${PYTHONPATH:+:${PYTHONPATH}}" \
+    "${PYTHON_BIN}" -c "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('${module_name}') else 1)" \
+    >/dev/null 2>&1; then
     return 0
   fi
 
-  echo "[2b/6] Installing missing Python runtime dependency pyxcursor into ${PYTHON_BIN}"
-  "${PYTHON_BIN}" -m pip install pyxcursor
+  echo "[2b/6] Installing missing Python runtime dependency ${package_name} into ${PYTHON_BIN}"
+  "${PYTHON_BIN}" -m pip install "${package_name}"
+}
+
+ensure_server_python_runtime_deps() {
+  ensure_python_module "flask" "flask"
+  ensure_python_module "lxml" "lxml"
+  ensure_python_module "PIL" "Pillow"
+  ensure_python_module "pyautogui" "pyautogui"
+  ensure_python_module "pygetwindow" "PyGetWindow"
+  ensure_python_module "requests" "requests"
+  ensure_python_module "Xlib" "python-xlib"
 }
 
 wait_for_x_socket() {
@@ -264,6 +280,7 @@ fi
 echo "[2/6] Syncing OSWorld control-plane app into ${APP_ROOT}"
 sync_control_plane_app
 ensure_accessibility_python_deps
+ensure_server_python_runtime_deps
 check_server_python_deps
 
 echo "[3/6] Rendering systemd units"
