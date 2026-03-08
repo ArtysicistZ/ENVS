@@ -32,6 +32,24 @@ if [ -z "${DESKTOP_HOME}" ] || [ ! -d "${DESKTOP_HOME}" ]; then
   exit 1
 fi
 
+CURRENT_PWD="$(pwd -P)"
+if [[ "${CURRENT_PWD}" == "${DESKTOP_HOME}" || "${CURRENT_PWD}" == "${DESKTOP_HOME}/"* ]]; then
+  cat >&2 <<EOF
+Install must be launched from outside the target desktop home.
+Current working directory: ${CURRENT_PWD}
+Target desktop home:       ${DESKTOP_HOME}
+
+Reason:
+  osworld-home-overlay.service mounts an overlay on top of ${DESKTOP_HOME}.
+  If your shell is currently inside that directory tree, the mount can fail.
+
+Run this instead:
+  cd /tmp
+  bash ${REPO_ROOT}/OSWorld/desktop_env/providers/aws/scripts/start_local_reset_stack.sh
+EOF
+  exit 1
+fi
+
 echo "[1/6] Installing reset stack for desktop user '${DESKTOP_USER}' (${DESKTOP_HOME})"
 
 render_unit() {

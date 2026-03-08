@@ -2,6 +2,23 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
+CURRENT_PWD="$(pwd -P)"
+DESKTOP_HOME="${OSWORLD_RESET_HOME:-${HOME}}"
+
+if [[ "${CURRENT_PWD}" == "${DESKTOP_HOME}" || "${CURRENT_PWD}" == "${DESKTOP_HOME}/"* ]]; then
+  cat >&2 <<EOF
+Do not start the reset stack from inside ${DESKTOP_HOME}.
+Current working directory: ${CURRENT_PWD}
+
+The overlay service mounts on top of ${DESKTOP_HOME}, so running this command
+from inside that tree can make osworld-home-overlay.service fail with EBUSY.
+
+Use:
+  cd /tmp
+  bash ${REPO_ROOT}/OSWorld/desktop_env/providers/aws/scripts/start_local_reset_stack.sh
+EOF
+  exit 1
+fi
 
 cd "${REPO_ROOT}"
 echo "Starting OSWorld reset stack from ${REPO_ROOT}"
