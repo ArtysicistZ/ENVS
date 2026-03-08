@@ -941,14 +941,17 @@ class SetupController:
                     """import os; print(os.path.join(os.getenv('HOME'), "Library", "Application Support", "Google", "Chrome", "Default", "History"))""")[
                     'output'].strip()
             elif os_type == 'Linux':
-                if "arm" in platform.machine():
-                    chrome_history_path = controller.execute_python_command(
-                        "import os; print(os.path.join(os.getenv('HOME'), 'snap', 'chromium', 'common', 'chromium', 'Default', 'History'))")[
-                        'output'].strip()
-                else:
-                    chrome_history_path = controller.execute_python_command(
-                        "import os; print(os.path.join(os.getenv('HOME'), '.config', 'google-chrome', 'Default', 'History'))")[
-                        'output'].strip()
+                chrome_history_path = controller.execute_python_command(
+                    """import os, shutil
+home = os.getenv('HOME')
+if shutil.which('google-chrome') or shutil.which('google-chrome-stable'):
+    print(os.path.join(home, '.config', 'google-chrome', 'Default', 'History'))
+elif shutil.which('chromium-browser') or shutil.which('chromium'):
+    print(os.path.join(home, 'snap', 'chromium', 'common', 'chromium', 'Default', 'History'))
+else:
+    print(os.path.join(home, '.config', 'google-chrome', 'Default', 'History'))
+"""
+                )['output'].strip()
             else:
                 raise Exception('Unsupported operating system')
 

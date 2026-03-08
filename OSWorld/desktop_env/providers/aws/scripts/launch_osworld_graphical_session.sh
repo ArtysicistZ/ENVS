@@ -32,6 +32,17 @@ ensure_writable_session_home() {
     "${DESKTOP_HOME}"
     "${XDG_CONFIG_HOME}"
     "${XDG_CONFIG_HOME}/autostart"
+    "${XDG_CONFIG_HOME}/dconf"
+    "${XDG_CONFIG_HOME}/Code"
+    "${XDG_CONFIG_HOME}/Code/User"
+    "${XDG_CONFIG_HOME}/google-chrome"
+    "${XDG_CONFIG_HOME}/google-chrome/Default"
+    "${XDG_CONFIG_HOME}/libreoffice"
+    "${XDG_CONFIG_HOME}/libreoffice/4"
+    "${XDG_CONFIG_HOME}/libreoffice/4/user"
+    "${XDG_CONFIG_HOME}/vlc"
+    "${XDG_CONFIG_HOME}/GIMP"
+    "${XDG_CONFIG_HOME}/GIMP/2.10"
     "${XDG_CONFIG_HOME}/mutter"
     "${XDG_CONFIG_HOME}/mutter/sessions"
     "${XDG_CACHE_HOME}"
@@ -45,6 +56,7 @@ ensure_writable_session_home() {
     "${XDG_DATA_HOME}/gnome-shell"
     "${XDG_DATA_HOME}/keyrings"
     "${XDG_STATE_HOME}"
+    "${DESKTOP_HOME}/.thunderbird"
   )
   local path
   for path in "${paths[@]}"; do

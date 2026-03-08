@@ -170,6 +170,54 @@ has_x_socket() {
   [ -S "/tmp/.X11-unix/X${display_index}" ]
 }
 
+desktop_stack_missing_components() {
+  local missing=()
+  local required_commands=(
+    Xvfb
+    gnome-screenshot
+    scrot
+    wmctrl
+    ffmpeg
+    socat
+    xclip
+    gnome-terminal
+    jq
+    python
+    gio
+    unzip
+    zip
+    git
+    expect
+    sqlite3
+    thunderbird
+    gimp
+    vlc
+    libreoffice
+    code
+    killall
+  )
+  local command_name
+  for command_name in "${required_commands[@]}"; do
+    if ! command -v "${command_name}" >/dev/null 2>&1; then
+      missing+=("${command_name}")
+    fi
+  done
+
+  if ! command -v google-chrome >/dev/null 2>&1 && ! command -v google-chrome-stable >/dev/null 2>&1; then
+    missing+=("google-chrome")
+  fi
+
+  if ! PYTHONPATH="${SYSTEM_DIST_PACKAGES}${PYTHONPATH:+:${PYTHONPATH}}" "${PYTHON_BIN}" -c "import pyatspi" >/dev/null 2>&1; then
+    missing+=("python3-pyatspi")
+  fi
+
+  if [ "${#missing[@]}" -gt 0 ]; then
+    printf '%s\n' "${missing[@]}"
+    return 0
+  fi
+  return 1
+}
+
 render_unit() {
   local src="$1"
   local dst="$2"
@@ -430,13 +478,88 @@ seed_minimal_baseline_home() {
 
   install -d -o "${DESKTOP_USER}" -g "${DESKTOP_USER}" -m 0700 \
     "${BASELINE_HOME}/.config" \
+    "${BASELINE_HOME}/.config/dconf" \
+    "${BASELINE_HOME}/.config/google-chrome" \
+    "${BASELINE_HOME}/.config/google-chrome/Default" \
+    "${BASELINE_HOME}/.config/Code" \
+    "${BASELINE_HOME}/.config/Code/User" \
+    "${BASELINE_HOME}/.config/libreoffice" \
+    "${BASELINE_HOME}/.config/libreoffice/4" \
+    "${BASELINE_HOME}/.config/libreoffice/4/user" \
+    "${BASELINE_HOME}/.config/vlc" \
+    "${BASELINE_HOME}/.config/GIMP" \
+    "${BASELINE_HOME}/.config/GIMP/2.10" \
     "${BASELINE_HOME}/.cache" \
     "${BASELINE_HOME}/.local" \
     "${BASELINE_HOME}/.local/share" \
-    "${BASELINE_HOME}/.local/state"
+    "${BASELINE_HOME}/.local/share/applications" \
+    "${BASELINE_HOME}/.local/state" \
+    "${BASELINE_HOME}/.thunderbird"
 
   touch "${BASELINE_HOME}/.Xauthority"
   chown "${DESKTOP_USER}:${DESKTOP_USER}" "${BASELINE_HOME}/.Xauthority"
+}
+
+ensure_minimal_baseline_layout() {
+  install -d -o "${DESKTOP_USER}" -g "${DESKTOP_USER}" -m 0755 \
+    "${BASELINE_HOME}/Desktop" \
+    "${BASELINE_HOME}/Documents" \
+    "${BASELINE_HOME}/Downloads" \
+    "${BASELINE_HOME}/Music" \
+    "${BASELINE_HOME}/Pictures" \
+    "${BASELINE_HOME}/Public" \
+    "${BASELINE_HOME}/Templates" \
+    "${BASELINE_HOME}/Videos"
+
+  install -d -o "${DESKTOP_USER}" -g "${DESKTOP_USER}" -m 0700 \
+    "${BASELINE_HOME}/.config" \
+    "${BASELINE_HOME}/.config/dconf" \
+    "${BASELINE_HOME}/.config/google-chrome" \
+    "${BASELINE_HOME}/.config/google-chrome/Default" \
+    "${BASELINE_HOME}/.config/Code" \
+    "${BASELINE_HOME}/.config/Code/User" \
+    "${BASELINE_HOME}/.config/libreoffice" \
+    "${BASELINE_HOME}/.config/libreoffice/4" \
+    "${BASELINE_HOME}/.config/libreoffice/4/user" \
+    "${BASELINE_HOME}/.config/vlc" \
+    "${BASELINE_HOME}/.config/GIMP" \
+    "${BASELINE_HOME}/.config/GIMP/2.10" \
+    "${BASELINE_HOME}/.cache" \
+    "${BASELINE_HOME}/.local" \
+    "${BASELINE_HOME}/.local/share" \
+    "${BASELINE_HOME}/.local/share/applications" \
+    "${BASELINE_HOME}/.local/state" \
+    "${BASELINE_HOME}/.thunderbird" \
+    "${BASELINE_HOME}/.vscode" \
+    "${BASELINE_HOME}/.vscode/extensions"
+
+  touch "${BASELINE_HOME}/.Xauthority"
+  chown "${DESKTOP_USER}:${DESKTOP_USER}" "${BASELINE_HOME}/.Xauthority"
+
+  if [ ! -f "${BASELINE_HOME}/.config/Code/User/settings.json" ]; then
+    printf '{}\n' > "${BASELINE_HOME}/.config/Code/User/settings.json"
+  fi
+  if [ ! -f "${BASELINE_HOME}/.config/google-chrome/Default/Preferences" ]; then
+    printf '{}\n' > "${BASELINE_HOME}/.config/google-chrome/Default/Preferences"
+  fi
+  if [ ! -f "${BASELINE_HOME}/.config/google-chrome/Local State" ]; then
+    printf '{}\n' > "${BASELINE_HOME}/.config/google-chrome/Local State"
+  fi
+  if [ ! -f "${BASELINE_HOME}/.config/google-chrome/Default/Bookmarks" ]; then
+    cat > "${BASELINE_HOME}/.config/google-chrome/Default/Bookmarks" <<'EOF'
+{"checksum":"","roots":{"bookmark_bar":{"children":[],"date_added":"0","date_modified":"0","id":"1","name":"Bookmarks bar","type":"folder"},"other":{"children":[],"date_added":"0","date_modified":"0","id":"2","name":"Other bookmarks","type":"folder"},"synced":{"children":[],"date_added":"0","date_modified":"0","id":"3","name":"Mobile bookmarks","type":"folder"}},"version":1}
+EOF
+  fi
+  if [ ! -f "${BASELINE_HOME}/.config/vlc/vlcrc" ]; then
+    : > "${BASELINE_HOME}/.config/vlc/vlcrc"
+  fi
+
+  chown -R "${DESKTOP_USER}:${DESKTOP_USER}" \
+    "${BASELINE_HOME}/.config" \
+    "${BASELINE_HOME}/.cache" \
+    "${BASELINE_HOME}/.local" \
+    "${BASELINE_HOME}/.thunderbird" \
+    "${BASELINE_HOME}/.vscode"
 }
 
 wait_for_x_socket() {
@@ -530,11 +653,21 @@ install -d -m 0755 "${RESET_ROOT}" "${SERVER_ROOT}" "${APP_ROOT}" "$(dirname "${
 
 DISPLAY_NUM="${OSWORLD_DISPLAY_NUMBER:-:0}"
 PROVISION_DESKTOP_MODE="${OSWORLD_PROVISION_DESKTOP:-auto}"
-if ! has_x_socket "${DISPLAY_NUM}"; then
+MISSING_STACK_COMPONENTS=()
+if mapfile -t MISSING_STACK_COMPONENTS < <(desktop_stack_missing_components); then
+  :
+fi
+if ! has_x_socket "${DISPLAY_NUM}" || [ "${#MISSING_STACK_COMPONENTS[@]}" -gt 0 ]; then
   if [ "${PROVISION_DESKTOP_MODE}" = "0" ] || [ "${PROVISION_DESKTOP_MODE}" = "false" ]; then
     fail_no_desktop
   fi
-  echo "No live X socket detected; provisioning or refreshing the OSWorld desktop stack"
+  if ! has_x_socket "${DISPLAY_NUM}"; then
+    echo "No live X socket detected; provisioning or refreshing the OSWorld desktop stack"
+  fi
+  if [ "${#MISSING_STACK_COMPONENTS[@]}" -gt 0 ]; then
+    echo "Refreshing OSWorld desktop stack because required app/tool components are missing:"
+    printf '  - %s\n' "${MISSING_STACK_COMPONENTS[@]}"
+  fi
   bash "${SCRIPT_DIR}/provision_osworld_desktop.sh" "${DESKTOP_USER}" "${DESKTOP_HOME}" "${PYTHON_BIN}"
 fi
 
@@ -572,6 +705,10 @@ if [ ! -d "${BASELINE_HOME}" ]; then
   fi
 else
   echo "[4/6] Baseline home already exists at ${BASELINE_HOME}, skipping seed copy"
+fi
+if [ "${BASELINE_MODE}" != "copy-home" ]; then
+  echo "[4a/6] Ensuring minimal baseline app/config skeleton"
+  ensure_minimal_baseline_layout
 fi
 echo "[4b/6] Normalizing baseline home ownership for ${DESKTOP_USER}"
 normalize_home_tree_ownership "${BASELINE_HOME}"

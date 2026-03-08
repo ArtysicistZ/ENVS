@@ -14,6 +14,94 @@ if ! id "${DESKTOP_USER}" >/dev/null 2>&1; then
   exit 1
 fi
 
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+ensure_google_chrome() {
+  if command_exists google-chrome; then
+    return 0
+  fi
+  if command_exists google-chrome-stable; then
+    ln -sf "$(command -v google-chrome-stable)" /usr/local/bin/google-chrome
+    return 0
+  fi
+
+  local arch
+  arch="$(dpkg --print-architecture)"
+  case "${arch}" in
+    amd64)
+      local chrome_deb="/tmp/google-chrome-stable_current_amd64.deb"
+      echo "[desktop 1a/5] Installing Google Chrome"
+      curl -LfsS "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb" -o "${chrome_deb}"
+      apt-get install -y "${chrome_deb}"
+      rm -f "${chrome_deb}"
+      ;;
+    arm64)
+      echo "[desktop 1a/5] Installing Chromium compatibility runtime for google-chrome"
+      apt-get install -y chromium-browser || apt-get install -y chromium
+      local chromium_cmd=""
+      if command_exists chromium-browser; then
+        chromium_cmd="$(command -v chromium-browser)"
+      elif command_exists chromium; then
+        chromium_cmd="$(command -v chromium)"
+      fi
+      if [ -n "${chromium_cmd}" ]; then
+        cat > /usr/local/bin/google-chrome <<EOF
+#!/bin/sh
+exec "${chromium_cmd}" --user-data-dir="\${HOME}/.config/google-chrome" "\$@"
+EOF
+        chmod 0755 /usr/local/bin/google-chrome
+      fi
+      ;;
+    *)
+      echo "Unsupported architecture for Chrome provisioning: ${arch}" >&2
+      exit 1
+      ;;
+  esac
+
+  if command_exists google-chrome-stable && ! command_exists google-chrome; then
+    ln -sf "$(command -v google-chrome-stable)" /usr/local/bin/google-chrome
+  fi
+
+  if ! command_exists google-chrome && ! command_exists google-chrome-stable; then
+    echo "Failed to provision a google-chrome-compatible browser" >&2
+    exit 1
+  fi
+}
+
+ensure_vscode() {
+  if command_exists code; then
+    return 0
+  fi
+
+  local arch vscode_url vscode_deb
+  arch="$(dpkg --print-architecture)"
+  case "${arch}" in
+    amd64)
+      vscode_url="https://update.code.visualstudio.com/latest/linux-deb-x64/stable"
+      ;;
+    arm64)
+      vscode_url="https://update.code.visualstudio.com/latest/linux-deb-arm64/stable"
+      ;;
+    *)
+      echo "Unsupported architecture for VS Code provisioning: ${arch}" >&2
+      exit 1
+      ;;
+  esac
+
+  vscode_deb="/tmp/vscode-latest.deb"
+  echo "[desktop 1a/5] Installing VS Code"
+  curl -LfsS "${vscode_url}" -o "${vscode_deb}"
+  apt-get install -y "${vscode_deb}"
+  rm -f "${vscode_deb}"
+
+  if ! command_exists code; then
+    echo "Failed to provision VS Code" >&2
+    exit 1
+  fi
+}
+
 echo "[desktop 1/5] Installing desktop and OSWorld runtime packages"
 apt-get update
 echo "gdm3 shared/default-x-display-manager select gdm3" | debconf-set-selections || true
@@ -35,7 +123,29 @@ apt-get install -y \
   python3-pyatspi \
   python3-pip \
   python3-tk \
-  python3-dev
+  python3-dev \
+  python-is-python3 \
+  libglib2.0-bin \
+  scrot \
+  curl \
+  wget \
+  ca-certificates \
+  gnupg \
+  jq \
+  unzip \
+  zip \
+  git \
+  expect \
+  psmisc \
+  sqlite3 \
+  gnome-terminal \
+  thunderbird \
+  gimp \
+  vlc \
+  libreoffice
+
+ensure_google_chrome
+ensure_vscode
 
 echo "[desktop 2/5] Setting multi-user boot target for managed OSWorld session"
 systemctl set-default multi-user.target

@@ -322,9 +322,10 @@ def launch_app():
             command[i] = os.path.expanduser(arg)
 
     try:
-        if 'google-chrome' in command and _get_machine_architecture() == 'arm':
-            index = command.index('google-chrome')
-            command[index] = 'chromium'  # arm64 chrome is not available yet, can only use chromium
+        # Keep `google-chrome` intact even on ARM. The AWS runtime provisions a
+        # compatibility wrapper that points Chrome launches at the correct
+        # browser binary while preserving the expected `~/.config/google-chrome`
+        # profile layout used by the task corpus and evaluators.
         subprocess.Popen(command, shell=shell, cwd=DEFAULT_WORKDIR)
         return "{:} launched successfully".format(command if shell else " ".join(command))
     except Exception as e:
@@ -388,13 +389,41 @@ def capture_screen_with_cursor():
 
         img.save(file_path)
     elif user_platform == "Linux":
-        cursor_obj = Xcursor()
-        imgarray = cursor_obj.getCursorImageArrayFast()
-        cursor_img = Image.fromarray(imgarray)
-        screenshot = pyautogui.screenshot()
-        cursor_x, cursor_y = pyautogui.position()
-        screenshot.paste(cursor_img, (cursor_x, cursor_y), cursor_img)
-        screenshot.save(file_path)
+        screenshot_captured = False
+
+        # Prefer the desktop-native tool under Xvfb/GNOME because it is more
+        # reliable than pyautogui during service cold-start.
+        for cmd in (["gnome-screenshot", "-f", file_path], ["scrot", file_path]):
+            try:
+                subprocess.run(
+                    cmd,
+                    check=True,
+                    timeout=10,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                    screenshot_captured = True
+                    break
+            except Exception:
+                continue
+
+        if not screenshot_captured:
+            screenshot = pyautogui.screenshot()
+            screenshot.save(file_path)
+
+        # Best-effort cursor overlay. Do not fail the whole endpoint if cursor
+        # capture is unavailable or slow on the VM.
+        try:
+            cursor_obj = Xcursor()
+            imgarray = cursor_obj.getCursorImageArrayFast()
+            cursor_img = Image.fromarray(imgarray)
+            screenshot = Image.open(file_path).convert("RGBA")
+            cursor_x, cursor_y = pyautogui.position()
+            screenshot.paste(cursor_img, (cursor_x, cursor_y), cursor_img)
+            screenshot.save(file_path)
+        except Exception as e:
+            logger.warning(f"Failed to capture cursor on Linux, screenshot will not have a cursor. Error: {e}")
     elif user_platform == "Darwin":  # (Mac OS)
         # Use the screencapture utility to capture the screen with the cursor
         subprocess.run(["screencapture", "-C", file_path])

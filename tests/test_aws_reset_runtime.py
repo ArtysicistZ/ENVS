@@ -2,6 +2,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "OSWorld"))
@@ -18,6 +19,12 @@ class FakeResetRuntime(ResetRuntime):
 
     def _resolve_instance_id(self) -> str:
         return "i-test"
+
+    def _desktop_uid(self) -> int:
+        return os.getuid()
+
+    def _desktop_gid(self) -> int:
+        return os.getgid()
 
     def _control_plane_build_id(self) -> str:
         return self.control_plane_build_id
@@ -72,6 +79,9 @@ class FakeResetRuntime(ResetRuntime):
     def _clear_user_crontab(self) -> None:
         return None
 
+    def _clear_user_runtime_dir(self) -> None:
+        return None
+
     def _server_health_ok(self) -> bool:
         return self.server_started
 
@@ -90,10 +100,37 @@ class TestAWSResetRuntime(unittest.TestCase):
         self.session_root = root / "session"
         self.dconf_snapshot = root / "baseline-dconf" / "user.dconf"
 
-        (self.baseline_home / "Desktop").mkdir(parents=True)
-        (self.baseline_home / ".config").mkdir(parents=True)
+        required_dirs = (
+            "Desktop",
+            "Documents",
+            "Downloads",
+            ".config",
+            ".config/dconf",
+            ".config/google-chrome",
+            ".config/google-chrome/Default",
+            ".config/Code/User",
+            ".config/libreoffice/4/user",
+            ".config/vlc",
+            ".config/GIMP/2.10",
+            ".cache",
+            ".local/share",
+            ".local/state",
+            ".thunderbird",
+        )
+        for rel_path in required_dirs:
+            (self.baseline_home / rel_path).mkdir(parents=True, exist_ok=True)
         (self.baseline_home / "Desktop" / "baseline.txt").write_text("clean", encoding="utf-8")
         (self.baseline_home / ".config" / "prefs.json").write_text("{}", encoding="utf-8")
+        (self.baseline_home / ".config" / "Code" / "User" / "settings.json").write_text("{}", encoding="utf-8")
+        (self.baseline_home / ".config" / "google-chrome" / "Default" / "Preferences").write_text(
+            "{}", encoding="utf-8"
+        )
+        (self.baseline_home / ".config" / "google-chrome" / "Local State").write_text("{}", encoding="utf-8")
+        (self.baseline_home / ".config" / "google-chrome" / "Default" / "Bookmarks").write_text(
+            "{}", encoding="utf-8"
+        )
+        (self.baseline_home / ".config" / "vlc" / "vlcrc").write_text("", encoding="utf-8")
+        (self.baseline_home / ".Xauthority").write_text("", encoding="utf-8")
         (self.control_plane_root / "server").mkdir(parents=True)
         (self.control_plane_root / "server" / "main.py").write_text("print('ok')\n", encoding="utf-8")
         shutil.copytree(self.baseline_home, self.workspace_home)
@@ -193,6 +230,16 @@ class TestAWSResetRuntime(unittest.TestCase):
 
         verify = self.runtime.verify()
         self.assertEqual(verify.status, "ok")
+
+    def test_verify_rejects_missing_critical_workspace_layout(self):
+        self.runtime.prepare_baseline()
+        self.runtime.server_started = True
+        (self.workspace_home / ".config" / "google-chrome" / "Default" / "Preferences").unlink()
+
+        verify = self.runtime.verify()
+        self.assertEqual(verify.status, "error")
+        self.assertEqual(verify.reason_code, "workspace_layout_invalid")
+        self.assertIn("missing:.config/google-chrome/Default/Preferences", verify.details["issues"])
 
     def test_prepare_baseline_rejects_non_isolated_target_by_default(self):
         config = ResetConfig(

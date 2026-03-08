@@ -322,6 +322,9 @@ class ResetRuntime:
     def _desktop_gid(self) -> int:
         return pwd.getpwnam(self.config.desktop_user).pw_gid
 
+    def _desktop_runtime_dir(self) -> Path:
+        return Path(f"/run/user/{self._desktop_uid()}")
+
     def _ensure_overlay_storage_permissions(self) -> None:
         uid = self._desktop_uid()
         gid = self._desktop_gid()
@@ -494,6 +497,62 @@ class ResetRuntime:
         )
         return {"entries": len(entries), "sample": entries[:50]}
 
+    def _critical_workspace_layout_issues(self) -> list[str]:
+        uid = self._desktop_uid()
+        gid = self._desktop_gid()
+        home = self.config.workspace_home
+        expected_dirs = (
+            ".",
+            "Desktop",
+            "Documents",
+            "Downloads",
+            ".config",
+            ".config/dconf",
+            ".config/google-chrome",
+            ".config/google-chrome/Default",
+            ".config/Code/User",
+            ".config/libreoffice/4/user",
+            ".config/vlc",
+            ".config/GIMP/2.10",
+            ".cache",
+            ".local",
+            ".local/share",
+            ".local/state",
+            ".thunderbird",
+        )
+        expected_files = (
+            ".Xauthority",
+            ".config/Code/User/settings.json",
+            ".config/google-chrome/Default/Preferences",
+            ".config/google-chrome/Local State",
+            ".config/google-chrome/Default/Bookmarks",
+            ".config/vlc/vlcrc",
+        )
+
+        issues: list[str] = []
+
+        def _check_path(rel_path: str, expected_type: str) -> None:
+            path = home / rel_path
+            if not path.exists():
+                issues.append(f"missing:{rel_path}")
+                return
+            if expected_type == "dir" and not path.is_dir():
+                issues.append(f"wrong_type:{rel_path}:expected_dir")
+                return
+            if expected_type == "file" and not path.is_file():
+                issues.append(f"wrong_type:{rel_path}:expected_file")
+                return
+            stat = path.stat()
+            if stat.st_uid != uid or stat.st_gid != gid:
+                issues.append(f"wrong_owner:{rel_path}:{stat.st_uid}:{stat.st_gid}")
+
+        for rel_path in expected_dirs:
+            _check_path(rel_path, "dir")
+        for rel_path in expected_files:
+            _check_path(rel_path, "file")
+
+        return issues
+
     def _stop_control_plane_server(self) -> None:
         self._run(["systemctl", "stop", self.config.osworld_server_service], check=False)
 
@@ -603,6 +662,22 @@ class ResetRuntime:
 
     def _clear_user_crontab(self) -> None:
         self._run(["crontab", "-u", self.config.desktop_user, "-r"], check=False)
+
+    def _clear_user_runtime_dir(self) -> None:
+        runtime_dir = self._desktop_runtime_dir()
+        if not runtime_dir.exists():
+            return
+
+        for child in runtime_dir.iterdir():
+            try:
+                if child.is_symlink() or child.is_file():
+                    child.unlink()
+                elif child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink(missing_ok=True)
+            except FileNotFoundError:
+                continue
 
     def _server_health_ok(self) -> bool:
         try:
@@ -739,6 +814,7 @@ class ResetRuntime:
                 self._mount_home_overlay()
                 self._clear_user_temp()
                 self._clear_user_crontab()
+                self._clear_user_runtime_dir()
                 self._restore_dconf()
                 self._restart_display_stack()
                 generation = self._bump_reset_generation()
@@ -818,6 +894,16 @@ class ResetRuntime:
                     "overlay_upper": self.config.workspace_upper.as_posix(),
                     **self._overlay_upper_summary(),
                 },
+            )
+            self._write_state(result.to_dict())
+            return result
+
+        critical_layout_issues = self._critical_workspace_layout_issues()
+        if critical_layout_issues:
+            result = self._result(
+                status="error",
+                reason_code="workspace_layout_invalid",
+                details={"issues": critical_layout_issues[:100]},
             )
             self._write_state(result.to_dict())
             return result
