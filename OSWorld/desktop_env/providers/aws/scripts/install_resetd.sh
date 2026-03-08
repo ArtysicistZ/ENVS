@@ -96,6 +96,31 @@ restart_or_dump() {
   exit 1
 }
 
+detect_display_manager_unit() {
+  if [ -n "${OSWORLD_DISPLAY_MANAGER_SERVICE:-}" ]; then
+    if systemctl list-unit-files "${OSWORLD_DISPLAY_MANAGER_SERVICE}" >/dev/null 2>&1; then
+      echo "${OSWORLD_DISPLAY_MANAGER_SERVICE}"
+      return 0
+    fi
+  fi
+
+  local candidates=(
+    "display-manager.service"
+    "gdm3.service"
+    "gdm.service"
+    "lightdm.service"
+    "sddm.service"
+  )
+  local unit
+  for unit in "${candidates[@]}"; do
+    if systemctl list-unit-files "${unit}" >/dev/null 2>&1; then
+      echo "${unit}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 install -d -m 0755 "${RESET_ROOT}" "${SERVER_ROOT}" "$(dirname "${BASELINE_HOME}")" "$(dirname "${BASELINE_DCONF}")" "${STATE_ROOT}" "${SESSION_ROOT}"
 
 echo "[2/6] Ensuring control directories exist under ${CONTROL_ROOT}"
@@ -129,7 +154,13 @@ systemctl enable osworld-server.service
 systemctl stop osworld-server.service || true
 systemctl stop osworld-resetd.service || true
 modprobe overlay || true
-systemctl restart display-manager || true
+DISPLAY_MANAGER_UNIT="$(detect_display_manager_unit || true)"
+if [ -n "${DISPLAY_MANAGER_UNIT}" ]; then
+  echo "Restarting display manager: ${DISPLAY_MANAGER_UNIT}"
+  systemctl restart "${DISPLAY_MANAGER_UNIT}" || true
+else
+  echo "No known display manager unit detected; relying on existing graphical session"
+fi
 restart_or_dump osworld-home-overlay.service
 restart_or_dump osworld-resetd.service
 restart_or_dump osworld-server.service

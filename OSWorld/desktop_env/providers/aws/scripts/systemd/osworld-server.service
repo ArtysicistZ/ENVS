@@ -1,8 +1,7 @@
 [Unit]
 Description=OSWorld control-plane server
-After=network-online.target display-manager.service graphical.target
+After=network-online.target graphical.target
 Wants=network-online.target
-Wants=display-manager.service
 Requires=osworld-home-overlay.service
 After=osworld-home-overlay.service
 
@@ -10,7 +9,6 @@ After=osworld-home-overlay.service
 Type=simple
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
-Environment=DISPLAY=:0
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=__DESKTOP_RUNTIME_DIR__/bus
 Environment=XDG_RUNTIME_DIR=__DESKTOP_RUNTIME_DIR__
 Environment=HOME=__DESKTOP_HOME__
@@ -20,8 +18,7 @@ Environment=PYTHONPATH=__REPO_ROOT__/OSWorld
 User=__DESKTOP_USER__
 Group=__DESKTOP_USER__
 WorkingDirectory=__DESKTOP_HOME__
-ExecStartPre=__PYTHON_BIN__ __REPO_ROOT__/OSWorld/desktop_env/providers/aws/scripts/wait_for_x_display.py
-ExecStart=__PYTHON_BIN__ __REPO_ROOT__/OSWorld/desktop_env/server/main.py
+ExecStart=__PYTHON_BIN__ __REPO_ROOT__/OSWorld/desktop_env/providers/aws/scripts/start_osworld_server.py __PYTHON_BIN__ __REPO_ROOT__/OSWorld/desktop_env/server/main.py
 Restart=always
 RestartSec=2
 

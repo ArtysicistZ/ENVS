@@ -37,6 +37,13 @@ DEFAULT_IGNORED_RELATIVE_PATHS = (
     ".config/pulse",
     ".local/share/recently-used.xbel",
 )
+DISPLAY_MANAGER_CANDIDATES = (
+    "display-manager.service",
+    "gdm3.service",
+    "gdm.service",
+    "lightdm.service",
+    "sddm.service",
+)
 
 
 def _normalize_ignored_paths() -> tuple[str, ...]:
@@ -436,10 +443,25 @@ class ResetRuntime:
 
     def _restart_display_stack(self) -> None:
         self._run(["loginctl", "terminate-user", self.config.desktop_user], check=False)
-        active = self._run(["systemctl", "is-active", self.config.display_manager_service], check=False)
-        if active.returncode == 0:
-            self._run(["systemctl", "restart", self.config.display_manager_service], check=False)
+        display_manager_unit = self._resolve_display_manager_service()
+        if display_manager_unit is not None:
+            active = self._run(["systemctl", "is-active", display_manager_unit], check=False)
+            if active.returncode == 0:
+                self._run(["systemctl", "restart", display_manager_unit], check=False)
         self._start_control_plane_server()
+
+    def _resolve_display_manager_service(self) -> str | None:
+        configured = self.config.display_manager_service
+        candidates = [configured, *DISPLAY_MANAGER_CANDIDATES]
+        seen: set[str] = set()
+        for unit in candidates:
+            if not unit or unit in seen:
+                continue
+            seen.add(unit)
+            result = self._run(["systemctl", "list-unit-files", unit], check=False)
+            if result.returncode == 0:
+                return unit
+        return None
 
     def _kill_task_user_processes(self) -> None:
         self._run(["loginctl", "kill-user", self.config.desktop_user, "--signal=KILL"], check=False)
