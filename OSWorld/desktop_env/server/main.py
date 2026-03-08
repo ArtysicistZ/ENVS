@@ -5,7 +5,6 @@ import shlex
 import json
 import re
 import subprocess, signal
-import sys
 import time
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -408,45 +407,13 @@ def capture_screen_with_cursor():
             except Exception:
                 return False
 
-        def _capture_with_pyautogui_subprocess(timeout_seconds: int) -> bool:
-            # Keep the fallback in a subprocess so a broken GUI stack cannot hang
-            # the server worker indefinitely.
-            pyautogui_capture = (
-                "import sys; "
-                "import pyautogui; "
-                "pyautogui.PAUSE = 0; "
-                "pyautogui.DARWIN_CATCH_UP_TIME = 0; "
-                "img = pyautogui.screenshot(); "
-                "img.save(sys.argv[1])"
-            )
-            try:
-                subprocess.run(
-                    [sys.executable, "-c", pyautogui_capture, file_path],
-                    check=True,
-                    timeout=timeout_seconds,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    env={
-                        **os.environ,
-                        "DISPLAY": os.environ.get("DISPLAY", ":0"),
-                        "XAUTHORITY": os.environ.get("XAUTHORITY", ""),
-                        "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", ""),
-                        "HOME": os.environ.get("HOME", DEFAULT_WORKDIR),
-                    },
-                )
-                return os.path.exists(file_path) and os.path.getsize(file_path) > 0
-            except Exception:
-                return False
-
-        # Prefer desktop-native tools under Xvfb/GNOME. They are more reliable
-        # than direct GUI library capture during service cold-start.
-        for cmd in (["gnome-screenshot", "-f", file_path], ["scrot", file_path]):
-            if _capture_with_command(cmd, timeout_seconds=5):
+        # Under the managed Xvfb session, native command-line capture is the
+        # only supported Linux path. It must return quickly enough for cold-start
+        # readiness probes, so avoid any slower in-process GUI fallback here.
+        for cmd in (["scrot", file_path], ["gnome-screenshot", "-f", file_path]):
+            if _capture_with_command(cmd, timeout_seconds=2):
                 screenshot_captured = True
                 break
-
-        if not screenshot_captured and _capture_with_pyautogui_subprocess(timeout_seconds=5):
-            screenshot_captured = True
 
         if not screenshot_captured:
             return jsonify({

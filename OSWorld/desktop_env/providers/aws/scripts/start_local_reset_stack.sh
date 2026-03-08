@@ -8,7 +8,10 @@ DESKTOP_USER="${OSWORLD_RESET_USER:-user}"
 DESKTOP_HOME="${OSWORLD_RESET_HOME:-/home/${DESKTOP_USER}}"
 if [[ "${DESKTOP_HOME}" == "/home/ubuntu" || "${DESKTOP_HOME}" == /home/ubuntu/* ]]; then
   cat >&2 <<EOF
-/home/ubuntu is permanently forbidden as an OSWorld reset workspace target.
+/home/ubuntu is protected from OSWorld reset/install mutations.
+
+It can still be used for the Python runtime and for reading files, but it must
+never be used as the disposable reset workspace target.
 
 Refusing to continue with:
   OSWORLD_RESET_HOME=${DESKTOP_HOME}
@@ -50,9 +53,6 @@ fi
 if [ -n "${OSWORLD_RESET_HOME:-}" ]; then
   ENV_ARGS+=("OSWORLD_RESET_HOME=${OSWORLD_RESET_HOME}")
 fi
-if [ -n "${OSWORLD_ALLOW_UNSAFE_HOME:-}" ]; then
-  ENV_ARGS+=("OSWORLD_ALLOW_UNSAFE_HOME=${OSWORLD_ALLOW_UNSAFE_HOME}")
-fi
 
 sudo env "${ENV_ARGS[@]}" bash "${REPO_ROOT}/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh"
 
@@ -82,7 +82,7 @@ wait_for_screenshot() {
   tmpfile="$(mktemp)"
   trap 'rm -f "${tmpfile}"' RETURN
   while [ "${SECONDS}" -lt "${deadline}" ]; do
-    if curl --max-time 5 -fsS "${url}" -o "${tmpfile}" >/dev/null 2>&1 && [ -s "${tmpfile}" ]; then
+    if curl --max-time 8 -fsS "${url}" -o "${tmpfile}" >/dev/null 2>&1 && [ -s "${tmpfile}" ]; then
       rm -f "${tmpfile}"
       trap - RETURN
       return 0

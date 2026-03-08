@@ -34,6 +34,17 @@ class FakeResetRuntime(ResetRuntime):
         if not self.config.dconf_snapshot.exists():
             self.config.dconf_snapshot.write_text("", encoding="utf-8")
 
+    def _validate_workspace_target(self) -> None:
+        protected_home = Path("/home/ubuntu")
+        if self.config.workspace_home == protected_home or protected_home in self.config.workspace_home.parents:
+            raise RuntimeError(
+                "unsafe_workspace_target: workspace home target would mutate the protected login home /home/ubuntu"
+            )
+        if self.config.desktop_user != "user":
+            raise RuntimeError(
+                "unsafe_workspace_target: OSWorld reset must use the isolated 'user' runtime home by default"
+            )
+
     def _ensure_overlay_storage_permissions(self) -> None:
         for path in self.config.overlay_dirs:
             path.mkdir(parents=True, exist_ok=True)
@@ -138,7 +149,6 @@ class TestAWSResetRuntime(unittest.TestCase):
         self.config = ResetConfig(
             desktop_user="user",
             workspace_home=self.workspace_home,
-            allow_unsafe_home=True,
             control_plane_root=self.control_plane_root,
             baseline_home=self.baseline_home,
             dconf_snapshot=self.dconf_snapshot,
@@ -245,7 +255,6 @@ class TestAWSResetRuntime(unittest.TestCase):
         config = ResetConfig(
             desktop_user="ubuntu",
             workspace_home=Path("/home/ubuntu"),
-            allow_unsafe_home=False,
             control_plane_root=self.control_plane_root,
             baseline_home=self.baseline_home,
             dconf_snapshot=self.dconf_snapshot,
@@ -269,7 +278,6 @@ class TestAWSResetRuntime(unittest.TestCase):
         config = ResetConfig(
             desktop_user="ubuntu",
             workspace_home=Path("/home/ubuntu"),
-            allow_unsafe_home=True,
             control_plane_root=self.control_plane_root,
             baseline_home=self.baseline_home,
             dconf_snapshot=self.dconf_snapshot,
@@ -283,6 +291,7 @@ class TestAWSResetRuntime(unittest.TestCase):
             taint_marker_path=self.state_root / "unsafe-override" / "system_taint.json",
             reset_generation_path=self.state_root / "unsafe-override" / "generation.txt",
         )
+        config.allow_unsafe_home = True
         runtime = FakeResetRuntime(config)
         prepared = runtime.prepare_baseline()
         self.assertEqual(prepared.status, "error")
@@ -293,7 +302,6 @@ class TestAWSResetRuntime(unittest.TestCase):
         config = ResetConfig(
             desktop_user="osworld",
             workspace_home=Path("/home/osworld"),
-            allow_unsafe_home=False,
             control_plane_root=self.control_plane_root,
             baseline_home=self.baseline_home,
             dconf_snapshot=self.dconf_snapshot,

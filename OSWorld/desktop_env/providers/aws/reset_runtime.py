@@ -334,19 +334,26 @@ class ResetRuntime:
             os.chmod(path, 0o700)
 
     def _ensure_runtime_layout(self) -> None:
+        self._assert_not_under_protected_home(self.config.workspace_home, "workspace home target")
+        self._assert_not_under_protected_home(self.config.session_root, "session root")
+        self._assert_not_under_protected_home(self.config.state_root, "state root")
+        self._assert_not_under_protected_home(self.config.baseline_home, "baseline home")
         self.config.state_root.mkdir(parents=True, exist_ok=True)
         self.config.session_root.mkdir(parents=True, exist_ok=True)
         self._ensure_overlay_storage_permissions()
 
+    def _protected_home_root(self) -> Path:
+        return Path("/home/ubuntu")
+
+    def _assert_not_under_protected_home(self, path: Path, action: str) -> None:
+        protected_root = self._protected_home_root()
+        if path == protected_root or protected_root in path.parents:
+            raise RuntimeError(
+                f"unsafe_workspace_target: {action} would mutate the protected login home {protected_root}"
+            )
+
     def _validate_workspace_target(self) -> None:
-        banned_prefix = Path("/home/ubuntu")
-        try:
-            if self.config.workspace_home == banned_prefix or banned_prefix in self.config.workspace_home.parents:
-                raise RuntimeError("unsafe_workspace_target: /home/ubuntu is permanently forbidden as an OSWorld reset workspace")
-        except RuntimeError:
-            raise
-        if self.config.allow_unsafe_home:
-            return
+        self._assert_not_under_protected_home(self.config.workspace_home, "workspace home target")
         expected_home = Path(f"/home/{self.config.desktop_user}")
         if self.config.desktop_user != "user" or self.config.workspace_home != expected_home:
             raise RuntimeError(
@@ -619,6 +626,7 @@ class ResetRuntime:
         return not last_seen, last_seen
 
     def _umount_home_overlay(self) -> None:
+        self._assert_not_under_protected_home(self.config.workspace_home, "home overlay unmount target")
         is_mountpoint, matches, options = self._home_overlay_status()
         if not is_mountpoint:
             raise RuntimeError(f"{self.config.workspace_home} is not mounted as an overlay workspace")
@@ -633,6 +641,7 @@ class ResetRuntime:
 
     def _reset_overlay_storage(self) -> None:
         for path in self.config.overlay_dirs:
+            self._assert_not_under_protected_home(path, "overlay storage reset target")
             if path.exists():
                 shutil.rmtree(path)
             path.mkdir(parents=True, exist_ok=True)
