@@ -3,6 +3,7 @@ import os
 import platform
 import shlex
 import json
+import re
 import subprocess, signal
 import time
 from pathlib import Path
@@ -77,6 +78,34 @@ logger = app.logger
 recording_process = None  # fixme: this is a temporary solution for recording, need to be changed to support multiple-process
 recording_path = server_artifact_path("recording.mp4").as_posix()
 DEFAULT_WORKDIR = user_home().as_posix()
+RESETD_URL = os.getenv("OSWORLD_RESETD_URL", "http://127.0.0.1:5001")
+PRIVILEGED_COMMAND_PATTERN = re.compile(
+    r"(^|[;&|]\s*|\s)(sudo\b|pkexec\b|su\s+-\b|apt(?:-get)?\b|dpkg\b|useradd\b|usermod\b|groupadd\b|groupmod\b|systemctl\b|service\b)",
+    re.IGNORECASE,
+)
+
+
+def _command_to_text(command: str | list[str]) -> str:
+    if isinstance(command, str):
+        return command
+    return " ".join(command)
+
+
+def _command_is_privileged(command: str | list[str]) -> bool:
+    return bool(PRIVILEGED_COMMAND_PATTERN.search(_command_to_text(command)))
+
+
+def _best_effort_mark_system_tainted(source: str, command: str | list[str], details: dict[str, Any] | None = None) -> None:
+    payload = {
+        "source": source,
+        "scope": "privileged_setup",
+        "command": _command_to_text(command),
+        "details": details or {},
+    }
+    try:
+        requests.post(f"{RESETD_URL}/mark_tainted", json=payload, timeout=5)
+    except Exception:
+        logger.warning("Best-effort taint marker failed for command: %s", payload["command"])
 
 
 @app.route('/health', methods=['GET'])
@@ -94,6 +123,15 @@ def execute_command():
 
     if isinstance(command, str) and not shell:
         command = shlex.split(command)
+
+    is_setup_route = request.path.startswith("/setup/")
+    if _command_is_privileged(command):
+        if not is_setup_route:
+            return jsonify({
+                "status": "error",
+                "message": "Privileged runtime commands are blocked. Use controlled task setup instead.",
+            }), 403
+        _best_effort_mark_system_tainted("server.execute", command)
 
     # Expand user directory
     for i, arg in enumerate(command):
@@ -142,6 +180,15 @@ def execute_command_with_verification():
 
     if isinstance(command, str) and not shell:
         command = shlex.split(command)
+
+    is_setup_route = request.path.startswith("/setup/")
+    if _command_is_privileged(command):
+        if not is_setup_route:
+            return jsonify({
+                "status": "error",
+                "message": "Privileged runtime commands are blocked. Use controlled task setup instead.",
+            }), 403
+        _best_effort_mark_system_tainted("server.execute_with_verification", command)
 
     # Expand user directory
     for i, arg in enumerate(command):

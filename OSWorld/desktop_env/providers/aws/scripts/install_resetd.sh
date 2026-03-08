@@ -243,6 +243,21 @@ check_server_python_deps() {
   exit 1
 }
 
+check_reset_runtime_python_deps() {
+  local checker="${APP_ROOT}/OSWorld/desktop_env/providers/aws/scripts/check_osworld_server_deps.py"
+  echo "[2c/6] Checking Python dependencies for reset-runtime with ${PYTHON_BIN}"
+  if PYTHONPATH="${APP_ROOT}/OSWorld:${SYSTEM_DIST_PACKAGES}${PYTHONPATH:+:${PYTHONPATH}}" \
+    "${PYTHON_BIN}" -c "import flask, requests; import importlib.util; raise SystemExit(0 if importlib.util.find_spec('waitress') else 1)" \
+    >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo >&2
+  echo "reset-runtime Python dependency preflight failed for ${PYTHON_BIN}" >&2
+  echo "The interpreter used by osworld-resetd/prepare-baseline is missing flask, requests, or waitress." >&2
+  exit 1
+}
+
 ensure_accessibility_python_deps() {
   if PYTHONPATH="${SYSTEM_DIST_PACKAGES}${PYTHONPATH:+:${PYTHONPATH}}" "${PYTHON_BIN}" -c "import pyatspi" >/dev/null 2>&1; then
     :
@@ -411,6 +426,7 @@ write_control_plane_build_stamp
 ensure_accessibility_python_deps
 ensure_server_python_runtime_deps
 check_server_python_deps
+check_reset_runtime_python_deps
 
 echo "[3/6] Rendering systemd units"
 install -d -m 0755 /etc/systemd/system
@@ -480,6 +496,7 @@ OSWORLD_CONTROL_PLANE_ROOT="${CONTROL_PLANE_HASH_ROOT}" \
 OSWORLD_CONTROL_PLANE_STAMP_PATH="${CONTROL_PLANE_STAMP_PATH}" \
 OSWORLD_RESET_BASELINE_MODE="${BASELINE_MODE}" \
 OSWORLD_SERVER_URL="http://127.0.0.1:5000" \
+PYTHONPATH="${APP_ROOT}/OSWorld:${SYSTEM_DIST_PACKAGES}${PYTHONPATH:+:${PYTHONPATH}}" \
 "${PYTHON_BIN}" "${APP_ROOT}/OSWorld/desktop_env/providers/aws/reset_runtime.py" prepare-baseline
 
 echo "Reset stack install completed."

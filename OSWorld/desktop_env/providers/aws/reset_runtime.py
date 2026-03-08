@@ -87,6 +87,9 @@ class ResetConfig:
     control_plane_stamp_path: Path = Path(
         os.getenv("OSWORLD_CONTROL_PLANE_STAMP_PATH", "/var/lib/osworld-reset/control_plane_build_id")
     )
+    taint_marker_path: Path = Path(
+        os.getenv("OSWORLD_RESET_TAINT_MARKER_PATH", "/var/lib/osworld-reset/system_taint.json")
+    )
     baseline_version: str = os.getenv("OSWORLD_RESET_BASELINE_VERSION", "")
     ami_build_version: str = os.getenv("OSWORLD_RESET_AMI_BUILD_VERSION", "unknown")
     verification_policy_version: str = os.getenv("OSWORLD_RESET_VERIFICATION_POLICY_VERSION", "1")
@@ -258,6 +261,22 @@ class ResetRuntime:
         except Exception:
             return 0
 
+    def _load_taint_marker(self, *, optional: bool = True) -> dict[str, Any]:
+        if not self.config.taint_marker_path.exists():
+            if optional:
+                return {}
+            raise FileNotFoundError(self.config.taint_marker_path)
+        return json.loads(self.config.taint_marker_path.read_text(encoding="utf-8"))
+
+    def _write_taint_marker(self, payload: dict[str, Any]) -> None:
+        self.config.state_root.mkdir(parents=True, exist_ok=True)
+        self.config.taint_marker_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config.taint_marker_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    def _clear_taint_marker(self) -> None:
+        if self.config.taint_marker_path.exists():
+            self.config.taint_marker_path.unlink()
+
     def _bump_reset_generation(self) -> int:
         generation = self._load_reset_generation() + 1
         self.config.state_root.mkdir(parents=True, exist_ok=True)
@@ -390,6 +409,31 @@ class ResetRuntime:
         if not self.config.control_plane_stamp_path.exists():
             return "missing"
         return self.config.control_plane_stamp_path.read_text(encoding="utf-8").strip() or "missing"
+
+    def mark_tainted(
+        self,
+        *,
+        source: str,
+        scope: str,
+        command: str = "",
+        details: dict[str, Any] | None = None,
+    ) -> ResetResult:
+        payload = {
+            "source": source,
+            "scope": scope,
+            "command": command,
+            "details": details or {},
+            "marked_at_epoch": time.time(),
+            "instance_id": self._resolve_instance_id(),
+        }
+        self._write_taint_marker(payload)
+        result = self._result(
+            status="ok",
+            reason_code="taint_marked",
+            details=payload,
+        )
+        self._write_state(result.to_dict())
+        return result
 
     def _capture_baseline_dconf_if_missing(self) -> None:
         if self.config.dconf_snapshot.exists():
@@ -554,6 +598,14 @@ class ResetRuntime:
         return False
 
     def _detect_unsupported_system_drift(self, metadata: dict[str, Any]) -> dict[str, Any] | None:
+        taint = self._load_taint_marker()
+        if taint:
+            return {
+                "field": "system_taint",
+                "expected": "clean",
+                "actual": taint.get("scope", "tainted"),
+                "taint": taint,
+            }
         current = {
             "expected_session_user": self.config.desktop_user,
             "control_plane_build_id": self._control_plane_build_id(),
@@ -582,6 +634,7 @@ class ResetRuntime:
 
         logger.info("Preparing baseline: capturing dconf snapshot if missing")
         self._capture_baseline_dconf_if_missing()
+        self._clear_taint_marker()
         baseline_version = self.config.baseline_version or f"baseline-{int(time.time())}"
         metadata = {
             "runtime_version": RUNTIME_VERSION,

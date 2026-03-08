@@ -3,6 +3,7 @@ import logging
 import os
 import os.path
 import platform
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -37,6 +38,21 @@ FILE_PATH = os.path.dirname(os.path.abspath(__file__))
 init_proxy_pool(PROXY_CONFIG_FILE)  # initialize the global proxy pool
 
 MAX_RETRIES = 60  # 60 × 5s = 5 min; AWS EC2 + QEMU VM boot can take 3-4 min
+RESETD_PORT = int(os.getenv("AWS_RESETD_PORT", "5001"))
+PRIVILEGED_COMMAND_PATTERN = re.compile(
+    r"(^|[;&|]\s*|\s)(sudo\b|pkexec\b|su\s+-\b|apt(?:-get)?\b|dpkg\b|useradd\b|usermod\b|groupadd\b|groupmod\b|systemctl\b|service\b)",
+    re.IGNORECASE,
+)
+
+
+def _command_to_text(command: Union[str, List[str]]) -> str:
+    if isinstance(command, str):
+        return command
+    return " ".join(command)
+
+
+def command_requires_relaunch_marker(command: Union[str, List[str]]) -> bool:
+    return bool(PRIVILEGED_COMMAND_PATTERN.search(_command_to_text(command)))
 
 class SetupController:
     def __init__(self, vm_ip: str, server_port: int = 5000, chromium_port: int = 9222, vlc_port: int = 8080, cache_dir: str = "cache", client_password: str = "", screen_width: int = 1920, screen_height: int = 1080):
@@ -46,11 +62,31 @@ class SetupController:
         self.vlc_port: int = vlc_port
         self.http_server: str = f"http://{vm_ip}:{server_port}"
         self.http_server_setup_root: str = f"http://{vm_ip}:{server_port}/setup"
+        self.http_resetd: str = f"http://{vm_ip}:{RESETD_PORT}"
         self.cache_dir: str = cache_dir
         self.use_proxy: bool = False
         self.client_password: str = client_password
         self.screen_width: int = screen_width
         self.screen_height: int = screen_height
+
+    def _mark_system_tainted(self, source: str, command: Union[str, List[str]], details: Optional[Dict[str, Any]] = None) -> None:
+        payload = {
+            "source": source,
+            "scope": "privileged_setup",
+            "command": _command_to_text(command),
+            "details": details or {},
+        }
+        try:
+            response = requests.post(
+                self.http_resetd + "/mark_tainted",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(payload),
+                timeout=10,
+            )
+            if response.status_code != 200:
+                logger.warning("Failed to mark reset state tainted for command %s: %s", payload["command"], response.text)
+        except requests.RequestException as exc:
+            logger.warning("Best-effort taint marker failed for command %s: %s", payload["command"], exc)
 
     def reset_cache_dir(self, cache_dir: str):
         self.cache_dir = cache_dir
@@ -377,6 +413,8 @@ class SetupController:
                     new_command_list.append(item)
                 return new_command_list
         command = replace_screen_env_in_command(command)
+        if command_requires_relaunch_marker(command):
+            self._mark_system_tainted("setup.execute", command)
         payload = json.dumps({"command": command, "shell": shell})
         headers = {"Content-Type": "application/json"}
 
