@@ -1803,4 +1803,5 @@ def run_bash_script():
             pass
 
 if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0")
+    debug = os.environ.get("OSWORLD_SERVER_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+    app.run(debug=debug, use_reloader=False, host="0.0.0.0")
