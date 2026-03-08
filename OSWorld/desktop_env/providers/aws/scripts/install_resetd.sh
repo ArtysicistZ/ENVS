@@ -22,6 +22,7 @@ fi
 CONTROL_ROOT="${OSWORLD_CONTROL_PLANE_ROOT:-/opt/osworld}"
 RESET_ROOT="${CONTROL_ROOT}/reset"
 SERVER_ROOT="${CONTROL_ROOT}/server"
+APP_ROOT="${CONTROL_ROOT}/app"
 BASELINE_HOME="${OSWORLD_RESET_BASELINE_HOME:-${CONTROL_ROOT}/baseline/home-user}"
 BASELINE_DCONF="${OSWORLD_RESET_DCONF_SNAPSHOT:-${CONTROL_ROOT}/baseline/dconf/user.dconf}"
 STATE_ROOT="${OSWORLD_RESET_STATE_ROOT:-/var/lib/osworld-reset}"
@@ -79,12 +80,40 @@ render_unit() {
   local src="$1"
   local dst="$2"
   sed \
+    -e "s|__APP_ROOT__|${APP_ROOT}|g" \
     -e "s|__DESKTOP_USER__|${DESKTOP_USER}|g" \
     -e "s|__DESKTOP_HOME__|${DESKTOP_HOME}|g" \
     -e "s|__DESKTOP_RUNTIME_DIR__|${DESKTOP_RUNTIME_DIR}|g" \
     -e "s|__REPO_ROOT__|${REPO_ROOT}|g" \
     -e "s|__PYTHON_BIN__|${PYTHON_BIN}|g" \
     "${src}" > "${dst}"
+}
+
+normalize_home_tree_ownership() {
+  local target="$1"
+  if [ ! -d "${target}" ]; then
+    return 0
+  fi
+  chown -R "${DESKTOP_USER}:${DESKTOP_USER}" "${target}"
+}
+
+sync_control_plane_app() {
+  local src_root="${REPO_ROOT}/OSWorld"
+  local dst_root="${APP_ROOT}/OSWorld"
+
+  install -d -m 0755 "${APP_ROOT}"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete \
+      --exclude "__pycache__" \
+      --exclude "*.pyc" \
+      "${src_root}/" "${dst_root}/"
+  else
+    rm -rf "${dst_root}"
+    cp -a "${src_root}" "${dst_root}"
+    find "${dst_root}" -type d -name "__pycache__" -prune -exec rm -rf {} +
+    find "${dst_root}" -type f -name "*.pyc" -delete
+  fi
+  chown -R root:root "${APP_ROOT}"
 }
 
 restart_or_dump() {
@@ -189,7 +218,7 @@ detect_display_manager_unit() {
   return 1
 }
 
-install -d -m 0755 "${RESET_ROOT}" "${SERVER_ROOT}" "$(dirname "${BASELINE_HOME}")" "$(dirname "${BASELINE_DCONF}")" "${STATE_ROOT}" "${SESSION_ROOT}"
+install -d -m 0755 "${RESET_ROOT}" "${SERVER_ROOT}" "${APP_ROOT}" "$(dirname "${BASELINE_HOME}")" "$(dirname "${BASELINE_DCONF}")" "${STATE_ROOT}" "${SESSION_ROOT}"
 
 DISPLAY_NUM="${OSWORLD_DISPLAY_NUMBER:-:0}"
 PROVISION_DESKTOP_MODE="${OSWORLD_PROVISION_DESKTOP:-auto}"
@@ -201,8 +230,8 @@ if ! has_x_socket "${DISPLAY_NUM}"; then
   bash "${SCRIPT_DIR}/provision_osworld_desktop.sh" "${DESKTOP_USER}" "${DESKTOP_HOME}"
 fi
 
-echo "[2/6] Ensuring control directories exist under ${CONTROL_ROOT}"
-install -d -m 0755 "${RESET_ROOT}" "${SERVER_ROOT}"
+echo "[2/6] Syncing OSWorld control-plane app into ${APP_ROOT}"
+sync_control_plane_app
 
 echo "[3/6] Rendering systemd units"
 install -d -m 0755 /etc/systemd/system
@@ -217,6 +246,8 @@ if [ ! -d "${BASELINE_HOME}" ]; then
 else
   echo "[4/6] Baseline home already exists at ${BASELINE_HOME}, skipping seed copy"
 fi
+echo "[4b/6] Normalizing baseline home ownership for ${DESKTOP_USER}"
+normalize_home_tree_ownership "${BASELINE_HOME}"
 
 if [ ! -f "${BASELINE_DCONF}" ]; then
   echo "[5/6] Capturing baseline dconf"
