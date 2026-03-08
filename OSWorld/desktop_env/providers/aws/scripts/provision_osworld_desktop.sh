@@ -20,6 +20,7 @@ apt-get install -y \
   ubuntu-desktop \
   gdm3 \
   xinit \
+  xvfb \
   dbus-x11 \
   dbus-user-session \
   gnome-screenshot \
@@ -105,9 +106,13 @@ EOF
 
 echo "[desktop 4/5] Disabling GDM autostart in favor of managed OSWorld session"
 systemctl disable gdm3.service || true
+systemctl disable gdm.service || true
 systemctl stop gdm3.service || true
 systemctl stop gdm.service || true
 systemctl stop display-manager.service || true
+systemctl mask gdm3.service || true
+systemctl mask gdm.service || true
+systemctl mask display-manager.service || true
 
 echo "[desktop 5/5] Preparing desktop user home"
 install -d -o "${DESKTOP_USER}" -g "${DESKTOP_USER}" -m 0755 "${DESKTOP_HOME}"

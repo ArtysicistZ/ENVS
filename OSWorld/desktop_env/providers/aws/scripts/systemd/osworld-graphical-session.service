@@ -6,17 +6,13 @@ Requires=osworld-home-overlay.service
 
 [Service]
 Type=simple
-User=__DESKTOP_USER__
-Group=__DESKTOP_USER__
-PAMName=login
 Environment=HOME=__DESKTOP_HOME__
 Environment=DISPLAY=:0
 Environment=XAUTHORITY=__DESKTOP_HOME__/.Xauthority
 Environment=XDG_RUNTIME_DIR=__DESKTOP_RUNTIME_DIR__
 Environment=XDG_SESSION_TYPE=x11
 Environment=DESKTOP_SESSION=ubuntu
-WorkingDirectory=__DESKTOP_HOME__
-ExecStart=/usr/bin/xinit /usr/bin/gnome-session --session=ubuntu -- /usr/lib/xorg/Xorg :0 -config /etc/X11/xorg.conf -nolisten tcp -noreset
+ExecStart=__REPO_ROOT__/OSWorld/desktop_env/providers/aws/scripts/launch_osworld_graphical_session.sh __DESKTOP_USER__ __DESKTOP_HOME__ __DESKTOP_RUNTIME_DIR__
 Restart=always
 RestartSec=5
 

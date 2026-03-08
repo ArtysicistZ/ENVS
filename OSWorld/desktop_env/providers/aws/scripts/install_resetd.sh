@@ -70,7 +70,9 @@ fi
 echo "[1/6] Installing reset stack for desktop user '${DESKTOP_USER}' (${DESKTOP_HOME})"
 
 has_x_socket() {
-  find /tmp/.X11-unix -maxdepth 1 -type s -name 'X*' 2>/dev/null | grep -q .
+  local display_num="${1:-:0}"
+  local display_index="${display_num##*:}"
+  [ -S "/tmp/.X11-unix/X${display_index}" ]
 }
 
 render_unit() {
@@ -102,9 +104,11 @@ restart_or_dump() {
 
 wait_for_x_socket() {
   local timeout="${1:-30}"
+  local display_num="${2:-:0}"
+  local display_index="${display_num##*:}"
   local deadline=$((SECONDS + timeout))
   while [ "${SECONDS}" -lt "${deadline}" ]; do
-    if find /tmp/.X11-unix -maxdepth 1 -type s -name 'X*' 2>/dev/null | grep -q .; then
+    if [ -S "/tmp/.X11-unix/X${display_index}" ]; then
       return 0
     fi
     sleep 1
@@ -187,8 +191,9 @@ detect_display_manager_unit() {
 
 install -d -m 0755 "${RESET_ROOT}" "${SERVER_ROOT}" "$(dirname "${BASELINE_HOME}")" "$(dirname "${BASELINE_DCONF}")" "${STATE_ROOT}" "${SESSION_ROOT}"
 
+DISPLAY_NUM="${OSWORLD_DISPLAY_NUMBER:-:0}"
 PROVISION_DESKTOP_MODE="${OSWORLD_PROVISION_DESKTOP:-auto}"
-if ! has_x_socket; then
+if ! has_x_socket "${DISPLAY_NUM}"; then
   if [ "${PROVISION_DESKTOP_MODE}" = "0" ] || [ "${PROVISION_DESKTOP_MODE}" = "false" ]; then
     fail_no_desktop
   fi
@@ -237,7 +242,7 @@ if [ -n "${DISPLAY_MANAGER_UNIT}" ]; then
 fi
 restart_or_dump osworld-home-overlay.service
 restart_or_dump osworld-graphical-session.service
-if ! wait_for_x_socket 30; then
+if ! wait_for_x_socket 30 "${DISPLAY_NUM}"; then
   echo "OSWorld graphical session did not produce an X socket within 30s" >&2
   echo "--- systemctl status osworld-graphical-session.service ---" >&2
   systemctl --no-pager --full status osworld-graphical-session.service >&2 || true
