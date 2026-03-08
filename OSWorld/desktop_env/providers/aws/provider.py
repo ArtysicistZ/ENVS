@@ -11,6 +11,7 @@ from desktop_env.providers.base import Provider
 # TTL configuration
 from desktop_env.providers.aws.config import ENABLE_TTL, DEFAULT_TTL_MINUTES, AWS_SCHEDULER_ROLE_ARN
 from desktop_env.providers.aws.scheduler_utils import schedule_instance_termination
+from desktop_env.providers.aws import vm_reset
 
 logger = logging.getLogger("desktopenv.providers.aws.AWSProvider")
 logger.setLevel(logging.INFO)
@@ -51,16 +52,13 @@ class AWSProvider(Provider):
             logger.info(f"Instance {path_to_vm} current state: {state}")
 
             if state == 'running':
-                # If the instance is already running, skip starting it
                 logger.info(f"Instance {path_to_vm} is already running. Skipping start.")
                 return
 
             if state == 'stopped':
-                # Start the instance if it's currently stopped
                 ec2_client.start_instances(InstanceIds=[path_to_vm])
                 logger.info(f"Instance {path_to_vm} is starting...")
 
-                # Wait until the instance reaches 'running' state
                 waiter = ec2_client.get_waiter('instance_running')
                 waiter.wait(
                     InstanceIds=[path_to_vm],
@@ -68,7 +66,6 @@ class AWSProvider(Provider):
                 )
                 logger.info(f"Instance {path_to_vm} is now running.")
             else:
-                # For all other states (terminated, pending, etc.), log a warning
                 logger.warning(f"Instance {path_to_vm} is in state '{state}' and cannot be started.")
 
         except ClientError as e:
@@ -90,21 +87,22 @@ class AWSProvider(Provider):
                     if public_ip_address:
                         vnc_url = f"http://{public_ip_address}:5910/vnc.html"
                         logger.info("="*80)
-                        logger.info(f"🖥️  VNC Web Access URL: {vnc_url}")
-                        logger.info(f"📡 Public IP: {public_ip_address}")
-                        logger.info(f"🏠 Private IP: {private_ip_address}")
+                        logger.info(f"VNC Web Access URL: {vnc_url}")
+                        logger.info(f"Public IP: {public_ip_address}")
+                        logger.info(f"Private IP: {private_ip_address}")
                         logger.info("="*80)
-                        print(f"\n🌐 VNC Web Access URL: {vnc_url}")
-                        print(f"📍 Please open the above address in the browser for remote desktop access\n")
                     else:
                         logger.warning("No public IP address available for VNC access")
 
                     if private_ip_address:
                         self._wait_for_vm_server(private_ip_address)
+                        try:
+                            vm_reset.snapshot_home(private_ip_address)
+                        except Exception as e:
+                            logger.warning(f"Failed to create snapshot on {private_ip_address}: {e}")
 
                     return private_ip_address
-                    # return public_ip_address
-            return ''  # Return an empty string if no IP address is found
+            return ''
         except ClientError as e:
             logger.error(f"Failed to retrieve IP address for the instance {path_to_vm}: {str(e)}")
             raise
@@ -122,27 +120,8 @@ class AWSProvider(Provider):
             logger.error(f"Failed to create AMI from the instance {path_to_vm}: {str(e)}")
             raise
 
-    # Apps to kill during soft reset — desktop applications only; never kills python/server processes
-    _SOFT_RESET_KILL_PATTERN = (
-        "chromium|firefox|libreoffice|soffice|vlc|gedit|mousepad|"
-        "thunar|nautilus|nemo|evince|eog|gimp|inkscape|code|kate|xed"
-    )
-
-    def _soft_reset_vm(self, ip: str, port: int = 5000):
-        """Kill all desktop apps inside the running VM via its HTTP API.
-
-        Does NOT kill python/server processes, so the VM's port-5000 server stays up.
-        Raises RuntimeError if the HTTP call fails (caller should fall back to full relaunch).
-        """
-        cmd = f"pkill -9 -f '{self._SOFT_RESET_KILL_PATTERN}' || true; sleep 1"
-        url = f"http://{ip}:{port}/setup/execute"
-        resp = requests.post(url, json={"command": cmd, "shell": True}, timeout=15)
-        if resp.status_code != 200:
-            raise RuntimeError(f"Soft reset returned HTTP {resp.status_code}: {resp.text[:200]}")
-        logger.info(f"Soft reset sent to {ip}:{port} — desktop apps killed.")
-
     def revert_to_snapshot(self, path_to_vm: str, snapshot_name: str):
-        """Revert to clean state. Tries a fast soft reset (~5s) first; falls back to
+        """Revert to clean state. Tries a fast soft reset (~5-8s) first; falls back to
         full terminate+relaunch (~89s) if the instance is unreachable or unhealthy."""
         ec2_client = boto3.client('ec2', region_name=self.region)
 
@@ -155,7 +134,7 @@ class AWSProvider(Provider):
 
             if state == 'running' and private_ip:
                 logger.info(f"Soft-resetting {path_to_vm} at {private_ip} (skipping terminate+relaunch)...")
-                self._soft_reset_vm(private_ip)
+                vm_reset.soft_reset(private_ip)
                 logger.info(f"Soft reset complete. Reusing instance {path_to_vm}.")
                 return path_to_vm
             else:
@@ -231,7 +210,7 @@ class AWSProvider(Provider):
 
             # Step 3: Launch a new instance from the snapshot(AMI) with performance optimization
             logger.info(f"Launching a new instance from AMI {image_id}...")
-            
+
             # TTL configuration follows the same env flags as allocation (centralized)
             enable_ttl = ENABLE_TTL
             default_ttl_minutes = DEFAULT_TTL_MINUTES
@@ -254,18 +233,17 @@ class AWSProvider(Provider):
                 ],
                 "BlockDeviceMappings": [
                     {
-                        "DeviceName": "/dev/sda1", 
+                        "DeviceName": "/dev/sda1",
                         "Ebs": {
-                            # "VolumeInitializationRate": 300
-                            "VolumeSize": 30,  # Size in GB
-                            "VolumeType": "gp3",  # General Purpose SSD
+                            "VolumeSize": 30,
+                            "VolumeType": "gp3",
                             "Throughput": 1000,
-                            "Iops": 4000  # Adjust IOPS as needed
+                            "Iops": 4000
                         }
                     }
                 ]
             }
-            
+
             new_instance = ec2_client.run_instances(**run_instances_params)
             new_instance_id = new_instance['Instances'][0]['InstanceId']
             logger.info(f"New instance {new_instance_id} launched from AMI {image_id}.")
@@ -314,12 +292,10 @@ class AWSProvider(Provider):
                 if public_ip:
                     vnc_url = f"http://{public_ip}:5910/vnc.html"
                     logger.info("="*80)
-                    logger.info(f"🖥️  New Instance VNC Web Access URL: {vnc_url}")
-                    logger.info(f"📡 Public IP: {public_ip}")
-                    logger.info(f"🆔 New Instance ID: {new_instance_id}")
+                    logger.info(f"New Instance VNC Web Access URL: {vnc_url}")
+                    logger.info(f"Public IP: {public_ip}")
+                    logger.info(f"New Instance ID: {new_instance_id}")
                     logger.info("="*80)
-                    print(f"\n🌐 New Instance VNC Web Access URL: {vnc_url}")
-                    print(f"📍 Please open the above address in the browser for remote desktop access\n")
             except Exception as e:
                 logger.warning(f"Failed to get VNC address for new instance {new_instance_id}: {e}")
 

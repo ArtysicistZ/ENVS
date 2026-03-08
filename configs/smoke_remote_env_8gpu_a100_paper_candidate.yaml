@@ -1,10 +1,7 @@
-# ARPO Safe Smoke Test - 8x A100 80G + Remote AWS Env
-# This is a low-risk correctness profile for 1 remote env.
-# It intentionally keeps rollout conservative to avoid the 78G-per-GPU peak
-# caused by using a throughput-oriented rollout topology in a smoke run.
-#
-# 1) Ensure AWS env server is running: curl http://YOUR_AWS_IP:15001/health
-# 2) Run: python -m verl.trainer.main config=configs/smoke_remote_env_8gpu_a100.yaml
+# ARPO Throughput Candidate - 8x A100 80G + Remote AWS Env
+# This profile is intentionally closer to the upstream ARPO rollout design:
+# lower rollout TP, higher rollout batching capacity, and no hard KV reservation.
+# Use it for throughput experiments after the safe smoke profile is stable.
 
 data:
   train_files: OSWorld/evaluation_examples/test_smoke_4.json
@@ -34,9 +31,7 @@ worker:
     micro_batch_size_per_device_for_update: 1
     micro_batch_size_per_device_for_experience: 1
     max_grad_norm: 1.0
-    padding_free: true   # required for ulysses sequence parallelism
-    # UI-TARS-1.5-7B has 28 attention heads / 4 KV heads, so the current Ulysses path can split
-    # the sequence across at most 4 ranks. On 8 GPUs, this yields 2 data-parallel groups of 4.
+    padding_free: true
     ulysses_sequence_parallel_size: 4
     ppo_epochs: 1
     clip_ratio_low: 0.2
@@ -58,19 +53,19 @@ worker:
       torch_dtype: bf16
     offload:
       offload_params: false
-      offload_optimizer: true
+      offload_optimizer: false
 
   rollout:
     temperature: 1.0
     n: 2
     gpu_memory_utilization: 0.4
     enforce_eager: false
-    enable_chunked_prefill: false
-    # Safe 1-env smoke profile: keep rollout split across 4 GPUs to reduce per-GPU KV pressure.
-    tensor_parallel_size: 4
+    enable_chunked_prefill: true
+    # Paper-like direction: use smaller TP to create more independent rollout engines.
+    tensor_parallel_size: 2
     limit_images: 15
     max_num_batched_tokens: 65536
-    max_num_seqs: 1
+    max_num_seqs: 2
     val_override_config:
       temperature: 0.5
       n: 1
@@ -96,7 +91,7 @@ trainer:
   total_episodes: 10
   logger: ["console", "wandb"]
   project_name: arpo-smoke-test
-  experiment_name: uitars_7b_8xa100_remote_safe_smoke
+  experiment_name: uitars_7b_8xa100_remote_paper_candidate
   n_gpus_per_node: 8
   nnodes: 1
   val_before_train: false

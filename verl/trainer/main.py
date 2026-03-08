@@ -17,6 +17,8 @@ Note that we don't combine the main with ray_trainer as ray_trainer is used by o
 python -m verl.trainer.main config=configs/smoke_remote_env_8gpu_a100.yaml
 
 bash /home/kevinzyz/yincheng/arpo/scripts/run_smoke_remote_env_8gpu_a100.sh
+
+bash /home/kevinzyz/yincheng/arpo/scripts/run_smoke_remote_env_8gpu_a100_paper_candidate.sh
 """
 
 import json
