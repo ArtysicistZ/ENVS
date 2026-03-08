@@ -62,6 +62,21 @@ render_unit() {
     "${src}" > "${dst}"
 }
 
+restart_or_dump() {
+  local unit="$1"
+  if systemctl restart "${unit}"; then
+    return 0
+  fi
+
+  echo >&2
+  echo "Failed to restart ${unit}" >&2
+  echo "--- systemctl status ${unit} ---" >&2
+  systemctl --no-pager --full status "${unit}" >&2 || true
+  echo "--- journalctl -u ${unit} -n 200 ---" >&2
+  journalctl -u "${unit}" -n 200 --no-pager >&2 || true
+  exit 1
+}
+
 install -d -m 0755 "${RESET_ROOT}" "${SERVER_ROOT}" "$(dirname "${BASELINE_HOME}")" "$(dirname "${BASELINE_DCONF}")" "${STATE_ROOT}" "${SESSION_ROOT}"
 
 echo "[2/6] Copying runtime and server files into ${CONTROL_ROOT}"
@@ -95,9 +110,12 @@ systemctl daemon-reload
 systemctl enable osworld-home-overlay.service
 systemctl enable osworld-resetd.service
 systemctl enable osworld-server.service
-systemctl restart osworld-home-overlay.service
-systemctl restart osworld-resetd.service
-systemctl restart osworld-server.service
+systemctl stop osworld-server.service || true
+systemctl stop osworld-resetd.service || true
+modprobe overlay || true
+restart_or_dump osworld-home-overlay.service
+restart_or_dump osworld-resetd.service
+restart_or_dump osworld-server.service
 
 OSWORLD_RESET_USER="${DESKTOP_USER}" \
 OSWORLD_RESET_HOME="${DESKTOP_HOME}" \

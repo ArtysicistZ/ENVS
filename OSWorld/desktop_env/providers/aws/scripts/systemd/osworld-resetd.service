@@ -11,6 +11,7 @@ Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=AWS_RESETD_PORT=5001
 Environment=OSWORLD_RESET_BIND=0.0.0.0
+Environment=OSWORLD_RESET_USER=__DESKTOP_USER__
 Environment=OSWORLD_CONTROL_PLANE_ROOT=/opt/osworld
 Environment=OSWORLD_RESET_HOME=__DESKTOP_HOME__
 Environment=OSWORLD_RESET_BASELINE_HOME=/opt/osworld/baseline/home-user
