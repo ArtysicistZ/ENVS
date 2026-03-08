@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import platform
 import sys
@@ -38,7 +39,8 @@ def main() -> int:
     missing: list[dict[str, str]] = []
     for module_name, package_name in required:
         try:
-            importlib.import_module(module_name)
+            if importlib.util.find_spec(module_name) is None:
+                raise ModuleNotFoundError(f"No module named '{module_name}'")
         except Exception as exc:
             missing.append(
                 {

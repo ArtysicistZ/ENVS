@@ -148,11 +148,18 @@ check_server_python_deps() {
 
 ensure_accessibility_python_deps() {
   if PYTHONPATH="${SYSTEM_DIST_PACKAGES}${PYTHONPATH:+:${PYTHONPATH}}" "${PYTHON_BIN}" -c "import pyatspi" >/dev/null 2>&1; then
+    :
+  else
+    echo "[2b/6] Installing Ubuntu accessibility runtime dependency python3-pyatspi"
+    apt-get install -y python3-pyatspi
+  fi
+
+  if "${PYTHON_BIN}" -c "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('pyxcursor') else 1)" >/dev/null 2>&1; then
     return 0
   fi
 
-  echo "[2b/6] Installing Ubuntu accessibility runtime dependency python3-pyatspi"
-  apt-get install -y python3-pyatspi
+  echo "[2b/6] Installing missing Python runtime dependency pyxcursor into ${PYTHON_BIN}"
+  "${PYTHON_BIN}" -m pip install pyxcursor
 }
 
 wait_for_x_socket() {

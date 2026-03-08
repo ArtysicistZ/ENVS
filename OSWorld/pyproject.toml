@@ -22,6 +22,7 @@ dependencies = [
     "websockets",
     "tiktoken",
     "pyautogui~=0.9.54",
+    "pyxcursor",
     "toml",
     "exa_py",
     "black",
