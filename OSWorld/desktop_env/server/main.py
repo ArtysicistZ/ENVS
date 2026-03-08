@@ -407,10 +407,10 @@ def capture_screen_with_cursor():
             except Exception:
                 return False
 
-        # Under the managed Xvfb session, native command-line capture is the
-        # only supported Linux path. It must return quickly enough for cold-start
-        # readiness probes, so avoid any slower in-process GUI fallback here.
-        for cmd in (["scrot", file_path], ["gnome-screenshot", "-f", file_path]):
+        # Prefer GNOME-native capture first (composited frame); fallback to
+        # X11 root capture only if GNOME's D-Bus screenshot interface is not
+        # reachable.
+        for cmd in (["gnome-screenshot", "-f", file_path], ["scrot", file_path]):
             if _capture_with_command(cmd, timeout_seconds=2):
                 screenshot_captured = True
                 break

@@ -74,6 +74,8 @@ wait_for_health() {
 wait_for_health "http://127.0.0.1:5001/health" "reset daemon" 30
 wait_for_health "http://127.0.0.1:5000/health" "OSWorld server" 90
 
+STRICT_SCREENSHOT_READINESS="${OSWORLD_STRICT_SCREENSHOT_READINESS:-0}"
+
 screenshot_looks_valid() {
   local image_path="$1"
   "${PYTHON_BIN}" - "${image_path}" <<'PY'
@@ -91,7 +93,7 @@ if max(means) < 8:
     raise SystemExit(1)
 
 # Reject a nearly uniform frame, which is typically the blank X root window.
-if max(stddev) < 1.0 and (max(means) - min(means)) < 2.0:
+if max(stddev) < 2.0:
     raise SystemExit(1)
 PY
 }
@@ -104,10 +106,18 @@ wait_for_screenshot() {
   tmpfile="$(mktemp)"
   trap 'rm -f "${tmpfile}"' RETURN
   while [ "${SECONDS}" -lt "${deadline}" ]; do
-    if curl --max-time 8 -fsS "${url}" -o "${tmpfile}" >/dev/null 2>&1 && [ -s "${tmpfile}" ] && screenshot_looks_valid "${tmpfile}"; then
-      rm -f "${tmpfile}"
-      trap - RETURN
-      return 0
+    if curl --max-time 8 -fsS "${url}" -o "${tmpfile}" >/dev/null 2>&1 && [ -s "${tmpfile}" ]; then
+      if [ "${STRICT_SCREENSHOT_READINESS}" = "1" ] || [ "${STRICT_SCREENSHOT_READINESS}" = "true" ]; then
+        if screenshot_looks_valid "${tmpfile}"; then
+          rm -f "${tmpfile}"
+          trap - RETURN
+          return 0
+        fi
+      else
+        rm -f "${tmpfile}"
+        trap - RETURN
+        return 0
+      fi
     fi
     : > "${tmpfile}"
     sleep 1

@@ -88,6 +88,10 @@ cleanup() {
     kill "${GNOME_PID}" 2>/dev/null || true
     wait "${GNOME_PID}" 2>/dev/null || true
   fi
+  if [ -n "${DBUS_PID:-}" ] && kill -0 "${DBUS_PID}" 2>/dev/null; then
+    kill "${DBUS_PID}" 2>/dev/null || true
+    wait "${DBUS_PID}" 2>/dev/null || true
+  fi
   if [ -n "${XORG_PID:-}" ] && kill -0 "${XORG_PID}" 2>/dev/null; then
     kill "${XORG_PID}" 2>/dev/null || true
     wait "${XORG_PID}" 2>/dev/null || true
@@ -126,18 +130,48 @@ fi
 DISPLAY="${DISPLAY_NUM}" xset s off -dpms s noblank >/dev/null 2>&1 || true
 DISPLAY="${DISPLAY_NUM}" xsetroot -solid "#2E3440" -cursor_name left_ptr >/dev/null 2>&1 || true
 
+DBUS_SOCKET="${DESKTOP_RUNTIME_DIR}/bus"
+rm -f "${DBUS_SOCKET}"
+runuser -u "${DESKTOP_USER}" -- env \
+  HOME="${DESKTOP_HOME}" \
+  XDG_RUNTIME_DIR="${DESKTOP_RUNTIME_DIR}" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_SOCKET}" \
+  dbus-daemon --session --address="unix:path=${DBUS_SOCKET}" --nofork --nopidfile &
+DBUS_PID=$!
+
+deadline=$((SECONDS + 10))
+while [ "${SECONDS}" -lt "${deadline}" ]; do
+  if [ -S "${DBUS_SOCKET}" ]; then
+    break
+  fi
+  sleep 1
+done
+if [ ! -S "${DBUS_SOCKET}" ]; then
+  echo "D-Bus session socket was not created at ${DBUS_SOCKET}" >&2
+  exit 1
+fi
+
 runuser -u "${DESKTOP_USER}" -- env \
   DISPLAY="${DISPLAY_NUM}" \
   HOME="${DESKTOP_HOME}" \
   XAUTHORITY="${DESKTOP_HOME}/.Xauthority" \
   XDG_RUNTIME_DIR="${DESKTOP_RUNTIME_DIR}" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_SOCKET}" \
   XDG_SESSION_TYPE=x11 \
+  XDG_CURRENT_DESKTOP=ubuntu:GNOME \
+  XDG_SESSION_DESKTOP=ubuntu \
   DESKTOP_SESSION=ubuntu \
+  GDK_BACKEND=x11 \
+  CLUTTER_BACKEND=x11 \
+  LIBGL_ALWAYS_SOFTWARE=1 \
+  MESA_LOADER_DRIVER_OVERRIDE=llvmpipe \
+  __GLX_VENDOR_LIBRARY_NAME=mesa \
+  GSK_RENDERER=cairo \
   XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" \
   XDG_CACHE_HOME="${XDG_CACHE_HOME}" \
   XDG_DATA_HOME="${XDG_DATA_HOME}" \
   XDG_STATE_HOME="${XDG_STATE_HOME}" \
-  dbus-run-session /usr/bin/gnome-session --session=ubuntu &
+  /usr/bin/gnome-session --session=ubuntu &
 GNOME_PID=$!
 
 # GNOME on Xvfb can come up with a black root window. Re-assert a visible root
