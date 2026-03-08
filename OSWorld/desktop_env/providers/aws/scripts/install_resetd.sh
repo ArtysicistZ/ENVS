@@ -129,6 +129,7 @@ systemctl enable osworld-server.service
 systemctl stop osworld-server.service || true
 systemctl stop osworld-resetd.service || true
 modprobe overlay || true
+systemctl restart display-manager || true
 restart_or_dump osworld-home-overlay.service
 restart_or_dump osworld-resetd.service
 restart_or_dump osworld-server.service
