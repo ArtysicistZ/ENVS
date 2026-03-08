@@ -43,6 +43,37 @@ AutomaticLogin=${DESKTOP_USER}
 WaylandEnable=false
 EOF
 
+cat > /etc/X11/xorg.conf <<'EOF'
+Section "ServerLayout"
+    Identifier "DummyLayout"
+    Screen 0 "DummyScreen"
+EndSection
+
+Section "Monitor"
+    Identifier "DummyMonitor"
+    HorizSync 28.0-80.0
+    VertRefresh 48.0-75.0
+    Modeline "1920x1080" 172.80 1920 2048 2248 2576 1080 1083 1088 1120
+EndSection
+
+Section "Device"
+    Identifier "DummyDevice"
+    Driver "dummy"
+    VideoRam 256000
+EndSection
+
+Section "Screen"
+    Identifier "DummyScreen"
+    Device "DummyDevice"
+    Monitor "DummyMonitor"
+    DefaultDepth 24
+    SubSection "Display"
+        Depth 24
+        Modes "1920x1080"
+    EndSubSection
+EndSection
+EOF
+
 install -d -m 0755 /etc/X11/xorg.conf.d
 cat > /etc/X11/xorg.conf.d/10-dummy.conf <<'EOF'
 Section "Device"

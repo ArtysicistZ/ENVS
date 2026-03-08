@@ -188,11 +188,11 @@ detect_display_manager_unit() {
 install -d -m 0755 "${RESET_ROOT}" "${SERVER_ROOT}" "$(dirname "${BASELINE_HOME}")" "$(dirname "${BASELINE_DCONF}")" "${STATE_ROOT}" "${SESSION_ROOT}"
 
 PROVISION_DESKTOP_MODE="${OSWORLD_PROVISION_DESKTOP:-auto}"
-if ! has_x_socket && ! detect_display_manager_unit >/dev/null 2>&1; then
+if ! has_x_socket; then
   if [ "${PROVISION_DESKTOP_MODE}" = "0" ] || [ "${PROVISION_DESKTOP_MODE}" = "false" ]; then
     fail_no_desktop
   fi
-  echo "No desktop session or display manager detected; provisioning OSWorld desktop stack"
+  echo "No live X socket detected; provisioning or refreshing the OSWorld desktop stack"
   bash "${SCRIPT_DIR}/provision_osworld_desktop.sh" "${DESKTOP_USER}" "${DESKTOP_HOME}"
 fi
 
