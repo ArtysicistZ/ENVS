@@ -106,6 +106,43 @@ if [ ! -x "${PYTHON_BIN}" ]; then
   exit 1
 fi
 
+ensure_python_runtime_access() {
+  local interpreter_path="$1"
+  local runtime_root
+
+  runtime_root="$(dirname "$(dirname "${interpreter_path}")")"
+  if [[ "${runtime_root}" != /home/ubuntu/* ]]; then
+    return 0
+  fi
+
+  echo "[1a/6] Granting ${DESKTOP_USER} read/execute access to Python runtime under ${runtime_root}"
+  apt-get install -y acl
+
+  local parent
+  local current="/home/ubuntu"
+  setfacl -m "u:${DESKTOP_USER}:rx" "/home/ubuntu"
+
+  while [ "${current}" != "${runtime_root}" ]; do
+    parent="${current}"
+    current="$(python3 - <<PY
+from pathlib import Path
+target = Path(${runtime_root@Q})
+current = Path(${parent@Q})
+for child in target.parts[len(current.parts):len(current.parts)+1]:
+    print((current / child).as_posix())
+    break
+PY
+)"
+    if [ -n "${current}" ] && [ -e "${current}" ]; then
+      setfacl -m "u:${DESKTOP_USER}:rx" "${current}"
+    else
+      break
+    fi
+  done
+
+  setfacl -R -m "u:${DESKTOP_USER}:rx" "${runtime_root}"
+}
+
 CURRENT_PWD="$(pwd -P)"
 if [[ "${CURRENT_PWD}" == "${DESKTOP_HOME}" || "${CURRENT_PWD}" == "${DESKTOP_HOME}/"* ]]; then
   cat >&2 <<EOF
@@ -125,6 +162,7 @@ EOF
 fi
 
 echo "[1/6] Installing reset stack for desktop user '${DESKTOP_USER}' (${DESKTOP_HOME})"
+ensure_python_runtime_access "${PYTHON_BIN}"
 
 has_x_socket() {
   local display_num="${1:-:0}"
