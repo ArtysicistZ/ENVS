@@ -32,7 +32,11 @@ EOF
 fi
 
 echo "Starting OSWorld reset stack from ${REPO_ROOT}"
-sudo PYTHON_BIN="${PYTHON_BIN}" bash "${REPO_ROOT}/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh"
+sudo \
+  PYTHON_BIN="${PYTHON_BIN}" \
+  OSWORLD_RESET_USER="${OSWORLD_RESET_USER:-${USER}}" \
+  OSWORLD_RESET_HOME="${OSWORLD_RESET_HOME:-${HOME}}" \
+  bash "${REPO_ROOT}/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh"
 
 wait_for_health() {
   local url="$1"

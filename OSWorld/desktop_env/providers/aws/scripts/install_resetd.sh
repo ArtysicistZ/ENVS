@@ -34,6 +34,10 @@ BASELINE_REBUILD_THRESHOLD_KB="${OSWORLD_RESET_BASELINE_REBUILD_THRESHOLD_KB:-20
 BASELINE_MODE="${OSWORLD_RESET_BASELINE_MODE:-minimal}"
 if [ -n "${OSWORLD_RESET_USER:-}" ]; then
   DESKTOP_USER="${OSWORLD_RESET_USER}"
+elif [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+  DESKTOP_USER="${SUDO_USER}"
+elif [ -n "${USER:-}" ] && [ "${USER}" != "root" ]; then
+  DESKTOP_USER="${USER}"
 elif id -u osworld >/dev/null 2>&1; then
   DESKTOP_USER="osworld"
 else
