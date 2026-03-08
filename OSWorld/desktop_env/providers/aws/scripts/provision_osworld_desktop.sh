@@ -19,7 +19,9 @@ echo "gdm3 shared/default-x-display-manager select gdm3" | debconf-set-selection
 apt-get install -y \
   ubuntu-desktop \
   gdm3 \
+  xinit \
   dbus-x11 \
+  dbus-user-session \
   gnome-screenshot \
   wmctrl \
   ffmpeg \
@@ -31,8 +33,8 @@ apt-get install -y \
   python3-tk \
   python3-dev
 
-echo "[desktop 2/5] Enabling graphical boot target"
-systemctl set-default graphical.target
+echo "[desktop 2/5] Setting multi-user boot target for managed OSWorld session"
+systemctl set-default multi-user.target
 
 echo "[desktop 3/5] Configuring GDM autologin and Xorg"
 install -d -m 0755 /etc/gdm3
@@ -101,8 +103,11 @@ Section "Screen"
 EndSection
 EOF
 
-echo "[desktop 4/5] Enabling display manager"
-systemctl enable gdm3.service
+echo "[desktop 4/5] Disabling GDM autostart in favor of managed OSWorld session"
+systemctl disable gdm3.service || true
+systemctl stop gdm3.service || true
+systemctl stop gdm.service || true
+systemctl stop display-manager.service || true
 
 echo "[desktop 5/5] Preparing desktop user home"
 install -d -o "${DESKTOP_USER}" -g "${DESKTOP_USER}" -m 0755 "${DESKTOP_HOME}"

@@ -118,12 +118,12 @@ No live X desktop session was detected on this VM.
 
 OSWorld server requires a real graphical desktop. This VM currently has:
   - no connectable X display socket under /tmp/.X11-unix
-  - no usable display manager service started by this installer
+  - no usable graphical session produced by the installer
 
 This usually means one of:
   1. this is not the desktop AMI / OSWorld VM image
   2. the desktop stack was not installed on the VM
-  3. the graphical session is not running yet
+  3. Xorg or the desktop session failed to start
 
 Quick checks:
   ls -l /tmp/.X11-unix
@@ -203,6 +203,7 @@ echo "[3/6] Rendering systemd units"
 install -d -m 0755 /etc/systemd/system
 render_unit "${SCRIPT_DIR}/systemd/osworld-home-overlay.service" /etc/systemd/system/osworld-home-overlay.service
 render_unit "${SCRIPT_DIR}/systemd/osworld-resetd.service" /etc/systemd/system/osworld-resetd.service
+render_unit "${SCRIPT_DIR}/systemd/osworld-graphical-session.service" /etc/systemd/system/osworld-graphical-session.service
 render_unit "${SCRIPT_DIR}/systemd/osworld-server.service" /etc/systemd/system/osworld-server.service
 
 if [ ! -d "${BASELINE_HOME}" ]; then
@@ -223,28 +224,26 @@ echo "[6/6] Reloading services and preparing baseline metadata"
 systemctl daemon-reload
 systemctl enable osworld-home-overlay.service
 systemctl enable osworld-resetd.service
+systemctl enable osworld-graphical-session.service
 systemctl enable osworld-server.service
 systemctl stop osworld-server.service || true
+systemctl stop osworld-graphical-session.service || true
 systemctl stop osworld-resetd.service || true
 modprobe overlay || true
 DISPLAY_MANAGER_UNIT="$(detect_display_manager_unit || true)"
 if [ -n "${DISPLAY_MANAGER_UNIT}" ]; then
-  echo "Stopping display manager before overlay remount: ${DISPLAY_MANAGER_UNIT}"
+  echo "Stopping display manager so OSWorld can own :0 directly: ${DISPLAY_MANAGER_UNIT}"
   systemctl stop "${DISPLAY_MANAGER_UNIT}" || true
 fi
 restart_or_dump osworld-home-overlay.service
-if [ -n "${DISPLAY_MANAGER_UNIT}" ]; then
-  echo "Starting display manager on top of overlay-mounted home: ${DISPLAY_MANAGER_UNIT}"
-  restart_or_dump "${DISPLAY_MANAGER_UNIT}"
-  if ! wait_for_x_socket 30; then
-    echo "Display manager did not produce an X socket within 30s: ${DISPLAY_MANAGER_UNIT}" >&2
-    fail_no_desktop
-  fi
-else
-  echo "No known display manager unit detected; relying on existing graphical session"
-  if ! wait_for_x_socket 5; then
-    fail_no_desktop
-  fi
+restart_or_dump osworld-graphical-session.service
+if ! wait_for_x_socket 30; then
+  echo "OSWorld graphical session did not produce an X socket within 30s" >&2
+  echo "--- systemctl status osworld-graphical-session.service ---" >&2
+  systemctl --no-pager --full status osworld-graphical-session.service >&2 || true
+  echo "--- journalctl -u osworld-graphical-session.service -n 200 ---" >&2
+  journalctl -u osworld-graphical-session.service -n 200 --no-pager >&2 || true
+  fail_no_desktop
 fi
 restart_or_dump osworld-resetd.service
 restart_or_dump osworld-server.service

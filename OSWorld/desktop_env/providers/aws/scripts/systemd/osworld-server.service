@@ -1,8 +1,9 @@
 [Unit]
 Description=OSWorld control-plane server
-After=network-online.target graphical.target
+After=network-online.target osworld-graphical-session.service
 Wants=network-online.target
 Requires=osworld-home-overlay.service
+Requires=osworld-graphical-session.service
 After=osworld-home-overlay.service
 
 [Service]
