@@ -69,6 +69,10 @@ fi
 
 echo "[1/6] Installing reset stack for desktop user '${DESKTOP_USER}' (${DESKTOP_HOME})"
 
+has_x_socket() {
+  find /tmp/.X11-unix -maxdepth 1 -type s -name 'X*' 2>/dev/null | grep -q .
+}
+
 render_unit() {
   local src="$1"
   local dst="$2"
@@ -96,9 +100,45 @@ restart_or_dump() {
   exit 1
 }
 
+wait_for_x_socket() {
+  local timeout="${1:-30}"
+  local deadline=$((SECONDS + timeout))
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
+    if find /tmp/.X11-unix -maxdepth 1 -type s -name 'X*' 2>/dev/null | grep -q .; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+fail_no_desktop() {
+  cat >&2 <<EOF
+No live X desktop session was detected on this VM.
+
+OSWorld server requires a real graphical desktop. This VM currently has:
+  - no connectable X display socket under /tmp/.X11-unix
+  - no usable display manager service started by this installer
+
+This usually means one of:
+  1. this is not the desktop AMI / OSWorld VM image
+  2. the desktop stack was not installed on the VM
+  3. the graphical session is not running yet
+
+Quick checks:
+  ls -l /tmp/.X11-unix
+  systemctl list-unit-files | grep -E 'gdm|lightdm|sddm'
+  loginctl list-sessions
+
+Do not use this VM for OSWorld if it is headless. The reset stack can run, but
+osworld-server cannot start without X.
+EOF
+  exit 1
+}
+
 detect_display_manager_unit() {
   if [ -n "${OSWORLD_DISPLAY_MANAGER_SERVICE:-}" ]; then
-    if systemctl list-unit-files "${OSWORLD_DISPLAY_MANAGER_SERVICE}" >/dev/null 2>&1; then
+    if systemctl list-unit-files --type=service --all 2>/dev/null | awk '{print $1}' | grep -Fxq "${OSWORLD_DISPLAY_MANAGER_SERVICE}"; then
       echo "${OSWORLD_DISPLAY_MANAGER_SERVICE}"
       return 0
     fi
@@ -113,7 +153,7 @@ detect_display_manager_unit() {
   )
   local unit
   for unit in "${candidates[@]}"; do
-    if systemctl list-unit-files "${unit}" >/dev/null 2>&1; then
+    if systemctl list-unit-files --type=service --all 2>/dev/null | awk '{print $1}' | grep -Fxq "${unit}"; then
       echo "${unit}"
       return 0
     fi
@@ -122,6 +162,15 @@ detect_display_manager_unit() {
 }
 
 install -d -m 0755 "${RESET_ROOT}" "${SERVER_ROOT}" "$(dirname "${BASELINE_HOME}")" "$(dirname "${BASELINE_DCONF}")" "${STATE_ROOT}" "${SESSION_ROOT}"
+
+PROVISION_DESKTOP_MODE="${OSWORLD_PROVISION_DESKTOP:-auto}"
+if ! has_x_socket && ! detect_display_manager_unit >/dev/null 2>&1; then
+  if [ "${PROVISION_DESKTOP_MODE}" = "0" ] || [ "${PROVISION_DESKTOP_MODE}" = "false" ]; then
+    fail_no_desktop
+  fi
+  echo "No desktop session or display manager detected; provisioning OSWorld desktop stack"
+  bash "${SCRIPT_DIR}/provision_osworld_desktop.sh" "${DESKTOP_USER}" "${DESKTOP_HOME}"
+fi
 
 echo "[2/6] Ensuring control directories exist under ${CONTROL_ROOT}"
 install -d -m 0755 "${RESET_ROOT}" "${SERVER_ROOT}"
@@ -156,12 +205,23 @@ systemctl stop osworld-resetd.service || true
 modprobe overlay || true
 DISPLAY_MANAGER_UNIT="$(detect_display_manager_unit || true)"
 if [ -n "${DISPLAY_MANAGER_UNIT}" ]; then
-  echo "Restarting display manager: ${DISPLAY_MANAGER_UNIT}"
-  systemctl restart "${DISPLAY_MANAGER_UNIT}" || true
-else
-  echo "No known display manager unit detected; relying on existing graphical session"
+  echo "Stopping display manager before overlay remount: ${DISPLAY_MANAGER_UNIT}"
+  systemctl stop "${DISPLAY_MANAGER_UNIT}" || true
 fi
 restart_or_dump osworld-home-overlay.service
+if [ -n "${DISPLAY_MANAGER_UNIT}" ]; then
+  echo "Starting display manager on top of overlay-mounted home: ${DISPLAY_MANAGER_UNIT}"
+  systemctl start "${DISPLAY_MANAGER_UNIT}" || true
+  if ! wait_for_x_socket 30; then
+    echo "Display manager did not produce an X socket within 30s: ${DISPLAY_MANAGER_UNIT}" >&2
+    fail_no_desktop
+  fi
+else
+  echo "No known display manager unit detected; relying on existing graphical session"
+  if ! wait_for_x_socket 5; then
+    fail_no_desktop
+  fi
+fi
 restart_or_dump osworld-resetd.service
 restart_or_dump osworld-server.service
 

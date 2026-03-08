@@ -34,6 +34,24 @@ fi
 echo "Starting OSWorld reset stack from ${REPO_ROOT}"
 sudo PYTHON_BIN="${PYTHON_BIN}" bash "${REPO_ROOT}/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh"
 
+wait_for_health() {
+  local url="$1"
+  local name="$2"
+  local timeout="${3:-60}"
+  local deadline=$((SECONDS + timeout))
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
+    if curl -fsS "${url}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "Timed out waiting for ${name} health at ${url}" >&2
+  return 1
+}
+
+wait_for_health "http://127.0.0.1:5001/health" "reset daemon" 30
+wait_for_health "http://127.0.0.1:5000/health" "OSWorld server" 90
+
 echo
 echo "Reset daemon health:"
 curl http://127.0.0.1:5001/health

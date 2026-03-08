@@ -61,6 +61,16 @@ def main() -> int:
                 os.execv(python_bin, [python_bin, server_main])
         time.sleep(1.0)
 
+    x11_dir = Path("/tmp/.X11-unix")
+    if not x11_dir.exists() or not any(x11_dir.glob("X*")):
+        print(
+            "Timed out waiting for a usable X display. "
+            "No X sockets were found under /tmp/.X11-unix, so this VM appears "
+            "to be missing a live graphical desktop session.",
+            file=sys.stderr,
+        )
+        return 1
+
     print(
         "Timed out waiting for a usable X display. "
         f"Tried: {', '.join(last_candidates)}",
