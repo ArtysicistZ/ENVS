@@ -589,23 +589,28 @@ class ResetRuntime:
 
     def prepare_baseline(self) -> ResetResult:
         self._ensure_runtime_layout()
+        self._write_state(self._result(status="busy", reason_code="preparing_baseline").to_dict())
         if not self.config.baseline_home.exists():
             result = self._result(status="error", reason_code="baseline_missing")
             self._write_state(result.to_dict())
             return result
 
+        logger.info("Preparing baseline: ensuring home overlay is mounted")
         overlay_result = self.ensure_home_overlay_mounted()
         if overlay_result.status != "ok":
             self._write_state(overlay_result.to_dict())
             return overlay_result
 
+        logger.info("Preparing baseline: capturing dconf snapshot if missing")
         self._capture_baseline_dconf_if_missing()
+        logger.info("Preparing baseline: hashing baseline home manifest under %s", self.config.baseline_home)
         baseline_manifest = _build_manifest(self.config.baseline_home, self.config.ignored_relative_paths)
         self.config.baseline_manifest_path.write_text(
             json.dumps(baseline_manifest, indent=2, sort_keys=True),
             encoding="utf-8",
         )
         baseline_version = self.config.baseline_version or _manifest_hash(baseline_manifest)[:12]
+        logger.info("Preparing baseline: hashing control plane under %s", self.config.control_plane_root)
         metadata = {
             "runtime_version": RUNTIME_VERSION,
             "ami_build_version": self.config.ami_build_version,
