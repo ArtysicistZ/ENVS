@@ -242,6 +242,30 @@ class TestAWSResetRuntime(unittest.TestCase):
         self.assertEqual(prepared.reason_code, "unsafe_workspace_target")
         self.assertIn("/home/ubuntu", prepared.details["error"])
 
+    def test_prepare_baseline_rejects_non_user_isolated_target_by_default(self):
+        config = ResetConfig(
+            desktop_user="osworld",
+            workspace_home=Path("/home/osworld"),
+            allow_unsafe_home=False,
+            control_plane_root=self.control_plane_root,
+            baseline_home=self.baseline_home,
+            dconf_snapshot=self.dconf_snapshot,
+            session_root=self.session_root,
+            state_root=self.state_root / "non-user",
+            metadata_path=self.state_root / "non-user" / "metadata.json",
+            state_path=self.state_root / "non-user" / "state.json",
+            lock_path=self.state_root / "non-user" / "reset.lock",
+            baseline_manifest_path=self.state_root / "non-user" / "baseline_home_manifest.json",
+            control_plane_stamp_path=self.state_root / "non-user" / "control_plane_build_id",
+            taint_marker_path=self.state_root / "non-user" / "system_taint.json",
+            reset_generation_path=self.state_root / "non-user" / "generation.txt",
+        )
+        runtime = FakeResetRuntime(config)
+        prepared = runtime.prepare_baseline()
+        self.assertEqual(prepared.status, "error")
+        self.assertEqual(prepared.reason_code, "unsafe_workspace_target")
+        self.assertIn("isolated 'user' runtime home", prepared.details["error"])
+
 
 if __name__ == "__main__":
     unittest.main()
