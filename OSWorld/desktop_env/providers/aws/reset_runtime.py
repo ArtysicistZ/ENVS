@@ -93,6 +93,9 @@ class ResetConfig:
     )
     osworld_server_url: str = os.getenv("OSWORLD_SERVER_URL", "http://127.0.0.1:5000")
     osworld_server_service: str = os.getenv("OSWORLD_SERVER_SERVICE", "osworld-server.service")
+    osworld_graphical_session_service: str = os.getenv(
+        "OSWORLD_GRAPHICAL_SESSION_SERVICE", "osworld-graphical-session.service"
+    )
     screenshot_endpoint: str = os.getenv("OSWORLD_SCREENSHOT_ENDPOINT", "/screenshot")
     health_endpoint: str = os.getenv("OSWORLD_HEALTH_ENDPOINT", "/health")
     display_manager_service: str = os.getenv("OSWORLD_DISPLAY_MANAGER_SERVICE", "display-manager")
@@ -441,13 +444,30 @@ class ResetRuntime:
     def _start_control_plane_server(self) -> None:
         self._run(["systemctl", "start", self.config.osworld_server_service], check=False)
 
+    def _service_exists(self, unit: str) -> bool:
+        result = self._run(["systemctl", "list-unit-files", unit], check=False)
+        return result.returncode == 0
+
+    def _stop_graphical_session(self) -> None:
+        unit = self.config.osworld_graphical_session_service
+        if self._service_exists(unit):
+            self._run(["systemctl", "stop", unit], check=False)
+
+    def _start_graphical_session(self) -> None:
+        unit = self.config.osworld_graphical_session_service
+        if self._service_exists(unit):
+            self._run(["systemctl", "start", unit], check=False)
+
     def _restart_display_stack(self) -> None:
         self._run(["loginctl", "terminate-user", self.config.desktop_user], check=False)
-        display_manager_unit = self._resolve_display_manager_service()
-        if display_manager_unit is not None:
-            active = self._run(["systemctl", "is-active", display_manager_unit], check=False)
-            if active.returncode == 0:
-                self._run(["systemctl", "restart", display_manager_unit], check=False)
+        if self._service_exists(self.config.osworld_graphical_session_service):
+            self._start_graphical_session()
+        else:
+            display_manager_unit = self._resolve_display_manager_service()
+            if display_manager_unit is not None:
+                active = self._run(["systemctl", "is-active", display_manager_unit], check=False)
+                if active.returncode == 0:
+                    self._run(["systemctl", "restart", display_manager_unit], check=False)
         self._start_control_plane_server()
 
     def _resolve_display_manager_service(self) -> str | None:
@@ -467,9 +487,21 @@ class ResetRuntime:
         self._run(["loginctl", "kill-user", self.config.desktop_user, "--signal=KILL"], check=False)
         self._run(["pkill", "-KILL", "-u", self.config.desktop_user], check=False)
 
-    def _assert_no_user_processes(self) -> bool:
-        result = self._run(["pgrep", "-u", self.config.desktop_user], check=False)
-        return result.returncode != 0
+    def _list_user_processes(self) -> list[str]:
+        result = self._run(["pgrep", "-a", "-u", self.config.desktop_user], check=False)
+        if result.returncode != 0:
+            return []
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def _wait_for_no_user_processes(self, timeout: float = 15.0, poll: float = 0.5) -> tuple[bool, list[str]]:
+        deadline = time.time() + timeout
+        last_seen = self._list_user_processes()
+        while time.time() < deadline:
+            if not last_seen:
+                return True, []
+            time.sleep(poll)
+            last_seen = self._list_user_processes()
+        return not last_seen, last_seen
 
     def _umount_home_overlay(self) -> None:
         is_mountpoint, matches, options = self._home_overlay_status()
@@ -620,10 +652,12 @@ class ResetRuntime:
             try:
                 self._write_state(self._result(status="busy", reason_code="resetting").to_dict())
                 self._stop_control_plane_server()
+                self._stop_graphical_session()
                 self._kill_task_user_processes()
-                time.sleep(1.0)
-                if not self._assert_no_user_processes():
+                drained, survivors = self._wait_for_no_user_processes()
+                if not drained:
                     result = self._result(status="error", reason_code="session_stop_failed")
+                    result.details["surviving_processes"] = survivors
                     self._write_state(result.to_dict())
                     return result
 
