@@ -108,6 +108,7 @@ echo "gdm3 shared/default-x-display-manager select gdm3" | debconf-set-selection
 apt-get install -y \
   ubuntu-desktop \
   gdm3 \
+  openbox \
   xinit \
   xvfb \
   dbus-x11 \

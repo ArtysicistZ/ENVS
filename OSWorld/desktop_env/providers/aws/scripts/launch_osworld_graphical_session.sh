@@ -88,6 +88,10 @@ cleanup() {
     kill "${GNOME_PID}" 2>/dev/null || true
     wait "${GNOME_PID}" 2>/dev/null || true
   fi
+  if [ -n "${OPENBOX_PID:-}" ] && kill -0 "${OPENBOX_PID}" 2>/dev/null; then
+    kill "${OPENBOX_PID}" 2>/dev/null || true
+    wait "${OPENBOX_PID}" 2>/dev/null || true
+  fi
   if [ -n "${XVFB_PID:-}" ] && kill -0 "${XVFB_PID}" 2>/dev/null; then
     kill "${XVFB_PID}" 2>/dev/null || true
     wait "${XVFB_PID}" 2>/dev/null || true
@@ -122,6 +126,14 @@ fi
 # the desktop session finishes painting its own background.
 DISPLAY="${DISPLAY_NUM}" xset s off -dpms s noblank >/dev/null 2>&1 || true
 DISPLAY="${DISPLAY_NUM}" xsetroot -solid "#2E3440" -cursor_name left_ptr >/dev/null 2>&1 || true
+
+runuser -u "${DESKTOP_USER}" -- env \
+  DISPLAY="${DISPLAY_NUM}" \
+  HOME="${DESKTOP_HOME}" \
+  XAUTHORITY="${DESKTOP_HOME}/.Xauthority" \
+  XDG_RUNTIME_DIR="${DESKTOP_RUNTIME_DIR}" \
+  openbox --sm-disable &
+OPENBOX_PID=$!
 
 runuser -u "${DESKTOP_USER}" -- env \
   DISPLAY="${DISPLAY_NUM}" \
