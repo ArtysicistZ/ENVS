@@ -5,7 +5,6 @@ from pathlib import Path
 
 
 SERVER_STATE_ROOT_ENV = "OSWORLD_SERVER_STATE_ROOT"
-DEFAULT_SERVER_STATE_ROOT = "/tmp/osworld-server"
 
 
 def user_home() -> Path:
@@ -28,7 +27,17 @@ def resolve_user_path(raw_path: str | os.PathLike[str], *, home: Path | None = N
 
 
 def server_state_root() -> Path:
-    root = Path(os.getenv(SERVER_STATE_ROOT_ENV, DEFAULT_SERVER_STATE_ROOT))
+    configured_root = os.getenv(SERVER_STATE_ROOT_ENV)
+    if configured_root:
+        root = Path(configured_root)
+    else:
+        runtime_dir = os.getenv("XDG_RUNTIME_DIR", "").strip()
+        if not runtime_dir:
+            raise RuntimeError(
+                "OSWORLD_SERVER_STATE_ROOT or XDG_RUNTIME_DIR must be set "
+                "before starting the OSWorld server."
+            )
+        root = Path(runtime_dir) / "osworld-server"
     root.mkdir(parents=True, exist_ok=True)
     return root.resolve(strict=False)
 
