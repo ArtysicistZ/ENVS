@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
 
 cd "${REPO_ROOT}"
+echo "Starting OSWorld reset stack from ${REPO_ROOT}"
 sudo bash "${REPO_ROOT}/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh"
 
 echo
