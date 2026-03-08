@@ -7,6 +7,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AWS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${AWS_DIR}/../../../.." && pwd)"
+if [ -z "${PYTHON_BIN:-}" ]; then
+  if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "${VIRTUAL_ENV}/bin/python" ]; then
+    PYTHON_BIN="${VIRTUAL_ENV}/bin/python"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="$(python -c 'import sys; print(sys.executable)')"
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(python3 -c 'import sys; print(sys.executable)')"
+  else
+    PYTHON_BIN=""
+  fi
+fi
 
 CONTROL_ROOT="${OSWORLD_CONTROL_PLANE_ROOT:-/opt/osworld}"
 RESET_ROOT="${CONTROL_ROOT}/reset"
@@ -29,6 +40,12 @@ DESKTOP_RUNTIME_DIR="/run/user/${DESKTOP_UID}"
 
 if [ -z "${DESKTOP_HOME}" ] || [ ! -d "${DESKTOP_HOME}" ]; then
   echo "Could not determine a valid desktop home for user '${DESKTOP_USER}'" >&2
+  exit 1
+fi
+
+if [ ! -x "${PYTHON_BIN}" ]; then
+  echo "Python interpreter not found or not executable: ${PYTHON_BIN}" >&2
+  echo "Set PYTHON_BIN explicitly before running install_resetd.sh" >&2
   exit 1
 fi
 
@@ -59,6 +76,8 @@ render_unit() {
     -e "s|__DESKTOP_USER__|${DESKTOP_USER}|g" \
     -e "s|__DESKTOP_HOME__|${DESKTOP_HOME}|g" \
     -e "s|__DESKTOP_RUNTIME_DIR__|${DESKTOP_RUNTIME_DIR}|g" \
+    -e "s|__REPO_ROOT__|${REPO_ROOT}|g" \
+    -e "s|__PYTHON_BIN__|${PYTHON_BIN}|g" \
     "${src}" > "${dst}"
 }
 
@@ -79,11 +98,8 @@ restart_or_dump() {
 
 install -d -m 0755 "${RESET_ROOT}" "${SERVER_ROOT}" "$(dirname "${BASELINE_HOME}")" "$(dirname "${BASELINE_DCONF}")" "${STATE_ROOT}" "${SESSION_ROOT}"
 
-echo "[2/6] Copying runtime and server files into ${CONTROL_ROOT}"
-install -m 0644 "${AWS_DIR}/reset_runtime.py" "${RESET_ROOT}/reset_runtime.py"
-install -m 0644 "${AWS_DIR}/reset_daemon.py" "${RESET_ROOT}/reset_daemon.py"
-install -m 0644 "${REPO_ROOT}/OSWorld/desktop_env/server/main.py" "${SERVER_ROOT}/main.py"
-install -m 0644 "${REPO_ROOT}/OSWorld/desktop_env/server/runtime_paths.py" "${SERVER_ROOT}/runtime_paths.py"
+echo "[2/6] Ensuring control directories exist under ${CONTROL_ROOT}"
+install -d -m 0755 "${RESET_ROOT}" "${SERVER_ROOT}"
 
 echo "[3/6] Rendering systemd units"
 install -d -m 0755 /etc/systemd/system
@@ -120,6 +136,6 @@ restart_or_dump osworld-server.service
 OSWORLD_RESET_USER="${DESKTOP_USER}" \
 OSWORLD_RESET_HOME="${DESKTOP_HOME}" \
 OSWORLD_SERVER_URL="http://127.0.0.1:5000" \
-python3 "${RESET_ROOT}/reset_runtime.py" prepare-baseline
+"${PYTHON_BIN}" "${REPO_ROOT}/OSWorld/desktop_env/providers/aws/reset_runtime.py" prepare-baseline
 
 echo "Reset stack install completed."

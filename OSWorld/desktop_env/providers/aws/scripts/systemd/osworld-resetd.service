@@ -19,8 +19,9 @@ Environment=OSWORLD_RESET_DCONF_SNAPSHOT=/opt/osworld/baseline/dconf/user.dconf
 Environment=OSWORLD_RESET_SESSION_ROOT=/var/lib/osworld/session
 Environment=OSWORLD_RESET_STATE_ROOT=/var/lib/osworld-reset
 Environment=OSWORLD_SERVER_URL=http://127.0.0.1:5000
-WorkingDirectory=/opt/osworld/reset
-ExecStart=/usr/bin/python3 /opt/osworld/reset/reset_daemon.py
+Environment=PYTHONPATH=__REPO_ROOT__/OSWorld
+WorkingDirectory=__REPO_ROOT__/OSWorld/desktop_env/providers/aws
+ExecStart=__PYTHON_BIN__ __REPO_ROOT__/OSWorld/desktop_env/providers/aws/reset_daemon.py
 Restart=always
 RestartSec=2
 

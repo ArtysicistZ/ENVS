@@ -15,10 +15,11 @@ Environment=XDG_RUNTIME_DIR=__DESKTOP_RUNTIME_DIR__
 Environment=HOME=__DESKTOP_HOME__
 Environment=XAUTHORITY=__DESKTOP_HOME__/.Xauthority
 Environment=OSWORLD_SERVER_STATE_ROOT=/tmp/osworld-server
+Environment=PYTHONPATH=__REPO_ROOT__/OSWorld
 User=__DESKTOP_USER__
 Group=__DESKTOP_USER__
 WorkingDirectory=__DESKTOP_HOME__
-ExecStart=/usr/bin/python3 /opt/osworld/server/main.py
+ExecStart=__PYTHON_BIN__ __REPO_ROOT__/OSWorld/desktop_env/server/main.py
 Restart=always
 RestartSec=2
 

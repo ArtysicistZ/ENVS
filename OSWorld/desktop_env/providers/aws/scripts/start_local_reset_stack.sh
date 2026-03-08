@@ -4,6 +4,17 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
 CURRENT_PWD="$(pwd -P)"
 DESKTOP_HOME="${OSWORLD_RESET_HOME:-${HOME}}"
+if [ -z "${PYTHON_BIN:-}" ]; then
+  if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "${VIRTUAL_ENV}/bin/python" ]; then
+    PYTHON_BIN="${VIRTUAL_ENV}/bin/python"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="$(python -c 'import sys; print(sys.executable)')"
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(python3 -c 'import sys; print(sys.executable)')"
+  else
+    PYTHON_BIN=""
+  fi
+fi
 
 if [[ "${CURRENT_PWD}" == "${DESKTOP_HOME}" || "${CURRENT_PWD}" == "${DESKTOP_HOME}/"* ]]; then
   cat >&2 <<EOF
@@ -21,7 +32,7 @@ EOF
 fi
 
 echo "Starting OSWorld reset stack from ${REPO_ROOT}"
-sudo bash "${REPO_ROOT}/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh"
+sudo PYTHON_BIN="${PYTHON_BIN}" bash "${REPO_ROOT}/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh"
 
 echo
 echo "Reset daemon health:"
