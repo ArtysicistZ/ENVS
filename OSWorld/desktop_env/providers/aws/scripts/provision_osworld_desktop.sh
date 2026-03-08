@@ -3,6 +3,7 @@ set -euo pipefail
 
 DESKTOP_USER="${1:?desktop user required}"
 DESKTOP_HOME="${2:?desktop home required}"
+PYTHON_BIN="${3:-python3}"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -31,8 +32,14 @@ apt-get install -y \
   xauth \
   x11-xserver-utils \
   xserver-xorg-video-dummy \
+  python3-pip \
   python3-tk \
   python3-dev
+
+if ! "${PYTHON_BIN}" -c "import pyatspi" >/dev/null 2>&1; then
+  echo "[desktop 1b/5] Installing pyatspi2 into ${PYTHON_BIN}"
+  "${PYTHON_BIN}" -m pip install pyatspi2
+fi
 
 echo "[desktop 2/5] Setting multi-user boot target for managed OSWorld session"
 systemctl set-default multi-user.target

@@ -131,6 +131,28 @@ restart_or_dump() {
   exit 1
 }
 
+check_server_python_deps() {
+  local checker="${APP_ROOT}/OSWorld/desktop_env/providers/aws/scripts/check_osworld_server_deps.py"
+  echo "[2b/6] Checking Python dependencies for osworld-server with ${PYTHON_BIN}"
+  if "${PYTHON_BIN}" "${checker}"; then
+    return 0
+  fi
+
+  echo >&2
+  echo "osworld-server Python dependency preflight failed for ${PYTHON_BIN}" >&2
+  echo "The missing modules above must be installed into the same interpreter used by osworld-server." >&2
+  exit 1
+}
+
+ensure_accessibility_python_deps() {
+  if "${PYTHON_BIN}" -c "import pyatspi" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "[2b/6] Installing missing accessibility dependency pyatspi2 into ${PYTHON_BIN}"
+  "${PYTHON_BIN}" -m pip install pyatspi2
+}
+
 wait_for_x_socket() {
   local timeout="${1:-30}"
   local display_num="${2:-:0}"
@@ -227,11 +249,13 @@ if ! has_x_socket "${DISPLAY_NUM}"; then
     fail_no_desktop
   fi
   echo "No live X socket detected; provisioning or refreshing the OSWorld desktop stack"
-  bash "${SCRIPT_DIR}/provision_osworld_desktop.sh" "${DESKTOP_USER}" "${DESKTOP_HOME}"
+  bash "${SCRIPT_DIR}/provision_osworld_desktop.sh" "${DESKTOP_USER}" "${DESKTOP_HOME}" "${PYTHON_BIN}"
 fi
 
 echo "[2/6] Syncing OSWorld control-plane app into ${APP_ROOT}"
 sync_control_plane_app
+ensure_accessibility_python_deps
+check_server_python_deps
 
 echo "[3/6] Rendering systemd units"
 install -d -m 0755 /etc/systemd/system
