@@ -62,7 +62,7 @@ wait_for_health() {
   local timeout="${3:-60}"
   local deadline=$((SECONDS + timeout))
   while [ "${SECONDS}" -lt "${deadline}" ]; do
-    if curl -fsS "${url}" >/dev/null 2>&1; then
+    if curl --max-time 5 -fsS "${url}" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -82,7 +82,7 @@ wait_for_screenshot() {
   tmpfile="$(mktemp)"
   trap 'rm -f "${tmpfile}"' RETURN
   while [ "${SECONDS}" -lt "${deadline}" ]; do
-    if curl -fsS "${url}" -o "${tmpfile}" >/dev/null 2>&1 && [ -s "${tmpfile}" ]; then
+    if curl --max-time 5 -fsS "${url}" -o "${tmpfile}" >/dev/null 2>&1 && [ -s "${tmpfile}" ]; then
       rm -f "${tmpfile}"
       trap - RETURN
       return 0
@@ -96,7 +96,7 @@ wait_for_screenshot() {
   return 1
 }
 
-wait_for_screenshot "http://127.0.0.1:5000/screenshot" 30
+wait_for_screenshot "http://127.0.0.1:5000/screenshot?cursor=0" 30
 
 echo
 echo "Reset daemon health:"

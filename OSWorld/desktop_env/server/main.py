@@ -5,6 +5,7 @@ import shlex
 import json
 import re
 import subprocess, signal
+import sys
 import time
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -389,41 +390,85 @@ def capture_screen_with_cursor():
 
         img.save(file_path)
     elif user_platform == "Linux":
+        include_cursor = request.args.get("cursor", "0") == "1" or os.getenv(
+            "OSWORLD_ENABLE_LINUX_CURSOR_OVERLAY", "0"
+        ) == "1"
         screenshot_captured = False
 
-        # Prefer the desktop-native tool under Xvfb/GNOME because it is more
-        # reliable than pyautogui during service cold-start.
-        for cmd in (["gnome-screenshot", "-f", file_path], ["scrot", file_path]):
+        def _capture_with_command(cmd: list[str], timeout_seconds: int) -> bool:
             try:
                 subprocess.run(
                     cmd,
                     check=True,
-                    timeout=10,
+                    timeout=timeout_seconds,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-                if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                    screenshot_captured = True
-                    break
+                return os.path.exists(file_path) and os.path.getsize(file_path) > 0
             except Exception:
-                continue
+                return False
+
+        def _capture_with_pyautogui_subprocess(timeout_seconds: int) -> bool:
+            # Keep the fallback in a subprocess so a broken GUI stack cannot hang
+            # the server worker indefinitely.
+            pyautogui_capture = (
+                "import sys; "
+                "import pyautogui; "
+                "pyautogui.PAUSE = 0; "
+                "pyautogui.DARWIN_CATCH_UP_TIME = 0; "
+                "img = pyautogui.screenshot(); "
+                "img.save(sys.argv[1])"
+            )
+            try:
+                subprocess.run(
+                    [sys.executable, "-c", pyautogui_capture, file_path],
+                    check=True,
+                    timeout=timeout_seconds,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env={
+                        **os.environ,
+                        "DISPLAY": os.environ.get("DISPLAY", ":0"),
+                        "XAUTHORITY": os.environ.get("XAUTHORITY", ""),
+                        "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", ""),
+                        "HOME": os.environ.get("HOME", DEFAULT_WORKDIR),
+                    },
+                )
+                return os.path.exists(file_path) and os.path.getsize(file_path) > 0
+            except Exception:
+                return False
+
+        # Prefer desktop-native tools under Xvfb/GNOME. They are more reliable
+        # than direct GUI library capture during service cold-start.
+        for cmd in (["gnome-screenshot", "-f", file_path], ["scrot", file_path]):
+            if _capture_with_command(cmd, timeout_seconds=5):
+                screenshot_captured = True
+                break
+
+        if not screenshot_captured and _capture_with_pyautogui_subprocess(timeout_seconds=5):
+            screenshot_captured = True
 
         if not screenshot_captured:
-            screenshot = pyautogui.screenshot()
-            screenshot.save(file_path)
+            return jsonify({
+                "status": "error",
+                "message": "Unable to capture screenshot on Linux",
+            }), 503
 
-        # Best-effort cursor overlay. Do not fail the whole endpoint if cursor
-        # capture is unavailable or slow on the VM.
-        try:
-            cursor_obj = Xcursor()
-            imgarray = cursor_obj.getCursorImageArrayFast()
-            cursor_img = Image.fromarray(imgarray)
-            screenshot = Image.open(file_path).convert("RGBA")
-            cursor_x, cursor_y = pyautogui.position()
-            screenshot.paste(cursor_img, (cursor_x, cursor_y), cursor_img)
-            screenshot.save(file_path)
-        except Exception as e:
-            logger.warning(f"Failed to capture cursor on Linux, screenshot will not have a cursor. Error: {e}")
+        # Cursor overlay is optional on Linux. It is disabled by default because
+        # cursor/Xlib access is a frequent source of cold-start hangs under
+        # Xvfb-backed sessions. The main screenshot path should remain fast and
+        # reliable even if cursor capture is unavailable.
+        if include_cursor:
+            try:
+                cursor_obj = Xcursor()
+                imgarray = cursor_obj.getCursorImageArrayFast()
+                cursor_img = Image.fromarray(imgarray)
+                screenshot = Image.open(file_path).convert("RGBA")
+                cursor_x, cursor_y = pyautogui.position()
+                screenshot.paste(cursor_img, (cursor_x, cursor_y), cursor_img)
+                screenshot.save(file_path)
+            except Exception as e:
+                logger.warning(f"Failed to capture cursor on Linux, screenshot will not have a cursor. Error: {e}")
     elif user_platform == "Darwin":  # (Mac OS)
         # Use the screencapture utility to capture the screen with the cursor
         subprocess.run(["screencapture", "-C", file_path])
