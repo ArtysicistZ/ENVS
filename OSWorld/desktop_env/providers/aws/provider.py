@@ -9,7 +9,12 @@ from datetime import datetime, timedelta, timezone
 from desktop_env.providers.base import Provider
 
 # TTL configuration
-from desktop_env.providers.aws.config import ENABLE_TTL, DEFAULT_TTL_MINUTES, AWS_SCHEDULER_ROLE_ARN
+from desktop_env.providers.aws.config import (
+    AWS_RESETD_PORT,
+    AWS_SCHEDULER_ROLE_ARN,
+    DEFAULT_TTL_MINUTES,
+    ENABLE_TTL,
+)
 from desktop_env.providers.aws.scheduler_utils import schedule_instance_termination
 from desktop_env.providers.aws import vm_reset
 
@@ -25,21 +30,37 @@ VM_READY_POLL = 10      # poll interval in seconds
 class AWSProvider(Provider):
 
     def _wait_for_vm_server(self, ip: str, port: int = 5000):
-        """Wait until the OSWorld HTTP server inside the VM is reachable on port 5000."""
-        url = f"http://{ip}:{port}/screenshot"
+        """Wait until the OSWorld HTTP server inside the VM is reachable."""
+        health_url = f"http://{ip}:{port}/health"
+        screenshot_url = f"http://{ip}:{port}/screenshot"
         deadline = time.time() + VM_READY_TIMEOUT
-        logger.info(f"Waiting for VM server at {url} (timeout={VM_READY_TIMEOUT}s)...")
+        logger.info(
+            "Waiting for VM server at %s (fallback %s, timeout=%ss)...",
+            health_url,
+            screenshot_url,
+            VM_READY_TIMEOUT,
+        )
         while time.time() < deadline:
             try:
-                r = requests.get(url, timeout=5)
+                r = requests.get(health_url, timeout=5)
                 if r.status_code == 200:
-                    logger.info(f"VM server at {url} is ready.")
+                    logger.info(f"VM server at {health_url} is ready.")
+                    return
+            except Exception:
+                pass
+            try:
+                r = requests.get(screenshot_url, timeout=5)
+                if r.status_code == 200:
+                    logger.info(f"VM server at {screenshot_url} is ready.")
                     return
             except Exception:
                 pass
             logger.info(f"VM not ready yet, retrying in {VM_READY_POLL}s...")
             time.sleep(VM_READY_POLL)
-        raise TimeoutError(f"VM server at {url} did not become ready within {VM_READY_TIMEOUT}s")
+        raise TimeoutError(
+            f"VM server at {health_url} (fallback {screenshot_url}) "
+            f"did not become ready within {VM_READY_TIMEOUT}s"
+        )
 
     def start_emulator(self, path_to_vm: str, headless: bool, *args, **kwargs):
         logger.info("Starting AWS VM...")
@@ -97,9 +118,9 @@ class AWSProvider(Provider):
                     if private_ip_address:
                         self._wait_for_vm_server(private_ip_address)
                         try:
-                            vm_reset.snapshot_home(private_ip_address)
+                            vm_reset.snapshot_home(private_ip_address, path_to_vm, port=AWS_RESETD_PORT)
                         except Exception as e:
-                            logger.warning(f"Failed to create snapshot on {private_ip_address}: {e}")
+                            logger.warning(f"Failed to prepare reset baseline on {private_ip_address}: {e}")
 
                     return private_ip_address
             return ''
@@ -133,10 +154,22 @@ class AWSProvider(Provider):
             private_ip = instance.get('PrivateIpAddress', '')
 
             if state == 'running' and private_ip:
-                logger.info(f"Soft-resetting {path_to_vm} at {private_ip} (skipping terminate+relaunch)...")
-                vm_reset.soft_reset(private_ip)
-                logger.info(f"Soft reset complete. Reusing instance {path_to_vm}.")
-                return path_to_vm
+                logger.info(f"Soft-resetting {path_to_vm} at {private_ip} via reset daemon...")
+                reset_result = vm_reset.soft_reset(private_ip, path_to_vm, vm_reset.ResetClientConfig(port=AWS_RESETD_PORT))
+                if reset_result.get("status") == "reused_clean":
+                    logger.info(
+                        "Soft reset complete for %s: %s (%s). Reusing instance.",
+                        path_to_vm,
+                        reset_result.get("status"),
+                        reset_result.get("reason_code"),
+                    )
+                    return path_to_vm
+                logger.warning(
+                    "Soft reset requested relaunch for %s: reason=%s details=%s",
+                    path_to_vm,
+                    reset_result.get("reason_code"),
+                    reset_result.get("details"),
+                )
             else:
                 logger.info(f"Instance {path_to_vm} is in state '{state}'; falling back to full relaunch.")
         except Exception as e:

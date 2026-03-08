@@ -93,3 +93,36 @@ Enter your credentials as required. This setup will allow you to interact with A
 Use the provided scripts and configurations at your own risk. Ensure that you understand the AWS pricing model and potential costs associated with deploying instances, as using these scripts might result in charges on your AWS account.
 
 > **Note:**  Ensure all AMI images used in `IMAGE_ID_MAP` are accessible and permissioned correctly for your AWS account, and that they are available in the specified region.
+
+## Direct Start On A Desktop VM
+
+If you are logged into the actual OSWorld desktop VM and want to start the new
+overlay-backed reset stack directly on that VM, run:
+
+```bash
+bash /home/kevinzyz/yincheng/arpo/OSWorld/desktop_env/providers/aws/scripts/start_local_reset_stack.sh
+```
+
+This wrapper will:
+
+- install/update the clean-room reset runtime under `/opt/osworld`
+- install/update the `systemd` units
+- mount the disposable `/home/user` overlay
+- start `osworld-resetd` on `5001`
+- start `osworld-server` on `5000`
+- print both health checks and service status
+
+If you prefer the raw one-liner, it is:
+
+```bash
+sudo bash /home/kevinzyz/yincheng/arpo/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh
+```
+
+Then verify:
+
+```bash
+curl http://127.0.0.1:5001/health
+curl http://127.0.0.1:5000/health
+```
+
+This is for the desktop VM itself, not the trainer/A100 host.

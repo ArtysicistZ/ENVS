@@ -1,99 +1,234 @@
-"""VM soft-reset logic: snapshot clean state on first boot, restore on each reset.
+"""Host-side client for the AWS reset daemon.
 
-Handles: home directory, dconf/gsettings, dpkg packages, pip packages,
-user accounts, /home directories, clipboard, /tmp, and process cleanup.
+The reset daemon runs inside the VM on a dedicated port and owns the clean-room
+workspace rollback lifecycle. The host provider only orchestrates:
+
+1. baseline preparation validation
+2. reset request
+3. verification request
+4. fallback-to-relaunch when any phase is not provably clean
 """
-import base64
+
+from __future__ import annotations
+
+import contextlib
+import fcntl
+import json
 import logging
 import os
+from dataclasses import dataclass
+from typing import Any
+
 import requests
+
+from .config import AWS_RESETD_PORT, AWS_RESETD_REQUEST_TIMEOUT
 
 logger = logging.getLogger("desktopenv.providers.aws.vm_reset")
 
-_SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "scripts")
 
-SUDO_PASSWORD = "osworld-public-evaluation"
-
-# Track which VMs already have a clean snapshot
-_snapshot_ready: dict = {}  # ip -> True
-
-
-def _load_script(name: str) -> str:
-    path = os.path.join(_SCRIPTS_DIR, name)
-    with open(path) as f:
-        return f.read()
+@dataclass(frozen=True)
+class ResetClientConfig:
+    port: int = AWS_RESETD_PORT
+    timeout: int = AWS_RESETD_REQUEST_TIMEOUT
 
 
-def _exec_in_vm(ip: str, cmd: str, port: int = 5000, timeout: int = 30) -> dict:
-    """Execute a shell command inside the VM via its HTTP API."""
-    url = f"http://{ip}:{port}/setup/execute"
-    resp = requests.post(url, json={"command": cmd, "shell": True}, timeout=timeout)
-    if resp.status_code != 200:
-        raise RuntimeError(f"VM exec returned HTTP {resp.status_code}: {resp.text[:200]}")
-    return resp.json()
+def _daemon_base_url(ip: str, port: int) -> str:
+    return f"http://{ip}:{port}"
 
 
-def _write_and_run_script(ip: str, script: str, port: int = 5000, timeout: int = 60) -> dict:
-    """Write a bash script to the VM via base64 and execute it with sudo."""
-    encoded = base64.b64encode(script.encode()).decode()
-    write_cmd = f"echo {encoded} | base64 -d > /tmp/_arpo_script.sh && chmod +x /tmp/_arpo_script.sh"
-    _exec_in_vm(ip, write_cmd, port, timeout=15)
-    run_cmd = f"echo '{SUDO_PASSWORD}' | sudo -S bash /tmp/_arpo_script.sh"
-    return _exec_in_vm(ip, run_cmd, port, timeout=timeout)
+def _result(
+    *,
+    status: str,
+    reason_code: str,
+    instance_id: str,
+    details: dict[str, Any] | None = None,
+    baseline_version: str = "unknown",
+    reset_generation: int = 0,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "reason_code": reason_code,
+        "details": details or {},
+        "instance_id": instance_id,
+        "baseline_version": baseline_version,
+        "reset_generation": reset_generation,
+    }
 
 
-def snapshot_home(ip: str, port: int = 5000):
-    """One-time: snapshot /home/user, dpkg, pip, user accounts, dconf.
-
-    Idempotent — skips if /home/user_clean already exists on the VM.
-    """
-    if _snapshot_ready.get(ip):
-        return
-
-    # Check for the integrity marker file, not just directory existence.
-    # If snapshot.sh was interrupted mid-copy, the directory exists but is incomplete.
-    result = _exec_in_vm(ip, "test -f /home/user_clean/.snapshot_complete && echo EXISTS || echo MISSING", port)
-    if "EXISTS" in result.get("output", ""):
-        logger.info(f"Snapshot /home/user_clean already exists on {ip}; skipping creation.")
-        _snapshot_ready[ip] = True
-        return
-
-    logger.info(f"Creating clean-state snapshot on {ip}...")
-    script = _load_script("snapshot.sh")
-    result = _write_and_run_script(ip, script, port, timeout=60)
-    if "SNAPSHOT_DONE" in result.get("output", ""):
-        logger.info(f"Clean-state snapshot created on {ip}.")
-        _snapshot_ready[ip] = True
-    else:
-        logger.warning(f"Snapshot creation may have failed on {ip}: {result}")
+def _request_json(
+    *,
+    method: str,
+    ip: str,
+    endpoint: str,
+    payload: dict[str, Any] | None,
+    config: ResetClientConfig,
+) -> dict[str, Any]:
+    url = f"{_daemon_base_url(ip, config.port)}{endpoint}"
+    response = requests.request(method, url, json=payload, timeout=config.timeout)
+    response.raise_for_status()
+    return response.json()
 
 
-def restore_home(ip: str, port: int = 5000):
-    """Restore VM to clean snapshot state. Raises RuntimeError on failure."""
-    script = _load_script("restore.sh")
-    result = _write_and_run_script(ip, script, port, timeout=180)
-    output = result.get("output", "")
-    if "RESTORE_FAILED" in output:
-        raise RuntimeError(f"Restore script reported failure on {ip}: {output}")
-    if "RESTORE_DONE" not in output:
-        raise RuntimeError(f"Home restore failed on {ip}: {result}")
-    logger.info(f"Clean-state restore complete on {ip}.")
+@contextlib.contextmanager
+def _instance_lock(instance_id: str):
+    lock_dir = "/tmp/osworld-reset-locks"
+    os.makedirs(lock_dir, exist_ok=True)
+    lock_path = os.path.join(lock_dir, f"{instance_id}.lock")
+    with open(lock_path, "w", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def soft_reset(ip: str, port: int = 5000):
-    """Kill task processes and restore VM to clean snapshot state.
+def _normalize_daemon_response(
+    response: dict[str, Any], *, default_status: str, default_reason: str, instance_id: str
+) -> dict[str, Any]:
+    return _result(
+        status=response.get("status", default_status),
+        reason_code=response.get("reason_code", default_reason),
+        instance_id=response.get("instance_id", instance_id),
+        details=response.get("details", {}),
+        baseline_version=response.get("baseline_version", "unknown"),
+        reset_generation=int(response.get("reset_generation", 0) or 0),
+    )
 
-    Falls back to kill-only if no snapshot is available.
-    Raises RuntimeError if restore fails (caller should fall back to full relaunch).
-    """
-    if _snapshot_ready.get(ip):
-        restore_home(ip, port)
-    else:
-        # No snapshot — use conservative app-name pattern to avoid killing desktop infrastructure
-        kill_cmd = (
-            "pkill -9 -f 'google-chrome|chrome|chromium|firefox|libreoffice|soffice|vlc|gedit|"
-            "mousepad|thunar|nautilus|nemo|evince|eog|gimp|inkscape|code|kate|xed|socat' "
-            "2>/dev/null || true; sleep 1"
+
+def get_state(ip: str, instance_id: str, config: ResetClientConfig | None = None) -> dict[str, Any]:
+    config = config or ResetClientConfig()
+    try:
+        response = _request_json(method="GET", ip=ip, endpoint="/state", payload=None, config=config)
+        return _normalize_daemon_response(response, default_status="ok", default_reason="state_available", instance_id=instance_id)
+    except Exception as exc:
+        logger.warning("Reset daemon state unavailable for %s at %s: %s", instance_id, ip, exc)
+        return _result(
+            status="error",
+            reason_code="daemon_unreachable",
+            instance_id=instance_id,
+            details={"error": str(exc)},
         )
-        _exec_in_vm(ip, kill_cmd, port, timeout=15)
-        logger.warning(f"No snapshot available for {ip}; kill-only soft reset (dirty state).")
+
+
+def prepare_baseline(ip: str, instance_id: str, config: ResetClientConfig | None = None) -> dict[str, Any]:
+    config = config or ResetClientConfig()
+    payload = {"instance_id": instance_id}
+    try:
+        response = _request_json(method="POST", ip=ip, endpoint="/prepare_baseline", payload=payload, config=config)
+        result = _normalize_daemon_response(
+            response,
+            default_status="ok",
+            default_reason="baseline_ready",
+            instance_id=instance_id,
+        )
+        logger.info(
+            "Reset baseline preparation for %s on %s: %s (%s)",
+            instance_id,
+            ip,
+            result["status"],
+            result["reason_code"],
+        )
+        return result
+    except Exception as exc:
+        logger.warning("Reset baseline preparation failed for %s on %s: %s", instance_id, ip, exc)
+        return _result(
+            status="error",
+            reason_code="daemon_unreachable",
+            instance_id=instance_id,
+            details={"error": str(exc)},
+        )
+
+
+def snapshot_home(ip: str, instance_id: str, port: int = AWS_RESETD_PORT) -> dict[str, Any]:
+    """Compatibility alias for older callers.
+
+    The new architecture no longer snapshots runtime state. This validates that
+    the image-baked baseline is present and that daemon metadata is ready.
+    """
+    return prepare_baseline(ip, instance_id, ResetClientConfig(port=port))
+
+
+def restore_home(ip: str, instance_id: str, port: int = AWS_RESETD_PORT) -> dict[str, Any]:
+    """Compatibility alias for explicit restore+verify callers."""
+    return soft_reset(ip, instance_id, ResetClientConfig(port=port))
+
+
+def soft_reset(ip: str, instance_id: str, config: ResetClientConfig | None = None) -> dict[str, Any]:
+    """Attempt a verified soft reset.
+
+    Returns a structured outcome dict. The provider should reuse the instance
+    only when `status == "reused_clean"`. All other outcomes must fall back to
+    full terminate+relaunch.
+    """
+    config = config or ResetClientConfig()
+    payload = {"instance_id": instance_id}
+
+    with _instance_lock(instance_id):
+        try:
+            reset_response = _request_json(method="POST", ip=ip, endpoint="/reset", payload=payload, config=config)
+            reset_result = _normalize_daemon_response(
+                reset_response,
+                default_status="ok",
+                default_reason="reset_completed",
+                instance_id=instance_id,
+            )
+        except Exception as exc:
+            logger.warning("Reset daemon reset call failed for %s on %s: %s", instance_id, ip, exc)
+            return _result(
+                status="must_relaunch",
+                reason_code="daemon_unreachable",
+                instance_id=instance_id,
+                details={"error": str(exc)},
+            )
+
+        if reset_result["status"] != "ok":
+            return _result(
+                status="must_relaunch",
+                reason_code=reset_result["reason_code"],
+                instance_id=instance_id,
+                details=reset_result["details"],
+                baseline_version=reset_result["baseline_version"],
+                reset_generation=reset_result["reset_generation"],
+            )
+
+        try:
+            verify_response = _request_json(method="POST", ip=ip, endpoint="/verify", payload=payload, config=config)
+            verify_result = _normalize_daemon_response(
+                verify_response,
+                default_status="ok",
+                default_reason="verified_clean",
+                instance_id=instance_id,
+            )
+        except Exception as exc:
+            logger.warning("Reset daemon verify call failed for %s on %s: %s", instance_id, ip, exc)
+            return _result(
+                status="must_relaunch",
+                reason_code="verification_unreachable",
+                instance_id=instance_id,
+                details={"error": str(exc)},
+                baseline_version=reset_result["baseline_version"],
+                reset_generation=reset_result["reset_generation"],
+            )
+
+        if verify_result["status"] == "ok":
+            return _result(
+                status="reused_clean",
+                reason_code="verified_clean",
+                instance_id=instance_id,
+                details=verify_result["details"],
+                baseline_version=verify_result["baseline_version"],
+                reset_generation=verify_result["reset_generation"],
+            )
+
+        return _result(
+            status="must_relaunch",
+            reason_code=verify_result["reason_code"],
+            instance_id=instance_id,
+            details=verify_result["details"],
+            baseline_version=verify_result["baseline_version"],
+            reset_generation=verify_result["reset_generation"],
+        )
+
+
+def pretty_json(data: dict[str, Any]) -> str:
+    return json.dumps(data, indent=2, sort_keys=True)

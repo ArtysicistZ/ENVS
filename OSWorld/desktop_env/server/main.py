@@ -58,6 +58,7 @@ else:
     BaseWrapper = Any
 
 from pyxcursor import Xcursor
+from runtime_paths import resolve_user_path, server_artifact_path, user_home
 
 # todo: need to reformat and organize this whole file
 
@@ -70,7 +71,13 @@ TIMEOUT = 1800  # seconds
 
 logger = app.logger
 recording_process = None  # fixme: this is a temporary solution for recording, need to be changed to support multiple-process
-recording_path = "/tmp/recording.mp4"
+recording_path = server_artifact_path("recording.mp4").as_posix()
+DEFAULT_WORKDIR = user_home().as_posix()
+
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"})
 
 
 @app.route('/setup/execute', methods=['POST'])
@@ -102,6 +109,7 @@ def execute_command():
             shell=shell,
             text=True,
             timeout=120,
+            cwd=DEFAULT_WORKDIR,
             creationflags=flags,
         )
         return jsonify({
@@ -149,6 +157,7 @@ def execute_command_with_verification():
             shell=shell,
             text=True,
             timeout=120,
+            cwd=DEFAULT_WORKDIR,
             creationflags=flags,
         )
         
@@ -254,7 +263,7 @@ def launch_app():
         if 'google-chrome' in command and _get_machine_architecture() == 'arm':
             index = command.index('google-chrome')
             command[index] = 'chromium'  # arm64 chrome is not available yet, can only use chromium
-        subprocess.Popen(command, shell=shell)
+        subprocess.Popen(command, shell=shell, cwd=DEFAULT_WORKDIR)
         return "{:} launched successfully".format(command if shell else " ".join(command))
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -264,7 +273,7 @@ def launch_app():
 def capture_screen_with_cursor():
     # fixme: when running on virtual machines, the cursor is not captured, don't know why
 
-    file_path = os.path.join(os.path.dirname(__file__), "screenshots", "screenshot.png")
+    file_path = server_artifact_path("screenshots", "screenshot.png").as_posix()
     user_platform = platform.system()
 
     # Ensure the screenshots directory exists
@@ -1116,7 +1125,7 @@ def get_directory_tree():
     if 'path' not in data:
         return jsonify(error="Missing 'path' parameter"), 400
 
-    start_path = data['path']
+    start_path = resolve_user_path(data['path']).as_posix()
     # Ensure the provided path is a directory
     if not os.path.isdir(start_path):
         return jsonify(error="The provided path is not a directory"), 400
@@ -1130,7 +1139,7 @@ def get_directory_tree():
 def get_file():
     # Retrieve filename from the POST request
     if 'file_path' in request.form:
-        file_path = os.path.expandvars(os.path.expanduser(request.form['file_path']))
+        file_path = resolve_user_path(request.form['file_path']).as_posix()
     else:
         return jsonify({"error": "file_path is required"}), 400
 
@@ -1156,7 +1165,7 @@ def get_file():
 def upload_file():
     # Retrieve filename from the POST request
     if 'file_path' in request.form and 'file_data' in request.files:
-        file_path = os.path.expandvars(os.path.expanduser(request.form['file_path']))
+        file_path = resolve_user_path(request.form['file_path']).as_posix()
         file = request.files["file_data"]
         
         try:
@@ -1203,7 +1212,7 @@ def change_wallpaper():
     if not path:
         return "Path not supplied!", 400
 
-    path = Path(os.path.expandvars(os.path.expanduser(path)))
+    path = resolve_user_path(path)
 
     if not path.exists():
         return f"File not found: {path}", 404
@@ -1234,7 +1243,7 @@ def download_file():
     if not url or not path:
         return "Path or URL not supplied!", 400
 
-    path = Path(os.path.expandvars(os.path.expanduser(path)))
+    path = resolve_user_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     max_retries = 3
@@ -1290,7 +1299,7 @@ def open_file():
     if not path:
         return "Path not supplied!", 400
 
-    path_obj = Path(os.path.expandvars(os.path.expanduser(path)))
+    path_obj = resolve_user_path(path)
 
     # Check if it's a file path that exists
     is_file_path = path_obj.exists()
@@ -1680,7 +1689,7 @@ def run_bash_script():
     
     # Expand user directory if provided
     if working_dir:
-        working_dir = os.path.expanduser(working_dir)
+        working_dir = resolve_user_path(working_dir).as_posix()
         if not os.path.exists(working_dir):
             return jsonify({
                 'status': 'error',

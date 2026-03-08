@@ -1,0 +1,26 @@
+[Unit]
+Description=OSWorld control-plane server
+After=network-online.target graphical.target
+Wants=network-online.target
+Requires=osworld-home-overlay.service
+After=osworld-home-overlay.service
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=DISPLAY=:0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=__DESKTOP_RUNTIME_DIR__/bus
+Environment=XDG_RUNTIME_DIR=__DESKTOP_RUNTIME_DIR__
+Environment=HOME=__DESKTOP_HOME__
+Environment=XAUTHORITY=__DESKTOP_HOME__/.Xauthority
+Environment=OSWORLD_SERVER_STATE_ROOT=/tmp/osworld-server
+User=__DESKTOP_USER__
+Group=__DESKTOP_USER__
+WorkingDirectory=__DESKTOP_HOME__
+ExecStart=/usr/bin/python3 /opt/osworld/server/main.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

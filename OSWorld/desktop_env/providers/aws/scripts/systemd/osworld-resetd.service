@@ -1,0 +1,27 @@
+[Unit]
+Description=OSWorld clean-room reset daemon
+After=network-online.target
+Wants=network-online.target
+Requires=osworld-home-overlay.service
+After=osworld-home-overlay.service
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=AWS_RESETD_PORT=5001
+Environment=OSWORLD_RESET_BIND=0.0.0.0
+Environment=OSWORLD_CONTROL_PLANE_ROOT=/opt/osworld
+Environment=OSWORLD_RESET_HOME=__DESKTOP_HOME__
+Environment=OSWORLD_RESET_BASELINE_HOME=/opt/osworld/baseline/home-user
+Environment=OSWORLD_RESET_DCONF_SNAPSHOT=/opt/osworld/baseline/dconf/user.dconf
+Environment=OSWORLD_RESET_SESSION_ROOT=/var/lib/osworld/session
+Environment=OSWORLD_RESET_STATE_ROOT=/var/lib/osworld-reset
+Environment=OSWORLD_SERVER_URL=http://127.0.0.1:5000
+WorkingDirectory=/opt/osworld/reset
+ExecStart=/usr/bin/python3 /opt/osworld/reset/reset_daemon.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
