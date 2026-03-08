@@ -14,12 +14,14 @@ Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=__DESKTOP_RUNTIME_DIR__/bus
 Environment=XDG_RUNTIME_DIR=__DESKTOP_RUNTIME_DIR__
 Environment=HOME=__DESKTOP_HOME__
 Environment=XAUTHORITY=__DESKTOP_HOME__/.Xauthority
-Environment=OSWORLD_SERVER_STATE_ROOT=/tmp/osworld-server
+Environment=OSWORLD_SERVER_STATE_ROOT=/run/osworld-server
 Environment=OSWORLD_CONTROL_PLANE_ROOT=__CONTROL_PLANE_HASH_ROOT__
 Environment=OSWORLD_CONTROL_PLANE_STAMP_PATH=__CONTROL_PLANE_STAMP_PATH__
 Environment=PYTHONPATH=__APP_ROOT__/OSWorld:__SYSTEM_DIST_PACKAGES__
 User=__DESKTOP_USER__
 Group=__DESKTOP_USER__
+RuntimeDirectory=osworld-server
+RuntimeDirectoryMode=0700
 WorkingDirectory=__DESKTOP_HOME__
 ExecStart=__PYTHON_BIN__ __APP_ROOT__/OSWorld/desktop_env/providers/aws/scripts/start_osworld_server.py __PYTHON_BIN__ __APP_ROOT__/OSWorld/desktop_env/server/main.py
 Restart=always
