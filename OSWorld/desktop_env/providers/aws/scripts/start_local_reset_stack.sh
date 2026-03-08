@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
 CURRENT_PWD="$(pwd -P)"
+START_TS="${SECONDS}"
 DESKTOP_USER="${OSWORLD_RESET_USER:-user}"
 DESKTOP_HOME="${OSWORLD_RESET_HOME:-/home/${DESKTOP_USER}}"
 if [[ "${DESKTOP_HOME}" == "/home/ubuntu" || "${DESKTOP_HOME}" == /home/ubuntu/* ]]; then
@@ -73,6 +74,30 @@ wait_for_health() {
 wait_for_health "http://127.0.0.1:5001/health" "reset daemon" 30
 wait_for_health "http://127.0.0.1:5000/health" "OSWorld server" 90
 
+wait_for_screenshot() {
+  local url="$1"
+  local timeout="${2:-30}"
+  local deadline=$((SECONDS + timeout))
+  local tmpfile
+  tmpfile="$(mktemp)"
+  trap 'rm -f "${tmpfile}"' RETURN
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
+    if curl -fsS "${url}" -o "${tmpfile}" >/dev/null 2>&1 && [ -s "${tmpfile}" ]; then
+      rm -f "${tmpfile}"
+      trap - RETURN
+      return 0
+    fi
+    : > "${tmpfile}"
+    sleep 1
+  done
+  rm -f "${tmpfile}"
+  trap - RETURN
+  echo "Timed out waiting for screenshot readiness at ${url}" >&2
+  return 1
+}
+
+wait_for_screenshot "http://127.0.0.1:5000/screenshot" 30
+
 echo
 echo "Reset daemon health:"
 curl http://127.0.0.1:5001/health
@@ -84,3 +109,5 @@ echo
 echo
 echo "Services:"
 sudo systemctl --no-pager --full status osworld-home-overlay.service osworld-resetd.service osworld-server.service
+echo
+echo "Cold start completed in $((SECONDS - START_TS))s"
