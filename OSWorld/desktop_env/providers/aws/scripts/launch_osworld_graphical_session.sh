@@ -13,10 +13,25 @@ XDG_CACHE_HOME="${DESKTOP_HOME}/.cache"
 XDG_DATA_HOME="${DESKTOP_HOME}/.local/share"
 XDG_STATE_HOME="${DESKTOP_HOME}/.local/state"
 
+install_autostart_override() {
+  local desktop_file="$1"
+  local override_dir="${XDG_CONFIG_HOME}/autostart"
+  local override_path="${override_dir}/${desktop_file}"
+  cat > "${override_path}" <<EOF
+[Desktop Entry]
+Type=Application
+Name=${desktop_file}
+Hidden=true
+X-GNOME-Autostart-enabled=false
+EOF
+  chown "${DESKTOP_USER}:${DESKTOP_USER}" "${override_path}"
+}
+
 ensure_writable_session_home() {
   local paths=(
     "${DESKTOP_HOME}"
     "${XDG_CONFIG_HOME}"
+    "${XDG_CONFIG_HOME}/autostart"
     "${XDG_CONFIG_HOME}/mutter"
     "${XDG_CONFIG_HOME}/mutter/sessions"
     "${XDG_CACHE_HOME}"
@@ -49,6 +64,11 @@ ensure_writable_session_home() {
     ls -ld "${DESKTOP_HOME}" "${DESKTOP_HOME}/.local" "${XDG_DATA_HOME}" >&2 || true
     exit 1
   fi
+
+  install_autostart_override "gnome-initial-setup-first-login.desktop"
+  install_autostart_override "gnome-initial-setup-copy-worker.desktop"
+  install_autostart_override "update-notifier.desktop"
+  install_autostart_override "tracker-miner-fs-3.desktop"
 }
 
 cleanup() {
