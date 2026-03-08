@@ -20,7 +20,6 @@ EOF
   exit 1
 fi
 
-cd "${REPO_ROOT}"
 echo "Starting OSWorld reset stack from ${REPO_ROOT}"
 sudo bash "${REPO_ROOT}/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh"
 
