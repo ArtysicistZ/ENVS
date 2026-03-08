@@ -101,6 +101,7 @@ class TestAWSResetRuntime(unittest.TestCase):
         self.config = ResetConfig(
             desktop_user="user",
             workspace_home=self.workspace_home,
+            allow_unsafe_home=True,
             control_plane_root=self.control_plane_root,
             baseline_home=self.baseline_home,
             dconf_snapshot=self.dconf_snapshot,
@@ -192,6 +193,54 @@ class TestAWSResetRuntime(unittest.TestCase):
 
         verify = self.runtime.verify()
         self.assertEqual(verify.status, "ok")
+
+    def test_prepare_baseline_rejects_non_isolated_target_by_default(self):
+        config = ResetConfig(
+            desktop_user="ubuntu",
+            workspace_home=Path("/home/ubuntu"),
+            allow_unsafe_home=False,
+            control_plane_root=self.control_plane_root,
+            baseline_home=self.baseline_home,
+            dconf_snapshot=self.dconf_snapshot,
+            session_root=self.session_root,
+            state_root=self.state_root / "unsafe",
+            metadata_path=self.state_root / "unsafe" / "metadata.json",
+            state_path=self.state_root / "unsafe" / "state.json",
+            lock_path=self.state_root / "unsafe" / "reset.lock",
+            baseline_manifest_path=self.state_root / "unsafe" / "baseline_home_manifest.json",
+            control_plane_stamp_path=self.state_root / "unsafe" / "control_plane_build_id",
+            taint_marker_path=self.state_root / "unsafe" / "system_taint.json",
+            reset_generation_path=self.state_root / "unsafe" / "generation.txt",
+        )
+        runtime = FakeResetRuntime(config)
+        prepared = runtime.prepare_baseline()
+        self.assertEqual(prepared.status, "error")
+        self.assertEqual(prepared.reason_code, "unsafe_workspace_target")
+        self.assertIn("/home/ubuntu", prepared.details["error"])
+
+    def test_prepare_baseline_rejects_ubuntu_home_even_with_unsafe_override(self):
+        config = ResetConfig(
+            desktop_user="ubuntu",
+            workspace_home=Path("/home/ubuntu"),
+            allow_unsafe_home=True,
+            control_plane_root=self.control_plane_root,
+            baseline_home=self.baseline_home,
+            dconf_snapshot=self.dconf_snapshot,
+            session_root=self.session_root,
+            state_root=self.state_root / "unsafe-override",
+            metadata_path=self.state_root / "unsafe-override" / "metadata.json",
+            state_path=self.state_root / "unsafe-override" / "state.json",
+            lock_path=self.state_root / "unsafe-override" / "reset.lock",
+            baseline_manifest_path=self.state_root / "unsafe-override" / "baseline_home_manifest.json",
+            control_plane_stamp_path=self.state_root / "unsafe-override" / "control_plane_build_id",
+            taint_marker_path=self.state_root / "unsafe-override" / "system_taint.json",
+            reset_generation_path=self.state_root / "unsafe-override" / "generation.txt",
+        )
+        runtime = FakeResetRuntime(config)
+        prepared = runtime.prepare_baseline()
+        self.assertEqual(prepared.status, "error")
+        self.assertEqual(prepared.reason_code, "unsafe_workspace_target")
+        self.assertIn("/home/ubuntu", prepared.details["error"])
 
 
 if __name__ == "__main__":

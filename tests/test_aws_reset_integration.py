@@ -142,6 +142,7 @@ class TestAWSResetIntegration(unittest.TestCase):
             ResetConfig(
                 desktop_user="user",
                 workspace_home=self.workspace_home,
+                allow_unsafe_home=True,
                 control_plane_root=self.control_plane_root,
                 baseline_home=self.baseline_home,
                 dconf_snapshot=self.dconf_snapshot,

@@ -56,6 +56,10 @@ def _normalize_ignored_paths() -> tuple[str, ...]:
     return tuple(dict.fromkeys(merged))
 
 
+def _env_flag(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _path_matches_ignored(rel_path: str, ignored_relative_paths: tuple[str, ...]) -> bool:
     return any(rel_path == ignored or rel_path.startswith(f"{ignored}/") for ignored in ignored_relative_paths)
 
@@ -73,6 +77,7 @@ def _path_is_allowed_runtime_artifact(rel_path: str, ignored_relative_paths: tup
 class ResetConfig:
     desktop_user: str = os.getenv("OSWORLD_RESET_USER", "user")
     workspace_home: Path = Path(os.getenv("OSWORLD_RESET_HOME", "/home/user"))
+    allow_unsafe_home: bool = _env_flag("OSWORLD_ALLOW_UNSAFE_HOME", "0")
     control_plane_root: Path = Path(os.getenv("OSWORLD_CONTROL_PLANE_ROOT", "/opt/osworld/app/OSWorld"))
     baseline_home: Path = Path(os.getenv("OSWORLD_RESET_BASELINE_HOME", "/opt/osworld/baseline/home-user"))
     dconf_snapshot: Path = Path(os.getenv("OSWORLD_RESET_DCONF_SNAPSHOT", "/opt/osworld/baseline/dconf/user.dconf"))
@@ -330,6 +335,21 @@ class ResetRuntime:
         self.config.session_root.mkdir(parents=True, exist_ok=True)
         self._ensure_overlay_storage_permissions()
 
+    def _validate_workspace_target(self) -> None:
+        banned_prefix = Path("/home/ubuntu")
+        try:
+            if self.config.workspace_home == banned_prefix or banned_prefix in self.config.workspace_home.parents:
+                raise RuntimeError("unsafe_workspace_target: /home/ubuntu is permanently forbidden as an OSWorld reset workspace")
+        except RuntimeError:
+            raise
+        if self.config.allow_unsafe_home:
+            return
+        expected_home = Path(f"/home/{self.config.desktop_user}")
+        if self.config.desktop_user != "osworld" or self.config.workspace_home != expected_home:
+            raise RuntimeError(
+                "unsafe_workspace_target: OSWorld reset must use the isolated 'osworld' runtime home by default"
+            )
+
     def _overlay_mount_options(self) -> str:
         return ",".join(
             [
@@ -362,6 +382,18 @@ class ResetRuntime:
 
     def ensure_home_overlay_mounted(self) -> ResetResult:
         self._ensure_runtime_layout()
+        try:
+            self._validate_workspace_target()
+        except RuntimeError as exc:
+            return self._result(
+                status="error",
+                reason_code="unsafe_workspace_target",
+                details={
+                    "desktop_user": self.config.desktop_user,
+                    "workspace_home": self.config.workspace_home.as_posix(),
+                    "error": str(exc),
+                },
+            )
         if not self.config.baseline_home.exists():
             return self._result(status="error", reason_code="baseline_missing")
 
@@ -621,6 +653,20 @@ class ResetRuntime:
     def prepare_baseline(self) -> ResetResult:
         self._ensure_runtime_layout()
         self._write_state(self._result(status="busy", reason_code="preparing_baseline").to_dict())
+        try:
+            self._validate_workspace_target()
+        except RuntimeError as exc:
+            result = self._result(
+                status="error",
+                reason_code="unsafe_workspace_target",
+                details={
+                    "desktop_user": self.config.desktop_user,
+                    "workspace_home": self.config.workspace_home.as_posix(),
+                    "error": str(exc),
+                },
+            )
+            self._write_state(result.to_dict())
+            return result
         if not self.config.baseline_home.exists():
             result = self._result(status="error", reason_code="baseline_missing")
             self._write_state(result.to_dict())
@@ -795,7 +841,7 @@ def _build_runtime_from_env() -> ResetRuntime:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="OSWorld AWS reset runtime CLI")
-    parser.add_argument("command", choices=["prepare-baseline", "mount-home", "reset", "verify", "state"])
+    parser.add_argument("command", choices=["prepare-baseline", "mount-home", "umount-home", "reset", "verify", "state"])
     args = parser.parse_args()
 
     runtime = _build_runtime_from_env()
@@ -803,6 +849,16 @@ def main() -> int:
         result = runtime.prepare_baseline()
     elif args.command == "mount-home":
         result = runtime.ensure_home_overlay_mounted()
+    elif args.command == "umount-home":
+        try:
+            runtime._umount_home_overlay()
+            result = runtime._result(status="ok", reason_code="home_overlay_unmounted")
+        except Exception as exc:
+            result = runtime._result(
+                status="error",
+                reason_code="overlay_unmount_failed",
+                details={"error": str(exc)},
+            )
     elif args.command == "reset":
         result = runtime.reset()
     elif args.command == "verify":

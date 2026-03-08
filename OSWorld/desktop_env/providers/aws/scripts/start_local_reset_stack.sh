@@ -3,7 +3,17 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
 CURRENT_PWD="$(pwd -P)"
-DESKTOP_HOME="${OSWORLD_RESET_HOME:-${HOME}}"
+DESKTOP_USER="${OSWORLD_RESET_USER:-osworld}"
+DESKTOP_HOME="${OSWORLD_RESET_HOME:-/home/${DESKTOP_USER}}"
+if [[ "${DESKTOP_HOME}" == "/home/ubuntu" || "${DESKTOP_HOME}" == /home/ubuntu/* ]]; then
+  cat >&2 <<EOF
+/home/ubuntu is permanently forbidden as an OSWorld reset workspace target.
+
+Refusing to continue with:
+  OSWORLD_RESET_HOME=${DESKTOP_HOME}
+EOF
+  exit 1
+fi
 if [ -z "${PYTHON_BIN:-}" ]; then
   if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "${VIRTUAL_ENV}/bin/python" ]; then
     PYTHON_BIN="${VIRTUAL_ENV}/bin/python"
@@ -32,11 +42,18 @@ EOF
 fi
 
 echo "Starting OSWorld reset stack from ${REPO_ROOT}"
-sudo \
-  PYTHON_BIN="${PYTHON_BIN}" \
-  OSWORLD_RESET_USER="${OSWORLD_RESET_USER:-${USER}}" \
-  OSWORLD_RESET_HOME="${OSWORLD_RESET_HOME:-${HOME}}" \
-  bash "${REPO_ROOT}/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh"
+ENV_ARGS=("PYTHON_BIN=${PYTHON_BIN}")
+if [ -n "${OSWORLD_RESET_USER:-}" ]; then
+  ENV_ARGS+=("OSWORLD_RESET_USER=${OSWORLD_RESET_USER}")
+fi
+if [ -n "${OSWORLD_RESET_HOME:-}" ]; then
+  ENV_ARGS+=("OSWORLD_RESET_HOME=${OSWORLD_RESET_HOME}")
+fi
+if [ -n "${OSWORLD_ALLOW_UNSAFE_HOME:-}" ]; then
+  ENV_ARGS+=("OSWORLD_ALLOW_UNSAFE_HOME=${OSWORLD_ALLOW_UNSAFE_HOME}")
+fi
+
+sudo env "${ENV_ARGS[@]}" bash "${REPO_ROOT}/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh"
 
 wait_for_health() {
   local url="$1"

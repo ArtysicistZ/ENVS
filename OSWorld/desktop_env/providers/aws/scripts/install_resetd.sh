@@ -32,17 +32,8 @@ SESSION_ROOT="${OSWORLD_RESET_SESSION_ROOT:-/var/lib/osworld/session}"
 SYSTEM_DIST_PACKAGES="${OSWORLD_SYSTEM_DIST_PACKAGES:-/usr/lib/python3/dist-packages}"
 BASELINE_REBUILD_THRESHOLD_KB="${OSWORLD_RESET_BASELINE_REBUILD_THRESHOLD_KB:-2097152}"
 BASELINE_MODE="${OSWORLD_RESET_BASELINE_MODE:-minimal}"
-if [ -n "${OSWORLD_RESET_USER:-}" ]; then
-  DESKTOP_USER="${OSWORLD_RESET_USER}"
-elif [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
-  DESKTOP_USER="${SUDO_USER}"
-elif [ -n "${USER:-}" ] && [ "${USER}" != "root" ]; then
-  DESKTOP_USER="${USER}"
-elif id -u osworld >/dev/null 2>&1; then
-  DESKTOP_USER="osworld"
-else
-  DESKTOP_USER="osworld"
-fi
+ALLOW_UNSAFE_HOME="${OSWORLD_ALLOW_UNSAFE_HOME:-0}"
+DESKTOP_USER="${OSWORLD_RESET_USER:-osworld}"
 
 if ! id -u "${DESKTOP_USER}" >/dev/null 2>&1; then
   useradd -m -s /bin/bash "${DESKTOP_USER}"
@@ -54,6 +45,58 @@ DESKTOP_RUNTIME_DIR="/run/user/${DESKTOP_UID}"
 
 if [ -z "${DESKTOP_HOME}" ] || [ ! -d "${DESKTOP_HOME}" ]; then
   echo "Could not determine a valid desktop home for user '${DESKTOP_USER}'" >&2
+  exit 1
+fi
+
+if [[ "${DESKTOP_HOME}" == "/home/ubuntu" || "${DESKTOP_HOME}" == /home/ubuntu/* ]]; then
+  cat >&2 <<EOF
+Refusing to install OSWorld reset stack onto /home/ubuntu.
+
+/home/ubuntu is permanently forbidden as an OSWorld reset workspace target.
+Use the isolated runtime home under /home/osworld instead.
+EOF
+  exit 1
+fi
+
+UNSAFE_REASONS=()
+EXPECTED_ISOLATED_HOME="/home/osworld"
+if [ "${DESKTOP_USER}" != "osworld" ]; then
+  UNSAFE_REASONS+=("desktop user '${DESKTOP_USER}' is not the dedicated osworld runtime user")
+fi
+if [ "${DESKTOP_HOME}" != "${EXPECTED_ISOLATED_HOME}" ]; then
+  UNSAFE_REASONS+=("target home '${DESKTOP_HOME}' is not the isolated runtime home (${EXPECTED_ISOLATED_HOME})")
+fi
+if [ "${DESKTOP_HOME}" = "${HOME:-}" ]; then
+  UNSAFE_REASONS+=("target home matches the current shell home (${DESKTOP_HOME})")
+fi
+if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+  SUDO_HOME="$(getent passwd "${SUDO_USER}" | cut -d: -f6 || true)"
+  if [ -n "${SUDO_HOME}" ] && [ "${DESKTOP_HOME}" = "${SUDO_HOME}" ]; then
+    UNSAFE_REASONS+=("target home matches sudo caller home (${SUDO_HOME})")
+  fi
+fi
+if [ -n "${USER:-}" ] && [ "${USER}" != "root" ]; then
+  USER_HOME="$(getent passwd "${USER}" | cut -d: -f6 || true)"
+  if [ -n "${USER_HOME}" ] && [ "${DESKTOP_HOME}" = "${USER_HOME}" ]; then
+    UNSAFE_REASONS+=("target home matches login user home (${USER_HOME})")
+  fi
+fi
+
+if [ "${#UNSAFE_REASONS[@]}" -gt 0 ] && [ "${ALLOW_UNSAFE_HOME}" != "1" ] && [ "${ALLOW_UNSAFE_HOME}" != "true" ]; then
+  {
+    echo "Refusing to install OSWorld reset stack onto an unsafe home target."
+    echo "Target user: ${DESKTOP_USER}"
+    echo "Target home: ${DESKTOP_HOME}"
+    echo
+    echo "Reasons:"
+    for reason in "${UNSAFE_REASONS[@]}"; do
+      echo "  - ${reason}"
+    done
+    echo
+    echo "This stack must run in an isolated runtime home, not a developer login home."
+    echo "Use the default dedicated runtime user/home, or explicitly override with:"
+    echo "  OSWORLD_ALLOW_UNSAFE_HOME=1"
+  } >&2
   exit 1
 fi
 
@@ -97,6 +140,7 @@ render_unit() {
     -e "s|__CONTROL_PLANE_HASH_ROOT__|${CONTROL_PLANE_HASH_ROOT}|g" \
     -e "s|__CONTROL_PLANE_STAMP_PATH__|${CONTROL_PLANE_STAMP_PATH}|g" \
     -e "s|__BASELINE_MODE__|${BASELINE_MODE}|g" \
+    -e "s|__ALLOW_UNSAFE_HOME__|${ALLOW_UNSAFE_HOME}|g" \
     -e "s|__DESKTOP_USER__|${DESKTOP_USER}|g" \
     -e "s|__DESKTOP_HOME__|${DESKTOP_HOME}|g" \
     -e "s|__DESKTOP_RUNTIME_DIR__|${DESKTOP_RUNTIME_DIR}|g" \
