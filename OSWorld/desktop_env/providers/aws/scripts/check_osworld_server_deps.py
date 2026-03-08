@@ -17,7 +17,7 @@ MODULES = {
         ("pyxcursor", "pyxcursor"),
     ],
     "Linux": [
-        ("pyatspi", "pyatspi2"),
+        ("pyatspi", "python3-pyatspi"),
     ],
     "Windows": [
         ("pywinauto", "pywinauto"),

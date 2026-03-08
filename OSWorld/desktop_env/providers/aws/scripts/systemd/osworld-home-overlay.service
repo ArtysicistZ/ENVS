@@ -13,7 +13,7 @@ Environment=OSWORLD_RESET_HOME=__DESKTOP_HOME__
 Environment=OSWORLD_RESET_BASELINE_HOME=/opt/osworld/baseline/home-user
 Environment=OSWORLD_RESET_SESSION_ROOT=/var/lib/osworld/session
 Environment=OSWORLD_RESET_STATE_ROOT=/var/lib/osworld-reset
-Environment=PYTHONPATH=__APP_ROOT__/OSWorld
+Environment=PYTHONPATH=__APP_ROOT__/OSWorld:__SYSTEM_DIST_PACKAGES__
 ExecStart=__PYTHON_BIN__ __APP_ROOT__/OSWorld/desktop_env/providers/aws/reset_runtime.py mount-home
 RemainAfterExit=yes
 

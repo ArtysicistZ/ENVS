@@ -15,7 +15,7 @@ Environment=XDG_RUNTIME_DIR=__DESKTOP_RUNTIME_DIR__
 Environment=HOME=__DESKTOP_HOME__
 Environment=XAUTHORITY=__DESKTOP_HOME__/.Xauthority
 Environment=OSWORLD_SERVER_STATE_ROOT=/tmp/osworld-server
-Environment=PYTHONPATH=__APP_ROOT__/OSWorld
+Environment=PYTHONPATH=__APP_ROOT__/OSWorld:__SYSTEM_DIST_PACKAGES__
 User=__DESKTOP_USER__
 Group=__DESKTOP_USER__
 WorkingDirectory=__DESKTOP_HOME__

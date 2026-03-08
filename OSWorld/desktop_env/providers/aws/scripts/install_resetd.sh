@@ -27,6 +27,7 @@ BASELINE_HOME="${OSWORLD_RESET_BASELINE_HOME:-${CONTROL_ROOT}/baseline/home-user
 BASELINE_DCONF="${OSWORLD_RESET_DCONF_SNAPSHOT:-${CONTROL_ROOT}/baseline/dconf/user.dconf}"
 STATE_ROOT="${OSWORLD_RESET_STATE_ROOT:-/var/lib/osworld-reset}"
 SESSION_ROOT="${OSWORLD_RESET_SESSION_ROOT:-/var/lib/osworld/session}"
+SYSTEM_DIST_PACKAGES="${OSWORLD_SYSTEM_DIST_PACKAGES:-/usr/lib/python3/dist-packages}"
 if [ -n "${OSWORLD_RESET_USER:-}" ]; then
   DESKTOP_USER="${OSWORLD_RESET_USER}"
 elif [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
@@ -86,6 +87,7 @@ render_unit() {
     -e "s|__DESKTOP_RUNTIME_DIR__|${DESKTOP_RUNTIME_DIR}|g" \
     -e "s|__REPO_ROOT__|${REPO_ROOT}|g" \
     -e "s|__PYTHON_BIN__|${PYTHON_BIN}|g" \
+    -e "s|__SYSTEM_DIST_PACKAGES__|${SYSTEM_DIST_PACKAGES}|g" \
     "${src}" > "${dst}"
 }
 
@@ -134,7 +136,7 @@ restart_or_dump() {
 check_server_python_deps() {
   local checker="${APP_ROOT}/OSWorld/desktop_env/providers/aws/scripts/check_osworld_server_deps.py"
   echo "[2b/6] Checking Python dependencies for osworld-server with ${PYTHON_BIN}"
-  if "${PYTHON_BIN}" "${checker}"; then
+  if PYTHONPATH="${APP_ROOT}/OSWorld:${SYSTEM_DIST_PACKAGES}${PYTHONPATH:+:${PYTHONPATH}}" "${PYTHON_BIN}" "${checker}"; then
     return 0
   fi
 
@@ -145,12 +147,12 @@ check_server_python_deps() {
 }
 
 ensure_accessibility_python_deps() {
-  if "${PYTHON_BIN}" -c "import pyatspi" >/dev/null 2>&1; then
+  if PYTHONPATH="${SYSTEM_DIST_PACKAGES}${PYTHONPATH:+:${PYTHONPATH}}" "${PYTHON_BIN}" -c "import pyatspi" >/dev/null 2>&1; then
     return 0
   fi
 
-  echo "[2b/6] Installing missing accessibility dependency pyatspi2 into ${PYTHON_BIN}"
-  "${PYTHON_BIN}" -m pip install pyatspi2
+  echo "[2b/6] Installing Ubuntu accessibility runtime dependency python3-pyatspi"
+  apt-get install -y python3-pyatspi
 }
 
 wait_for_x_socket() {
