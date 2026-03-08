@@ -63,7 +63,12 @@ else:
     BaseWrapper = Any
 
 from pyxcursor import Xcursor
-from runtime_paths import resolve_user_path, server_artifact_path, user_home
+from runtime_paths import (
+    normalize_command_for_runtime,
+    resolve_user_path,
+    server_artifact_path,
+    user_home,
+)
 
 # todo: need to reformat and organize this whole file
 
@@ -124,6 +129,8 @@ def execute_command():
     if isinstance(command, str) and not shell:
         command = shlex.split(command)
 
+    command = _normalize_command_for_runtime(command, shell=shell)
+
     is_setup_route = request.path.startswith("/setup/")
     if _command_is_privileged(command):
         if not is_setup_route:
@@ -180,6 +187,8 @@ def execute_command_with_verification():
 
     if isinstance(command, str) and not shell:
         command = shlex.split(command)
+
+    command = _normalize_command_for_runtime(command, shell=shell)
 
     is_setup_route = request.path.startswith("/setup/")
     if _command_is_privileged(command):
@@ -304,6 +313,8 @@ def launch_app():
 
     if isinstance(command, str) and not shell:
         command = shlex.split(command)
+
+    command = _normalize_command_for_runtime(command, shell=shell)
 
     # Expand user directory
     for i, arg in enumerate(command):

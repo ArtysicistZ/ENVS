@@ -345,9 +345,9 @@ class ResetRuntime:
         if self.config.allow_unsafe_home:
             return
         expected_home = Path(f"/home/{self.config.desktop_user}")
-        if self.config.desktop_user != "osworld" or self.config.workspace_home != expected_home:
+        if self.config.desktop_user != "user" or self.config.workspace_home != expected_home:
             raise RuntimeError(
-                "unsafe_workspace_target: OSWorld reset must use the isolated 'osworld' runtime home by default"
+                "unsafe_workspace_target: OSWorld reset must use the isolated 'user' runtime home by default"
             )
 
     def _overlay_mount_options(self) -> str:

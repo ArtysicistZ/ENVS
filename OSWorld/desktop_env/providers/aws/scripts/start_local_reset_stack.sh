@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
 CURRENT_PWD="$(pwd -P)"
-DESKTOP_USER="${OSWORLD_RESET_USER:-osworld}"
+DESKTOP_USER="${OSWORLD_RESET_USER:-user}"
 DESKTOP_HOME="${OSWORLD_RESET_HOME:-/home/${DESKTOP_USER}}"
 if [[ "${DESKTOP_HOME}" == "/home/ubuntu" || "${DESKTOP_HOME}" == /home/ubuntu/* ]]; then
   cat >&2 <<EOF

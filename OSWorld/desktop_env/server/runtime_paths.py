@@ -37,3 +37,35 @@ def server_artifact_path(*parts: str) -> Path:
     path = server_state_root().joinpath(*parts)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def rewrite_runtime_compat_paths(
+    value: str,
+    *,
+    runtime_home: str | None = None,
+    runtime_dir: str | None = None,
+) -> str:
+    """Rewrite legacy task paths to the actual runtime home/runtime dir.
+
+    The OSWorld task corpus still contains a small number of hardcoded setup
+    commands like `/run/user/1000/bus`. Those should follow the live runtime
+    directory without requiring evaluator or task-json changes.
+    """
+    rewritten = value
+    runtime_home = runtime_home or os.getenv("HOME", "")
+    runtime_dir = runtime_dir or os.getenv("XDG_RUNTIME_DIR", "")
+    if runtime_home and runtime_home != "/home/user":
+        rewritten = rewritten.replace("/home/user", runtime_home)
+    if runtime_dir and runtime_dir != "/run/user/1000":
+        rewritten = rewritten.replace("/run/user/1000", runtime_dir)
+    return rewritten
+
+
+def normalize_command_for_runtime(command: str | list[str], *, shell: bool) -> str | list[str]:
+    if shell:
+        if isinstance(command, str):
+            return rewrite_runtime_compat_paths(command)
+        return rewrite_runtime_compat_paths(" ".join(command))
+    if isinstance(command, str):
+        return rewrite_runtime_compat_paths(command)
+    return [rewrite_runtime_compat_paths(arg) for arg in command]
