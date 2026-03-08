@@ -267,6 +267,40 @@ ensure_accessibility_python_deps() {
   fi
 }
 
+ensure_pip_for_python() {
+  if "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "[2b/6] Bootstrapping pip for ${PYTHON_BIN}"
+  if "${PYTHON_BIN}" -m ensurepip --upgrade >/dev/null 2>&1; then
+    if "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  echo "[2b/6] Installing Ubuntu Python packaging helpers"
+  apt-get install -y python3-pip python3-venv
+
+  if "${PYTHON_BIN}" -m ensurepip --upgrade >/dev/null 2>&1; then
+    if "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  cat >&2 <<EOF
+Unable to bootstrap pip for interpreter: ${PYTHON_BIN}
+
+Tried:
+  1. ${PYTHON_BIN} -m ensurepip --upgrade
+  2. apt-get install python3-pip python3-venv
+  3. ${PYTHON_BIN} -m ensurepip --upgrade
+
+Set PYTHON_BIN to an interpreter with pip available, or recreate the virtualenv with pip enabled.
+EOF
+  exit 1
+}
+
 ensure_python_module() {
   local module_name="$1"
   local package_name="$2"
@@ -276,6 +310,7 @@ ensure_python_module() {
     return 0
   fi
 
+  ensure_pip_for_python
   echo "[2b/6] Installing missing Python runtime dependency ${package_name} into ${PYTHON_BIN}"
   "${PYTHON_BIN}" -m pip install "${package_name}"
 }
