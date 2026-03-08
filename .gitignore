@@ -20,6 +20,7 @@ venv/
 .venv/
 .venv
 *.venv/
+*arpo_env/
 env/
 vmware_vm_data
 
