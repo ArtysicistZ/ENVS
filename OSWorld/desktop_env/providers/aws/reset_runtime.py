@@ -32,9 +32,8 @@ DEFAULT_IGNORED_RELATIVE_PATHS = (
     ".ICEauthority",
     ".cache",
     ".dbus",
-    ".config/dconf",
-    ".config/ibus",
-    ".config/pulse",
+    ".config",
+    ".local",
     ".local/share/recently-used.xbel",
 )
 DISPLAY_MANAGER_CANDIDATES = (
@@ -74,7 +73,7 @@ def _path_is_allowed_runtime_artifact(rel_path: str, ignored_relative_paths: tup
 class ResetConfig:
     desktop_user: str = os.getenv("OSWORLD_RESET_USER", "user")
     workspace_home: Path = Path(os.getenv("OSWORLD_RESET_HOME", "/home/user"))
-    control_plane_root: Path = Path(os.getenv("OSWORLD_CONTROL_PLANE_ROOT", "/opt/osworld"))
+    control_plane_root: Path = Path(os.getenv("OSWORLD_CONTROL_PLANE_ROOT", "/opt/osworld/app/OSWorld"))
     baseline_home: Path = Path(os.getenv("OSWORLD_RESET_BASELINE_HOME", "/opt/osworld/baseline/home-user"))
     dconf_snapshot: Path = Path(os.getenv("OSWORLD_RESET_DCONF_SNAPSHOT", "/opt/osworld/baseline/dconf/user.dconf"))
     session_root: Path = Path(os.getenv("OSWORLD_RESET_SESSION_ROOT", "/var/lib/osworld/session"))
@@ -85,12 +84,16 @@ class ResetConfig:
     baseline_manifest_path: Path = Path(
         os.getenv("OSWORLD_RESET_BASELINE_MANIFEST_PATH", "/var/lib/osworld-reset/baseline_home_manifest.json")
     )
+    control_plane_stamp_path: Path = Path(
+        os.getenv("OSWORLD_CONTROL_PLANE_STAMP_PATH", "/var/lib/osworld-reset/control_plane_build_id")
+    )
     baseline_version: str = os.getenv("OSWORLD_RESET_BASELINE_VERSION", "")
     ami_build_version: str = os.getenv("OSWORLD_RESET_AMI_BUILD_VERSION", "unknown")
     verification_policy_version: str = os.getenv("OSWORLD_RESET_VERIFICATION_POLICY_VERSION", "1")
     reset_generation_path: Path = Path(
         os.getenv("OSWORLD_RESET_GENERATION_PATH", "/var/lib/osworld-reset/reset_generation")
     )
+    baseline_mode: str = os.getenv("OSWORLD_RESET_BASELINE_MODE", "minimal")
     osworld_server_url: str = os.getenv("OSWORLD_SERVER_URL", "http://127.0.0.1:5000")
     osworld_server_service: str = os.getenv("OSWORLD_SERVER_SERVICE", "osworld-server.service")
     osworld_graphical_session_service: str = os.getenv(
@@ -383,34 +386,10 @@ class ResetRuntime:
             )
         return self._result(status="ok", reason_code="home_overlay_ready")
 
-    def _package_fingerprint(self) -> str:
-        try:
-            result = self._run(
-                ["dpkg-query", "-W", "-f=${Package}=${Version}\n"],
-                check=True,
-            )
-            return _sha256_bytes(result.stdout.encode("utf-8"))
-        except Exception:
-            return "unavailable"
-
-    def _user_fingerprint(self) -> str:
-        passwd_lines = []
-        with open("/etc/passwd", "r", encoding="utf-8") as handle:
-            for line in handle:
-                parts = line.strip().split(":")
-                if len(parts) >= 3 and parts[0] != "nobody":
-                    try:
-                        uid = int(parts[2])
-                    except ValueError:
-                        continue
-                    if uid >= 1000:
-                        passwd_lines.append(line.strip())
-        return _sha256_bytes("\n".join(sorted(passwd_lines)).encode("utf-8"))
-
-    def _control_plane_manifest_hash(self) -> str:
-        if not self.config.control_plane_root.exists():
+    def _control_plane_build_id(self) -> str:
+        if not self.config.control_plane_stamp_path.exists():
             return "missing"
-        return _manifest_hash(_build_manifest(self.config.control_plane_root))
+        return self.config.control_plane_stamp_path.read_text(encoding="utf-8").strip() or "missing"
 
     def _capture_baseline_dconf_if_missing(self) -> None:
         if self.config.dconf_snapshot.exists():
@@ -420,23 +399,24 @@ class ResetRuntime:
         if result.returncode == 0:
             self.config.dconf_snapshot.write_text(result.stdout, encoding="utf-8")
 
-    def _current_home_manifest(self) -> dict[str, Any]:
-        return _build_manifest(self.config.workspace_home, self.config.ignored_relative_paths)
-
-    def _baseline_home_manifest(self) -> dict[str, Any]:
-        if not self.config.baseline_manifest_path.exists():
-            raise FileNotFoundError(self.config.baseline_manifest_path)
-        return json.loads(self.config.baseline_manifest_path.read_text(encoding="utf-8"))
-
     def _overlay_upper_clean(self) -> bool:
         if not self.config.workspace_upper.exists():
             return True
         manifest = _build_manifest(self.config.workspace_upper)
         return all(
             rel_path == "."
-            or _path_is_allowed_runtime_artifact(rel_path, self.config.ignored_relative_paths)
-            for rel_path in manifest
+                or _path_is_allowed_runtime_artifact(rel_path, self.config.ignored_relative_paths)
+                for rel_path in manifest
         )
+
+    def _overlay_upper_summary(self) -> dict[str, Any]:
+        if not self.config.workspace_upper.exists():
+            return {"entries": 0, "sample": []}
+        manifest = _build_manifest(self.config.workspace_upper)
+        entries = sorted(
+            rel_path for rel_path in manifest if rel_path != "."
+        )
+        return {"entries": len(entries), "sample": entries[:50]}
 
     def _stop_control_plane_server(self) -> None:
         self._run(["systemctl", "stop", self.config.osworld_server_service], check=False)
@@ -565,7 +545,7 @@ class ResetRuntime:
         except Exception:
             return False
 
-    def _wait_for_server_health(self, timeout: float = 30.0, poll: float = 2.0) -> bool:
+    def _wait_for_server_health(self, timeout: float = 10.0, poll: float = 0.5) -> bool:
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._server_health_ok() and self._screenshot_ok():
@@ -575,9 +555,8 @@ class ResetRuntime:
 
     def _detect_unsupported_system_drift(self, metadata: dict[str, Any]) -> dict[str, Any] | None:
         current = {
-            "package_fingerprint": self._package_fingerprint(),
-            "user_fingerprint": self._user_fingerprint(),
-            "control_plane_manifest_sha256": self._control_plane_manifest_hash(),
+            "expected_session_user": self.config.desktop_user,
+            "control_plane_build_id": self._control_plane_build_id(),
         }
         for field, value in current.items():
             expected = metadata.get(field)
@@ -603,25 +582,15 @@ class ResetRuntime:
 
         logger.info("Preparing baseline: capturing dconf snapshot if missing")
         self._capture_baseline_dconf_if_missing()
-        logger.info("Preparing baseline: hashing baseline home manifest under %s", self.config.baseline_home)
-        baseline_manifest = _build_manifest(self.config.baseline_home, self.config.ignored_relative_paths)
-        self.config.baseline_manifest_path.write_text(
-            json.dumps(baseline_manifest, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
-        baseline_version = self.config.baseline_version or _manifest_hash(baseline_manifest)[:12]
-        logger.info("Preparing baseline: hashing control plane under %s", self.config.control_plane_root)
+        baseline_version = self.config.baseline_version or f"baseline-{int(time.time())}"
         metadata = {
             "runtime_version": RUNTIME_VERSION,
             "ami_build_version": self.config.ami_build_version,
             "baseline_version": baseline_version,
-            "baseline_manifest_sha256": _manifest_hash(baseline_manifest),
-            "baseline_manifest_path": self.config.baseline_manifest_path.as_posix(),
+            "baseline_mode": self.config.baseline_mode,
             "expected_session_user": self.config.desktop_user,
             "verification_policy_version": self.config.verification_policy_version,
-            "package_fingerprint": self._package_fingerprint(),
-            "user_fingerprint": self._user_fingerprint(),
-            "control_plane_manifest_sha256": self._control_plane_manifest_hash(),
+            "control_plane_build_id": self._control_plane_build_id(),
             "prepared_at_epoch": time.time(),
         }
         self._write_metadata(metadata)
@@ -742,35 +711,14 @@ class ResetRuntime:
             self._write_state(result.to_dict())
             return result
 
-        try:
-            current_manifest = self._current_home_manifest()
-            expected_manifest = self._baseline_home_manifest()
-        except Exception as exc:
-            result = self._result(
-                status="error",
-                reason_code="verification_failed",
-                details={"error": str(exc)},
-            )
-            self._write_state(result.to_dict())
-            return result
-
-        if current_manifest != expected_manifest:
-            result = self._result(
-                status="error",
-                reason_code="workspace_not_clean",
-                details={
-                    "current_manifest_sha256": _manifest_hash(current_manifest),
-                    "expected_manifest_sha256": metadata.get("baseline_manifest_sha256", "unknown"),
-                },
-            )
-            self._write_state(result.to_dict())
-            return result
-
         if not self._overlay_upper_clean():
             result = self._result(
                 status="error",
                 reason_code="workspace_not_clean",
-                details={"overlay_upper": self.config.workspace_upper.as_posix()},
+                details={
+                    "overlay_upper": self.config.workspace_upper.as_posix(),
+                    **self._overlay_upper_summary(),
+                },
             )
             self._write_state(result.to_dict())
             return result

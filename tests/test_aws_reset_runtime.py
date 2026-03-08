@@ -12,26 +12,15 @@ from desktop_env.providers.aws.reset_runtime import ResetConfig, ResetRuntime
 class FakeResetRuntime(ResetRuntime):
     def __init__(self, config: ResetConfig):
         super().__init__(config)
-        self.fingerprints = {
-            "package_fingerprint": "pkg-fp",
-            "user_fingerprint": "user-fp",
-            "control_plane_manifest_sha256": "control-fp",
-        }
+        self.control_plane_build_id = "control-build-id"
         self.server_started = False
-        self.user_processes_quiesced = True
         self.overlay_mounted = True
 
     def _resolve_instance_id(self) -> str:
         return "i-test"
 
-    def _package_fingerprint(self) -> str:
-        return self.fingerprints["package_fingerprint"]
-
-    def _user_fingerprint(self) -> str:
-        return self.fingerprints["user_fingerprint"]
-
-    def _control_plane_manifest_hash(self) -> str:
-        return self.fingerprints["control_plane_manifest_sha256"]
+    def _control_plane_build_id(self) -> str:
+        return self.control_plane_build_id
 
     def _capture_baseline_dconf_if_missing(self) -> None:
         self.config.dconf_snapshot.parent.mkdir(parents=True, exist_ok=True)
@@ -62,9 +51,6 @@ class FakeResetRuntime(ResetRuntime):
 
     def _kill_task_user_processes(self) -> None:
         return None
-
-    def _assert_no_user_processes(self) -> bool:
-        return self.user_processes_quiesced
 
     def _umount_home_overlay(self) -> None:
         self.overlay_mounted = False
@@ -124,6 +110,7 @@ class TestAWSResetRuntime(unittest.TestCase):
             state_path=self.state_root / "state.json",
             lock_path=self.state_root / "reset.lock",
             baseline_manifest_path=self.state_root / "baseline_home_manifest.json",
+            control_plane_stamp_path=self.state_root / "control_plane_build_id",
             reset_generation_path=self.state_root / "generation.txt",
             osworld_server_url="http://127.0.0.1:5000",
             ignored_relative_paths=(".cache",),
@@ -137,7 +124,9 @@ class TestAWSResetRuntime(unittest.TestCase):
         prepared = self.runtime.prepare_baseline()
         self.assertEqual(prepared.status, "ok")
         self.assertTrue(self.config.metadata_path.exists())
-        self.assertTrue(self.config.baseline_manifest_path.exists())
+        metadata = self.runtime._load_metadata()
+        self.assertEqual(metadata["control_plane_build_id"], "control-build-id")
+        self.assertEqual(metadata["baseline_mode"], self.config.baseline_mode)
 
         (self.workspace_home / "Desktop" / "baseline.txt").write_text("dirty", encoding="utf-8")
         (self.workspace_home / "Desktop" / "leftover.tmp").write_text("temp", encoding="utf-8")
@@ -155,20 +144,21 @@ class TestAWSResetRuntime(unittest.TestCase):
     def test_verify_detects_unsupported_system_drift(self):
         self.runtime.prepare_baseline()
         self.runtime.server_started = True
-        self.runtime.fingerprints["package_fingerprint"] = "changed"
+        self.runtime.control_plane_build_id = "changed"
 
         verify = self.runtime.verify()
         self.assertEqual(verify.status, "error")
         self.assertEqual(verify.reason_code, "unsupported_system_drift")
-        self.assertEqual(verify.details["field"], "package_fingerprint")
+        self.assertEqual(verify.details["field"], "control_plane_build_id")
 
     def test_reset_fails_when_user_processes_survive(self):
         self.runtime.prepare_baseline()
-        self.runtime.user_processes_quiesced = False
+        self.runtime._wait_for_no_user_processes = lambda timeout=15.0, poll=0.5: (False, ["123 xdg-open"])  # type: ignore[method-assign]
 
         reset = self.runtime.reset()
         self.assertEqual(reset.status, "error")
         self.assertEqual(reset.reason_code, "session_stop_failed")
+        self.assertEqual(reset.details["surviving_processes"], ["123 xdg-open"])
 
     def test_verify_allows_known_runtime_artifacts(self):
         self.runtime.prepare_baseline()

@@ -18,9 +18,12 @@ from desktop_env.providers.aws.reset_runtime import ResetConfig, ResetRuntime
 
 
 def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return sock.getsockname()[1]
+    except PermissionError as exc:  # pragma: no cover - sandbox-dependent
+        raise unittest.SkipTest(f"localhost socket bind unavailable in this environment: {exc}") from exc
 
 
 class _ServerThread(threading.Thread):
@@ -40,26 +43,15 @@ class _ServerThread(threading.Thread):
 class FakeResetRuntime(ResetRuntime):
     def __init__(self, config: ResetConfig):
         super().__init__(config)
-        self.fingerprints = {
-            "package_fingerprint": "pkg-fp",
-            "user_fingerprint": "user-fp",
-            "control_plane_manifest_sha256": "control-fp",
-        }
+        self.control_plane_build_id = "control-build-id"
         self.server_started = False
-        self.user_processes_quiesced = True
         self.overlay_mounted = True
 
     def _resolve_instance_id(self) -> str:
         return "i-integration"
 
-    def _package_fingerprint(self) -> str:
-        return self.fingerprints["package_fingerprint"]
-
-    def _user_fingerprint(self) -> str:
-        return self.fingerprints["user_fingerprint"]
-
-    def _control_plane_manifest_hash(self) -> str:
-        return self.fingerprints["control_plane_manifest_sha256"]
+    def _control_plane_build_id(self) -> str:
+        return self.control_plane_build_id
 
     def _capture_baseline_dconf_if_missing(self) -> None:
         self.config.dconf_snapshot.parent.mkdir(parents=True, exist_ok=True)
@@ -90,9 +82,6 @@ class FakeResetRuntime(ResetRuntime):
 
     def _kill_task_user_processes(self) -> None:
         return None
-
-    def _assert_no_user_processes(self) -> bool:
-        return self.user_processes_quiesced
 
     def _umount_home_overlay(self) -> None:
         self.overlay_mounted = False
@@ -162,6 +151,7 @@ class TestAWSResetIntegration(unittest.TestCase):
                 state_path=self.state_root / "state.json",
                 lock_path=self.state_root / "reset.lock",
                 baseline_manifest_path=self.state_root / "baseline_home_manifest.json",
+                control_plane_stamp_path=self.state_root / "control_plane_build_id",
                 reset_generation_path=self.state_root / "generation.txt",
                 osworld_server_url=f"http://127.0.0.1:{self.mock_server_port}",
                 ignored_relative_paths=(".cache",),

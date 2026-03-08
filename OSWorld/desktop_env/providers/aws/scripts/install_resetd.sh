@@ -23,17 +23,25 @@ CONTROL_ROOT="${OSWORLD_CONTROL_PLANE_ROOT:-/opt/osworld}"
 RESET_ROOT="${CONTROL_ROOT}/reset"
 SERVER_ROOT="${CONTROL_ROOT}/server"
 APP_ROOT="${CONTROL_ROOT}/app"
+CONTROL_PLANE_HASH_ROOT="${OSWORLD_CONTROL_PLANE_HASH_ROOT:-${APP_ROOT}/OSWorld}"
 BASELINE_HOME="${OSWORLD_RESET_BASELINE_HOME:-${CONTROL_ROOT}/baseline/home-user}"
 BASELINE_DCONF="${OSWORLD_RESET_DCONF_SNAPSHOT:-${CONTROL_ROOT}/baseline/dconf/user.dconf}"
 STATE_ROOT="${OSWORLD_RESET_STATE_ROOT:-/var/lib/osworld-reset}"
+CONTROL_PLANE_STAMP_PATH="${OSWORLD_CONTROL_PLANE_STAMP_PATH:-${STATE_ROOT}/control_plane_build_id}"
 SESSION_ROOT="${OSWORLD_RESET_SESSION_ROOT:-/var/lib/osworld/session}"
 SYSTEM_DIST_PACKAGES="${OSWORLD_SYSTEM_DIST_PACKAGES:-/usr/lib/python3/dist-packages}"
+BASELINE_REBUILD_THRESHOLD_KB="${OSWORLD_RESET_BASELINE_REBUILD_THRESHOLD_KB:-2097152}"
+BASELINE_MODE="${OSWORLD_RESET_BASELINE_MODE:-minimal}"
 if [ -n "${OSWORLD_RESET_USER:-}" ]; then
   DESKTOP_USER="${OSWORLD_RESET_USER}"
-elif [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
-  DESKTOP_USER="${SUDO_USER}"
+elif id -u osworld >/dev/null 2>&1; then
+  DESKTOP_USER="osworld"
 else
-  DESKTOP_USER="$(id -un)"
+  DESKTOP_USER="osworld"
+fi
+
+if ! id -u "${DESKTOP_USER}" >/dev/null 2>&1; then
+  useradd -m -s /bin/bash "${DESKTOP_USER}"
 fi
 
 DESKTOP_HOME="${OSWORLD_RESET_HOME:-$(getent passwd "${DESKTOP_USER}" | cut -d: -f6)}"
@@ -82,6 +90,9 @@ render_unit() {
   local dst="$2"
   sed \
     -e "s|__APP_ROOT__|${APP_ROOT}|g" \
+    -e "s|__CONTROL_PLANE_HASH_ROOT__|${CONTROL_PLANE_HASH_ROOT}|g" \
+    -e "s|__CONTROL_PLANE_STAMP_PATH__|${CONTROL_PLANE_STAMP_PATH}|g" \
+    -e "s|__BASELINE_MODE__|${BASELINE_MODE}|g" \
     -e "s|__DESKTOP_USER__|${DESKTOP_USER}|g" \
     -e "s|__DESKTOP_HOME__|${DESKTOP_HOME}|g" \
     -e "s|__DESKTOP_RUNTIME_DIR__|${DESKTOP_RUNTIME_DIR}|g" \
@@ -97,6 +108,54 @@ normalize_home_tree_ownership() {
     return 0
   fi
   chown -R "${DESKTOP_USER}:${DESKTOP_USER}" "${target}"
+}
+
+baseline_needs_rebuild() {
+  if [ "${OSWORLD_RESET_REBUILD_BASELINE:-0}" = "1" ] || [ "${OSWORLD_RESET_REBUILD_BASELINE:-false}" = "true" ]; then
+    return 0
+  fi
+
+  if [ ! -d "${BASELINE_HOME}" ]; then
+    return 1
+  fi
+
+  if [ -f "${STATE_ROOT}/metadata.json" ]; then
+    local expected_user existing_mode
+    expected_user="$("${PYTHON_BIN}" - <<PY
+import json
+from pathlib import Path
+path = Path(${STATE_ROOT@Q}) / "metadata.json"
+data = json.loads(path.read_text(encoding="utf-8"))
+print(data.get("expected_session_user", ""))
+PY
+)"
+    existing_mode="$("${PYTHON_BIN}" - <<PY
+import json
+from pathlib import Path
+path = Path(${STATE_ROOT@Q}) / "metadata.json"
+data = json.loads(path.read_text(encoding="utf-8"))
+print(data.get("baseline_mode", ""))
+PY
+)"
+    if [ -n "${expected_user}" ] && [ "${expected_user}" != "${DESKTOP_USER}" ]; then
+      return 0
+    fi
+    if [ -n "${existing_mode}" ] && [ "${existing_mode}" != "${BASELINE_MODE}" ]; then
+      return 0
+    fi
+  fi
+
+  local baseline_kb
+  baseline_kb="$(du -sk "${BASELINE_HOME}" | awk '{print $1}')"
+  if [ "${baseline_kb}" -gt "${BASELINE_REBUILD_THRESHOLD_KB}" ]; then
+    return 0
+  fi
+
+  if [ ! -s "${CONTROL_PLANE_STAMP_PATH}" ]; then
+    return 0
+  fi
+
+  return 1
 }
 
 sync_control_plane_app() {
@@ -116,6 +175,44 @@ sync_control_plane_app() {
     find "${dst_root}" -type f -name "*.pyc" -delete
   fi
   chown -R root:root "${APP_ROOT}"
+}
+
+lock_down_control_plane_app() {
+  local dst_root="${APP_ROOT}/OSWorld"
+  chown -R root:root "${dst_root}"
+  find "${dst_root}" -type d -exec chmod 0555 {} +
+  find "${dst_root}" -type f -exec chmod 0444 {} +
+}
+
+write_control_plane_build_stamp() {
+  install -d -m 0755 "$(dirname "${CONTROL_PLANE_STAMP_PATH}")"
+  "${PYTHON_BIN}" - <<PY > "${CONTROL_PLANE_STAMP_PATH}.tmp"
+import hashlib
+import os
+from pathlib import Path
+
+root = Path(${CONTROL_PLANE_HASH_ROOT@Q}).resolve()
+digest = hashlib.sha256()
+
+for current_root, dirnames, filenames in os.walk(root):
+    dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+    for name in sorted(filenames):
+        if name.endswith(".pyc"):
+            continue
+        path = Path(current_root) / name
+        rel = path.relative_to(root).as_posix().encode("utf-8")
+        digest.update(rel)
+        stat = path.stat()
+        digest.update(str(stat.st_mode & 0o7777).encode("utf-8"))
+        digest.update(str(stat.st_size).encode("utf-8"))
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+
+print(digest.hexdigest())
+PY
+  mv "${CONTROL_PLANE_STAMP_PATH}.tmp" "${CONTROL_PLANE_STAMP_PATH}"
+  chmod 0644 "${CONTROL_PLANE_STAMP_PATH}"
 }
 
 restart_or_dump() {
@@ -169,6 +266,7 @@ ensure_python_module() {
 }
 
 ensure_server_python_runtime_deps() {
+  ensure_python_module "waitress" "waitress"
   ensure_python_module "flask" "flask"
   ensure_python_module "lxml" "lxml"
   ensure_python_module "PIL" "Pillow"
@@ -176,6 +274,33 @@ ensure_server_python_runtime_deps() {
   ensure_python_module "pygetwindow" "PyGetWindow"
   ensure_python_module "requests" "requests"
   ensure_python_module "Xlib" "python-xlib"
+}
+
+seed_minimal_baseline_home() {
+  install -d -m 0755 "${BASELINE_HOME}"
+  if [ -d /etc/skel ]; then
+    cp -a /etc/skel/. "${BASELINE_HOME}/"
+  fi
+
+  install -d -o "${DESKTOP_USER}" -g "${DESKTOP_USER}" -m 0755 \
+    "${BASELINE_HOME}/Desktop" \
+    "${BASELINE_HOME}/Documents" \
+    "${BASELINE_HOME}/Downloads" \
+    "${BASELINE_HOME}/Music" \
+    "${BASELINE_HOME}/Pictures" \
+    "${BASELINE_HOME}/Public" \
+    "${BASELINE_HOME}/Templates" \
+    "${BASELINE_HOME}/Videos"
+
+  install -d -o "${DESKTOP_USER}" -g "${DESKTOP_USER}" -m 0700 \
+    "${BASELINE_HOME}/.config" \
+    "${BASELINE_HOME}/.cache" \
+    "${BASELINE_HOME}/.local" \
+    "${BASELINE_HOME}/.local/share" \
+    "${BASELINE_HOME}/.local/state"
+
+  touch "${BASELINE_HOME}/.Xauthority"
+  chown "${DESKTOP_USER}:${DESKTOP_USER}" "${BASELINE_HOME}/.Xauthority"
 }
 
 wait_for_x_socket() {
@@ -279,6 +404,10 @@ fi
 
 echo "[2/6] Syncing OSWorld control-plane app into ${APP_ROOT}"
 sync_control_plane_app
+echo "[2a/6] Locking down staged control-plane app permissions"
+lock_down_control_plane_app
+echo "[2a/6] Writing control-plane build stamp to ${CONTROL_PLANE_STAMP_PATH}"
+write_control_plane_build_stamp
 ensure_accessibility_python_deps
 ensure_server_python_runtime_deps
 check_server_python_deps
@@ -290,9 +419,20 @@ render_unit "${SCRIPT_DIR}/systemd/osworld-resetd.service" /etc/systemd/system/o
 render_unit "${SCRIPT_DIR}/systemd/osworld-graphical-session.service" /etc/systemd/system/osworld-graphical-session.service
 render_unit "${SCRIPT_DIR}/systemd/osworld-server.service" /etc/systemd/system/osworld-server.service
 
+if baseline_needs_rebuild; then
+  echo "[4/6] Rebuilding baseline home at ${BASELINE_HOME}"
+  rm -rf "${BASELINE_HOME}"
+  rm -f "${BASELINE_DCONF}"
+fi
+
 if [ ! -d "${BASELINE_HOME}" ]; then
-  echo "[4/6] Seeding baseline home from ${DESKTOP_HOME} to ${BASELINE_HOME} (first install can take time)"
-  cp -a "${DESKTOP_HOME}" "${BASELINE_HOME}"
+  if [ "${BASELINE_MODE}" = "copy-home" ]; then
+    echo "[4/6] Seeding baseline home from ${DESKTOP_HOME} to ${BASELINE_HOME} (first install can take time)"
+    cp -a "${DESKTOP_HOME}" "${BASELINE_HOME}"
+  else
+    echo "[4/6] Building minimal baseline home at ${BASELINE_HOME}"
+    seed_minimal_baseline_home
+  fi
 else
   echo "[4/6] Baseline home already exists at ${BASELINE_HOME}, skipping seed copy"
 fi
@@ -336,7 +476,10 @@ restart_or_dump osworld-server.service
 
 OSWORLD_RESET_USER="${DESKTOP_USER}" \
 OSWORLD_RESET_HOME="${DESKTOP_HOME}" \
+OSWORLD_CONTROL_PLANE_ROOT="${CONTROL_PLANE_HASH_ROOT}" \
+OSWORLD_CONTROL_PLANE_STAMP_PATH="${CONTROL_PLANE_STAMP_PATH}" \
+OSWORLD_RESET_BASELINE_MODE="${BASELINE_MODE}" \
 OSWORLD_SERVER_URL="http://127.0.0.1:5000" \
-"${PYTHON_BIN}" "${REPO_ROOT}/OSWorld/desktop_env/providers/aws/reset_runtime.py" prepare-baseline
+"${PYTHON_BIN}" "${APP_ROOT}/OSWorld/desktop_env/providers/aws/reset_runtime.py" prepare-baseline
 
 echo "Reset stack install completed."

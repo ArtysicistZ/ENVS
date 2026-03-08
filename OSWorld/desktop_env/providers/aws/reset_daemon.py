@@ -14,6 +14,11 @@ try:
 except ImportError:  # pragma: no cover - support running as a copied standalone script
     from reset_runtime import ResetConfig, ResetRuntime
 
+try:  # pragma: no cover - optional production server
+    from waitress import serve as waitress_serve
+except ImportError:  # pragma: no cover - fallback for development environments
+    waitress_serve = None
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("desktopenv.providers.aws.reset_daemon")
@@ -74,6 +79,9 @@ def main() -> None:
     host = os.getenv("OSWORLD_RESET_BIND", "0.0.0.0")
     port = int(os.getenv("AWS_RESETD_PORT", "5001"))
     logger.info("Starting OSWorld reset daemon on %s:%d", host, port)
+    if waitress_serve is not None:
+        waitress_serve(app, host=host, port=port, threads=8)
+        return
     app.run(host=host, port=port, threaded=True)
 
 

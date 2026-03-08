@@ -19,6 +19,10 @@ from PIL import Image, ImageGrab
 from Xlib import display, X
 from flask import Flask, request, jsonify, send_file, abort  # , send_from_directory
 from lxml.etree import _Element
+try:
+    from waitress import serve as waitress_serve
+except ImportError:
+    waitress_serve = None
 
 platform_name: str = platform.system()
 
@@ -1804,4 +1808,7 @@ def run_bash_script():
 
 if __name__ == '__main__':
     debug = os.environ.get("OSWORLD_SERVER_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
-    app.run(debug=debug, use_reloader=False, host="0.0.0.0")
+    if not debug and waitress_serve is not None:
+        waitress_serve(app, host="0.0.0.0", port=5000, threads=16)
+    else:
+        app.run(debug=debug, use_reloader=False, host="0.0.0.0")

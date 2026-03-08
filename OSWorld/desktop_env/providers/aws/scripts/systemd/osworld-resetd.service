@@ -12,12 +12,14 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=AWS_RESETD_PORT=5001
 Environment=OSWORLD_RESET_BIND=0.0.0.0
 Environment=OSWORLD_RESET_USER=__DESKTOP_USER__
-Environment=OSWORLD_CONTROL_PLANE_ROOT=/opt/osworld
+Environment=OSWORLD_CONTROL_PLANE_ROOT=__CONTROL_PLANE_HASH_ROOT__
+Environment=OSWORLD_CONTROL_PLANE_STAMP_PATH=__CONTROL_PLANE_STAMP_PATH__
 Environment=OSWORLD_RESET_HOME=__DESKTOP_HOME__
 Environment=OSWORLD_RESET_BASELINE_HOME=/opt/osworld/baseline/home-user
 Environment=OSWORLD_RESET_DCONF_SNAPSHOT=/opt/osworld/baseline/dconf/user.dconf
 Environment=OSWORLD_RESET_SESSION_ROOT=/var/lib/osworld/session
 Environment=OSWORLD_RESET_STATE_ROOT=/var/lib/osworld-reset
+Environment=OSWORLD_RESET_BASELINE_MODE=__BASELINE_MODE__
 Environment=OSWORLD_SERVER_URL=http://127.0.0.1:5000
 Environment=PYTHONPATH=__APP_ROOT__/OSWorld:__SYSTEM_DIST_PACKAGES__
 WorkingDirectory=__APP_ROOT__/OSWorld/desktop_env/providers/aws
