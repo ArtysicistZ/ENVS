@@ -153,7 +153,6 @@ class TestAWSResetIntegration(unittest.TestCase):
                 lock_path=self.state_root / "reset.lock",
                 baseline_manifest_path=self.state_root / "baseline_home_manifest.json",
                 control_plane_stamp_path=self.state_root / "control_plane_build_id",
-                taint_marker_path=self.state_root / "system_taint.json",
                 reset_generation_path=self.state_root / "generation.txt",
                 osworld_server_url=f"http://127.0.0.1:{self.mock_server_port}",
                 ignored_relative_paths=(".cache",),
@@ -197,27 +196,6 @@ class TestAWSResetIntegration(unittest.TestCase):
         state_resp = requests.get(f"http://127.0.0.1:{self.resetd_port}/state", timeout=5)
         self.assertEqual(state_resp.status_code, 200)
         self.assertEqual(state_resp.json()["reason_code"], "verified_clean")
-
-    def test_mark_tainted_endpoint_updates_state(self):
-        baseline = requests.post(f"http://127.0.0.1:{self.resetd_port}/prepare_baseline", timeout=5)
-        self.assertEqual(baseline.status_code, 200)
-
-        resp = requests.post(
-            f"http://127.0.0.1:{self.resetd_port}/mark_tainted",
-            json={
-                "source": "setup.execute",
-                "scope": "privileged_setup",
-                "command": "sudo apt-get install -y jq",
-            },
-            timeout=5,
-        )
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["reason_code"], "taint_marked")
-
-        state_resp = requests.get(f"http://127.0.0.1:{self.resetd_port}/state", timeout=5)
-        self.assertEqual(state_resp.status_code, 200)
-        self.assertEqual(state_resp.json()["reason_code"], "taint_marked")
-
 
 if __name__ == "__main__":
     unittest.main()

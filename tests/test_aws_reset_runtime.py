@@ -159,7 +159,6 @@ class TestAWSResetRuntime(unittest.TestCase):
             lock_path=self.state_root / "reset.lock",
             baseline_manifest_path=self.state_root / "baseline_home_manifest.json",
             control_plane_stamp_path=self.state_root / "control_plane_build_id",
-            taint_marker_path=self.state_root / "system_taint.json",
             reset_generation_path=self.state_root / "generation.txt",
             osworld_server_url="http://127.0.0.1:5000",
             ignored_relative_paths=(".cache",),
@@ -199,26 +198,6 @@ class TestAWSResetRuntime(unittest.TestCase):
         self.assertEqual(verify.status, "error")
         self.assertEqual(verify.reason_code, "unsupported_system_drift")
         self.assertEqual(verify.details["field"], "control_plane_build_id")
-
-    def test_mark_tainted_forces_relaunch_path(self):
-        self.runtime.prepare_baseline()
-        marked = self.runtime.mark_tainted(
-            source="setup.execute",
-            scope="privileged_setup",
-            command="sudo apt-get install -y jq",
-        )
-        self.assertEqual(marked.status, "ok")
-        self.assertEqual(marked.reason_code, "taint_marked")
-
-        reset = self.runtime.reset()
-        self.assertEqual(reset.status, "error")
-        self.assertEqual(reset.reason_code, "unsupported_system_drift")
-        self.assertEqual(reset.details["field"], "system_taint")
-        self.assertEqual(reset.details["taint"]["source"], "setup.execute")
-
-        verify = self.runtime.verify()
-        self.assertEqual(verify.status, "error")
-        self.assertEqual(verify.details["field"], "system_taint")
 
     def test_reset_fails_when_user_processes_survive(self):
         self.runtime.prepare_baseline()
@@ -265,7 +244,6 @@ class TestAWSResetRuntime(unittest.TestCase):
             lock_path=self.state_root / "unsafe" / "reset.lock",
             baseline_manifest_path=self.state_root / "unsafe" / "baseline_home_manifest.json",
             control_plane_stamp_path=self.state_root / "unsafe" / "control_plane_build_id",
-            taint_marker_path=self.state_root / "unsafe" / "system_taint.json",
             reset_generation_path=self.state_root / "unsafe" / "generation.txt",
         )
         runtime = FakeResetRuntime(config)
@@ -288,7 +266,6 @@ class TestAWSResetRuntime(unittest.TestCase):
             lock_path=self.state_root / "unsafe-override" / "reset.lock",
             baseline_manifest_path=self.state_root / "unsafe-override" / "baseline_home_manifest.json",
             control_plane_stamp_path=self.state_root / "unsafe-override" / "control_plane_build_id",
-            taint_marker_path=self.state_root / "unsafe-override" / "system_taint.json",
             reset_generation_path=self.state_root / "unsafe-override" / "generation.txt",
         )
         config.allow_unsafe_home = True
@@ -312,7 +289,6 @@ class TestAWSResetRuntime(unittest.TestCase):
             lock_path=self.state_root / "non-user" / "reset.lock",
             baseline_manifest_path=self.state_root / "non-user" / "baseline_home_manifest.json",
             control_plane_stamp_path=self.state_root / "non-user" / "control_plane_build_id",
-            taint_marker_path=self.state_root / "non-user" / "system_taint.json",
             reset_generation_path=self.state_root / "non-user" / "generation.txt",
         )
         runtime = FakeResetRuntime(config)

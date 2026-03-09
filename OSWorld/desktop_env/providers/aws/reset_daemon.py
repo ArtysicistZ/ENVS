@@ -75,24 +75,6 @@ def verify():
     return _jsonify_result(runtime.verify())
 
 
-@app.post("/mark_tainted")
-def mark_tainted():
-    payload = request.get_json(silent=True) or {}
-    source = str(payload.get("source", "unknown"))
-    scope = str(payload.get("scope", "system"))
-    command = str(payload.get("command", ""))
-    details = payload.get("details")
-    if not isinstance(details, dict):
-        details = {"value": details} if details is not None else {}
-    return _jsonify_result(
-        runtime.mark_tainted(
-            source=source,
-            scope=scope,
-            command=command,
-            details=details,
-        )
-    )
-
 
 def main() -> None:
     host = os.getenv("OSWORLD_RESET_BIND", "0.0.0.0")

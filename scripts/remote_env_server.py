@@ -42,9 +42,11 @@ import logging
 import os
 import re
 import socket
+import threading
 import traceback
 from collections import deque
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from io import BytesIO
 
 from fastapi import FastAPI, HTTPException
@@ -182,15 +184,10 @@ def _patch_docker_provider_ports() -> None:
     DockerProvider._ARPO_PORT_PATCHED = True  # type: ignore[attr-defined]
     logger.info("Docker provider patched successfully (no psutil; /dev/kvm optional for macOS).")
 
-# --- Server state: one env ---
-env: DesktopEnv | None = None
-_provider_name: str = (os.environ.get("PROVIDER") or _default_provider()).strip().lower()  # pre-init provider for /health; finalized on first _get_env()
-history_messages: list = []
-is_done = False
-step_counter = 0
+# --- Global constants (shared across all slots) ---
+_provider_name: str = (os.environ.get("PROVIDER") or _default_provider()).strip().lower()
 max_steps = int(os.environ.get("REMOTE_MAX_STEPS", "32"))
-instruction: str | None = None
-OBSERVATION_TYPE = "screenshot"  # same as run_uitars --observation_type screenshot
+OBSERVATION_TYPE = "screenshot"
 IMAGE_MIN_PIXELS = int(os.environ.get("REMOTE_IMAGE_MIN_PIXELS", "3136"))
 IMAGE_MAX_PIXELS = int(os.environ.get("REMOTE_IMAGE_MAX_PIXELS", "518400"))
 ACTION_PAUSE_SEC = float(os.environ.get("REMOTE_ACTION_PAUSE_SEC", "1.0"))
@@ -212,14 +209,6 @@ WRONG_AFFORDANCE_PENALTY = float(os.environ.get("REMOTE_WRONG_AFFORDANCE_PENALTY
 SCREENSHOT_STALL_PENALTY = float(os.environ.get("REMOTE_SCREENSHOT_STALL_PENALTY", "0.08"))
 SCREENSHOT_STALL_DIFF_THRESHOLD = float(os.environ.get("REMOTE_SCREENSHOT_STALL_DIFF_THRESHOLD", "0.2"))
 SCREENSHOT_ZERO_DIFF_EPS = float(os.environ.get("REMOTE_SCREENSHOT_ZERO_DIFF_EPS", "0.02"))
-_last_action_signature: str | None = None
-_repeat_action_count = 0
-_last_semantic_action_key: str | None = None
-_semantic_repeat_count = 0
-_last_intent_key: str | None = None
-_intent_repeat_count = 0
-_last_screenshot_fingerprint = None
-_recent_action_signatures = deque(maxlen=4)
 CYCLE_REPEAT_PENALTY = float(os.environ.get("REMOTE_CYCLE_REPEAT_PENALTY", "0.35"))
 WAIT_REPEAT_THRESHOLD = int(os.environ.get("REMOTE_WAIT_REPEAT_THRESHOLD", "5"))
 WAIT_REPEAT_PENALTY = float(os.environ.get("REMOTE_WAIT_REPEAT_PENALTY", "0.25"))
@@ -229,9 +218,52 @@ PARSE_FAIL_REPEAT_PENALTY = float(os.environ.get("REMOTE_PARSE_FAIL_REPEAT_PENAL
 INVALID_BOX_LITERAL_PENALTY = float(os.environ.get("REMOTE_INVALID_BOX_LITERAL_PENALTY", "0.25"))
 ALLOW_ACTION_ONLY_RESPONSE = os.environ.get("REMOTE_ALLOW_ACTION_ONLY_RESPONSE", "1").strip() not in {"0", "false", "False"}
 PARSE_REPAIR_RETRY = os.environ.get("REMOTE_PARSE_REPAIR_RETRY", "1").strip() not in {"0", "false", "False"}
-_last_step_reward_components: dict[str, float] = {}
-_eval_precondition_state: dict | None = None
-_parse_fail_streak = 0
+
+
+# --- Per-slot state (one instance per parallel env slot) ---
+@dataclass
+class SlotState:
+    env: DesktopEnv | None = None
+    history_messages: list = field(default_factory=list)
+    is_done: bool = False
+    step_counter: int = 0
+    instruction: str | None = None
+    _last_action_signature: str | None = None
+    _repeat_action_count: int = 0
+    _last_semantic_action_key: str | None = None
+    _semantic_repeat_count: int = 0
+    _last_intent_key: str | None = None
+    _intent_repeat_count: int = 0
+    _last_screenshot_fingerprint: object = None
+    _recent_action_signatures: deque = field(default_factory=lambda: deque(maxlen=4))
+    _last_step_reward_components: dict = field(default_factory=dict)
+    _eval_precondition_state: dict | None = None
+    _parse_fail_streak: int = 0
+
+
+# Slot pool: slot_id -> SlotState; protected by _slots_lock
+_slots: dict[int, SlotState] = {}
+_slots_lock = threading.RLock()
+# Per-slot init locks: prevent two threads from double-initializing the same slot's DesktopEnv
+_slot_init_locks: dict[int, threading.Lock] = {}
+_slot_init_locks_meta = threading.Lock()
+# Per-slot endpoint locks: serialize concurrent step/reset/evaluate for same slot
+_slot_endpoint_locks: dict[int, threading.RLock] = {}
+_slot_endpoint_locks_meta = threading.Lock()
+
+
+def _get_slot_init_lock(slot_id: int) -> threading.Lock:
+    with _slot_init_locks_meta:
+        if slot_id not in _slot_init_locks:
+            _slot_init_locks[slot_id] = threading.Lock()
+        return _slot_init_locks[slot_id]
+
+
+def _get_slot_endpoint_lock(slot_id: int) -> threading.RLock:
+    with _slot_endpoint_locks_meta:
+        if slot_id not in _slot_endpoint_locks:
+            _slot_endpoint_locks[slot_id] = threading.RLock()
+        return _slot_endpoint_locks[slot_id]
 
 def _default_provider() -> str:
     """Use VMware on macOS (no KVM); Docker on Linux."""
@@ -258,10 +290,16 @@ app = FastAPI(title="OSWorld Remote Env", version="0.1.0", lifespan=_lifespan)
 
 class ResetRequest(BaseModel):
     task_config: dict
+    slot_id: int = 0
 
 
 class StepRequest(BaseModel):
     prediction: str
+    slot_id: int = 0
+
+
+class SlotRequest(BaseModel):
+    slot_id: int = 0
 
 
 def _build_init_messages(screenshot_bytes: bytes, instruction_text: str) -> list:
@@ -780,16 +818,16 @@ def _absence_metric_evidence(env, when: str) -> dict | None:
     return _cookie_deletion_evidence(env, when) or _history_deletion_evidence(env, when)
 
 
-def _log_step_reward_final(format_reward: float, done_flag: bool, step_counter_value: int) -> None:
-    comps = _last_step_reward_components or {}
+def _log_step_reward_final(slot: SlotState, format_reward: float, done_flag: bool) -> None:
+    comps = slot._last_step_reward_components or {}
     parts = " ".join(f"{k}={v:+.2f}" for k, v in comps.items() if abs(v) > 1e-9)
     if parts:
         print(
             f"step_reward_final: format_reward={format_reward:.2f} is_done={done_flag} "
-            f"step_counter={step_counter_value} components[{parts}]"
+            f"step_counter={slot.step_counter} components[{parts}]"
         )
     else:
-        print(f"step_reward_final: format_reward={format_reward:.2f} is_done={done_flag} step_counter={step_counter_value}")
+        print(f"step_reward_final: format_reward={format_reward:.2f} is_done={done_flag} step_counter={slot.step_counter}")
 
 
 def _safe_env_pause(env) -> None:
@@ -812,14 +850,32 @@ def _safe_env_unpause(env) -> None:
             print(traceback.format_exc())
 
 
-def _get_env():
-    global env
-    if env is None:
+def _get_slot(slot_id: int = 0) -> SlotState:
+    """Return the SlotState for slot_id, creating a new DesktopEnv if this slot has no env yet.
+
+    Thread safety: uses a per-slot init lock so only one thread ever initializes a given slot's
+    DesktopEnv, even if multiple threads call _get_slot(same_id) concurrently.
+    """
+    with _slots_lock:
+        if slot_id not in _slots:
+            _slots[slot_id] = SlotState()
+        slot = _slots[slot_id]
+
+    # Guard env initialization with a per-slot lock to prevent TOCTOU double-init.
+    # We check env outside the lock first for the fast path (already initialized).
+    if slot.env is not None:
+        return slot
+
+    init_lock = _get_slot_init_lock(slot_id)
+    with init_lock:
+        # Re-check after acquiring init lock (double-checked locking pattern)
+        if slot.env is not None:
+            return slot
         # Default: VMware on macOS (no KVM), Docker on Linux. Override with PROVIDER=aws|vmware|docker.
         provider_name = (os.environ.get("PROVIDER") or _default_provider()).strip().lower()
-        if provider_name not in ("docker", "vmware", "aws"):
+        if provider_name not in ("docker", "arpo_docker", "vmware", "aws"):
             provider_name = "docker"
-        if provider_name == "docker":
+        if provider_name in ("docker", "arpo_docker"):
             if docker is None:
                 raise HTTPException(
                     status_code=503,
@@ -828,41 +884,43 @@ def _get_env():
                         "Install it: pip install docker. Then ensure the Docker daemon is running (e.g. Docker Desktop or system docker)."
                     ),
                 )
-            _patch_docker_provider_ports()
-        # Check KVM availability for logging (Docker only; AWS/VMware use their own)
+            if provider_name == "docker":
+                _patch_docker_provider_ports()
+        # Check KVM availability for logging
         kvm_available = os.path.exists("/dev/kvm")
         if provider_name == "docker":
             if kvm_available:
-                print("✓ KVM detected: /dev/kvm exists - VM will use hardware acceleration")
+                print(f"[slot {slot_id}] ✓ KVM detected: /dev/kvm exists - VM will use hardware acceleration")
             else:
-                print("⚠ KVM not found: /dev/kvm does not exist - VM will use software emulation (slower)")
+                print(f"[slot {slot_id}] ⚠ KVM not found: /dev/kvm does not exist - VM will use software emulation (slower)")
         if provider_name == "aws":
-            print("✓ Using provider: aws (EC2 instances; ensure boto3 and aws configure are set)")
-        print(f"✓ Using provider: {provider_name} (observation_type=screenshot, same as run_uitars)")
-        # Docker: QEMU/KVM VM inside container. VMware: Fusion VM. AWS: EC2 instances (no local Docker).
+            print(f"[slot {slot_id}] ✓ Using provider: aws (EC2 instances; ensure boto3 and aws configure are set)")
+        print(f"[slot {slot_id}] ✓ Using provider: {provider_name} (observation_type=screenshot, same as run_uitars)")
         global _provider_name
         _provider_name = provider_name
         region = os.environ.get("AWS_REGION", "us-east-1")
         snapshot_name = os.environ.get("OSWORLD_SNAPSHOT_AMI", "init_state")
+        # For arpo_docker, pass path_to_vm=f"slot_{slot_id}" so provider can route to correct container
+        path_to_vm_arg = f"slot_{slot_id}" if provider_name == "arpo_docker" else None
         try:
-            env = DesktopEnv(
+            slot.env = DesktopEnv(
                 provider_name=provider_name,
                 region=region,
                 snapshot_name=snapshot_name,
+                path_to_vm=path_to_vm_arg,
                 action_space="pyautogui",
                 screen_size=(1920, 1080),
-                cache_dir="cache_dirs/cache_0",
+                cache_dir=f"cache_dirs/cache_{slot_id}",
                 headless=True,
                 os_type="Ubuntu",
                 require_a11y_tree=False,
             )
-            print(f"DesktopEnv initialized successfully (provider={provider_name}, KVM={kvm_available})")
-            print(f"  → VM is ready: screenshots will come from VM via controller.get_screenshot()")
+            print(f"[slot {slot_id}] DesktopEnv initialized successfully (provider={provider_name}, KVM={kvm_available})")
         except HTTPException:
             raise
         except OSError as e:
             if e.errno == 28:  # No space left on device
-                print(f"Env init failed: {e}", flush=True)
+                print(f"[slot {slot_id}] Env init failed: {e}", flush=True)
                 raise HTTPException(
                     status_code=503,
                     detail=(
@@ -872,7 +930,7 @@ def _get_env():
                 ) from e
             raise
         except Exception as e:
-            print(f"Env init failed: {type(e).__name__}: {e}", flush=True)
+            print(f"[slot {slot_id}] Env init failed: {type(e).__name__}: {e}", flush=True)
             print(traceback.format_exc(), flush=True)
             is_docker_error = (
                 docker is not None
@@ -890,63 +948,67 @@ def _get_env():
             if isinstance(e, FileNotFoundError) and "SKIP_DOCKER_VM_DOWNLOAD" in str(e):
                 raise HTTPException(status_code=503, detail=str(e)) from e
             raise
-    return env
+
+    return slot
 
 
 @app.post("/env/reset")
 def env_reset(body: ResetRequest):
-    global history_messages, is_done, step_counter, instruction, _last_action_signature, _repeat_action_count
-    global _last_semantic_action_key, _semantic_repeat_count, _last_screenshot_fingerprint, _recent_action_signatures
-    global _last_intent_key, _intent_repeat_count
-    global _eval_precondition_state, _parse_fail_streak
+    slot_id = body.slot_id
+    endpoint_lock = _get_slot_endpoint_lock(slot_id)
+    with endpoint_lock:
+        return _env_reset_locked(slot_id, body)
+
+
+def _env_reset_locked(slot_id: int, body: ResetRequest):
+    """Inner reset logic, called with the per-slot endpoint lock held."""
+    slot = _get_slot(slot_id)
     task_config = body.task_config
-    instruction = _instruction_with_hints(task_config)
-    step_counter = 0
-    is_done = False
-    _last_action_signature = None
-    _repeat_action_count = 0
-    _last_semantic_action_key = None
-    _semantic_repeat_count = 0
-    _last_intent_key = None
-    _intent_repeat_count = 0
-    _last_screenshot_fingerprint = None
-    _recent_action_signatures.clear()
-    _eval_precondition_state = None
-    _parse_fail_streak = 0
-    history_messages = []
-    env = _get_env()
+    env = slot.env
 
     try:
         obs = env.reset(task_config)
     except Exception as e:
-        print(f"Env reset exception: {e}")
+        print(f"[slot {slot_id}] Env reset exception: {e}")
         print(traceback.format_exc())
-        is_done = True
+        slot.is_done = True
         raise HTTPException(status_code=500, detail=f"env.reset() failed: {e}")
+
+    # Reset SlotState ONLY after env.reset() succeeds to prevent stale state on failure
+    slot.instruction = _instruction_with_hints(task_config)
+    slot.step_counter = 0
+    slot.is_done = False
+    slot._last_action_signature = None
+    slot._repeat_action_count = 0
+    slot._last_semantic_action_key = None
+    slot._semantic_repeat_count = 0
+    slot._last_intent_key = None
+    slot._intent_repeat_count = 0
+    slot._last_screenshot_fingerprint = None
+    slot._recent_action_signatures.clear()
+    slot._eval_precondition_state = None
+    slot._parse_fail_streak = 0
+    slot.history_messages = []
 
     _safe_env_pause(env)
     screenshot = obs.get("screenshot")
     if screenshot is None:
-        print("Reset: screenshot is None (VM/container not ready or get_screenshot failed). Returning obs_messages=None.")
-        is_done = True
-        return {"env_idx": 0, "obs_messages": None, "is_done": True, "format_reward": 0.0}
-    if isinstance(screenshot, bytes):
-        pass
-    else:
+        print(f"[slot {slot_id}] Reset: screenshot is None. Returning obs_messages=None.")
+        slot.is_done = True
+        return {"env_idx": slot_id, "obs_messages": None, "is_done": True, "format_reward": 0.0}
+    if not isinstance(screenshot, bytes):
         from PIL import Image
         buf = BytesIO()
         Image.open(BytesIO(screenshot) if isinstance(screenshot, bytes) else screenshot).save(buf, format="JPEG")
         screenshot = buf.getvalue()
 
-    history_messages = _build_init_messages(screenshot, instruction)
-    _last_screenshot_fingerprint = _screenshot_fingerprint(screenshot)
-    _eval_precondition_state = _absence_metric_evidence(env, when="reset_precondition")
-    # Screenshot comes from VM inside Docker container (QEMU/KVM) via controller.get_screenshot()
-    # → http://localhost:5000/screenshot → pyautogui.screenshot() inside the VM
-    print(f"Reset OK: VM screenshot obtained ({len(screenshot)} bytes), returning obs_messages with image. Instruction: {instruction[:60]}...")
+    slot.history_messages = _build_init_messages(screenshot, slot.instruction)
+    slot._last_screenshot_fingerprint = _screenshot_fingerprint(screenshot)
+    slot._eval_precondition_state = _absence_metric_evidence(env, when="reset_precondition")
+    print(f"[slot {slot_id}] Reset OK: {len(screenshot)} bytes. Instruction: {slot.instruction[:60]}...")
     return {
-        "env_idx": 0,
-        "obs_messages": messages_to_wire(history_messages),
+        "env_idx": slot_id,
+        "obs_messages": messages_to_wire(slot.history_messages),
         "is_done": False,
         "format_reward": 0.0,
     }
@@ -954,11 +1016,16 @@ def env_reset(body: ResetRequest):
 
 @app.post("/env/step")
 def env_step(body: StepRequest):
-    global history_messages, is_done, step_counter, _last_action_signature, _repeat_action_count
-    global _last_semantic_action_key, _semantic_repeat_count, _last_screenshot_fingerprint, _recent_action_signatures
-    global _last_intent_key, _intent_repeat_count
-    global _last_step_reward_components, _parse_fail_streak
-    env = _get_env()
+    slot_id = body.slot_id
+    endpoint_lock = _get_slot_endpoint_lock(slot_id)
+    with endpoint_lock:
+        return _env_step_locked(slot_id, body)
+
+
+def _env_step_locked(slot_id: int, body: StepRequest):
+    """Inner step logic, called with the per-slot endpoint lock held."""
+    slot = _get_slot(slot_id)
+    env = slot.env
     prediction = body.prediction
     action_parse_res_factor = 1000
     model_type = "qwen25vl"
@@ -995,7 +1062,17 @@ def env_step(body: StepRequest):
                     break
             code = parsing_response_to_pyautogui_code(pr, obs_image_height, obs_image_width, False)
             actions.append(code)
-        
+
+        # Validate that all action types are known; unknown types are a parse error
+        _KNOWN_ACTION_TYPES = {
+            "hotkey", "press", "keyup", "keydown", "type", "drag", "select",
+            "scroll", "click", "left_single", "left_double", "right_single", "hover",
+            FINISH_WORD, WAIT_WORD, ENV_FAIL_WORD, CALL_USER,
+        }
+        unknown_types = [at for at in action_types if at not in _KNOWN_ACTION_TYPES]
+        if unknown_types:
+            raise ValueError(f"Unknown action type(s): {unknown_types}")
+
         # Conservative shaping: reward parse quality lightly; task evaluator should dominate.
         format_reward = FORMAT_PARSE_BASE_REWARD
         reward_components["parse"] = FORMAT_PARSE_BASE_REWARD
@@ -1009,14 +1086,14 @@ def env_step(body: StepRequest):
         if FINISH_WORD in action_types:
             format_reward += FORMAT_FINISH_BONUS
             reward_components["finish"] = reward_components.get("finish", 0.0) + FORMAT_FINISH_BONUS
-        _parse_fail_streak = 0
-        
+        slot._parse_fail_streak = 0
+
     except Exception:
         print("Parse action error:", prediction)
         print(traceback.format_exc())
         parse_failed = True
         invalid_box_literal_key = _detect_invalid_box_literal(parse_input or prediction)
-        _parse_fail_streak += 1
+        slot._parse_fail_streak += 1
         # Keep a strong parse penalty, but avoid instantly collapsing every bad sample.
         format_reward = -0.4
         reward_components["parse_error"] = -0.4
@@ -1029,103 +1106,100 @@ def env_step(body: StepRequest):
     parse_status = "fail" if format_reward < 0 else "ok"
     print(f"step_parse: {parse_status} actions=[{action_preview}] format_reward={format_reward:.2f} pred_preview={pred_preview!r}")
     click_xy = _extract_click_xy(actions)
-    task_family = _task_family_from_instruction(instruction)
+    task_family = _task_family_from_instruction(slot.instruction)
 
     action_signature = _make_action_signature(parsed_responses, actions)
-    _recent_action_signatures.append(action_signature)
-    if action_signature == _last_action_signature:
-        _repeat_action_count += 1
+    slot._recent_action_signatures.append(action_signature)
+    if action_signature == slot._last_action_signature:
+        slot._repeat_action_count += 1
     else:
-        _last_action_signature = action_signature
-        _repeat_action_count = 1
-    print(f"step_trace: repeat_action_count={_repeat_action_count} threshold={REPEAT_ACTION_THRESHOLD}")
+        slot._last_action_signature = action_signature
+        slot._repeat_action_count = 1
+    print(f"[slot {slot_id}] step_trace: repeat_action_count={slot._repeat_action_count} threshold={REPEAT_ACTION_THRESHOLD}")
 
     if parse_failed and invalid_box_literal_key:
-        # Penalize placeholder literals like (x,y), but don't hard-stop the trajectory.
         format_reward = max(format_reward - INVALID_BOX_LITERAL_PENALTY, -1.0)
         reward_components[invalid_box_literal_key] = reward_components.get(invalid_box_literal_key, 0.0) - INVALID_BOX_LITERAL_PENALTY
-        print(
-            f"step_trace: {invalid_box_literal_key}; penalty={INVALID_BOX_LITERAL_PENALTY:.2f}"
-        )
+        print(f"step_trace: {invalid_box_literal_key}; penalty={INVALID_BOX_LITERAL_PENALTY:.2f}")
 
-    if parse_failed and _parse_fail_streak >= PARSE_FAIL_REPEAT_THRESHOLD:
+    if parse_failed and slot._parse_fail_streak >= PARSE_FAIL_REPEAT_THRESHOLD:
         format_reward = max(format_reward - PARSE_FAIL_REPEAT_PENALTY, -1.0)
         reward_components["parse_fail_repeat"] = reward_components.get("parse_fail_repeat", 0.0) - PARSE_FAIL_REPEAT_PENALTY
-        is_done = True
+        slot.is_done = True
         print(
-            f"loop_breaker: parse_fail_streak x{_parse_fail_streak}; "
+            f"loop_breaker: parse_fail_streak x{slot._parse_fail_streak}; "
             f"terminating episode with penalty {PARSE_FAIL_REPEAT_PENALTY:.2f}"
         )
-        _last_step_reward_components = reward_components
-        _log_step_reward_final(format_reward, is_done, step_counter)
-        return {"env_idx": 0, "obs_messages": None, "is_done": True, "format_reward": format_reward}
+        slot._last_step_reward_components = reward_components
+        _log_step_reward_final(slot, format_reward, slot.is_done)
+        final_obs = messages_to_wire(slot.history_messages) if slot.history_messages else None
+        return {"env_idx": slot_id, "obs_messages": final_obs, "is_done": True, "format_reward": format_reward}
 
     semantic_key = _extract_semantic_action_key(actions)
-    if semantic_key and semantic_key == _last_semantic_action_key:
-        _semantic_repeat_count += 1
+    if semantic_key and semantic_key == slot._last_semantic_action_key:
+        slot._semantic_repeat_count += 1
     else:
-        _last_semantic_action_key = semantic_key
-        _semantic_repeat_count = 1 if semantic_key else 0
-    if semantic_key and _semantic_repeat_count >= SEMANTIC_REPEAT_THRESHOLD:
+        slot._last_semantic_action_key = semantic_key
+        slot._semantic_repeat_count = 1 if semantic_key else 0
+    if semantic_key and slot._semantic_repeat_count >= SEMANTIC_REPEAT_THRESHOLD:
         format_reward = max(format_reward - SEMANTIC_REPEAT_PENALTY, -1.0)
         reward_components["semantic_repeat"] = reward_components.get("semantic_repeat", 0.0) - SEMANTIC_REPEAT_PENALTY
         print(
-            f"step_trace: semantic_repeat key={semantic_key!r} count={_semantic_repeat_count} "
+            f"step_trace: semantic_repeat key={semantic_key!r} count={slot._semantic_repeat_count} "
             f"penalty={SEMANTIC_REPEAT_PENALTY:.2f}"
         )
 
     intent_key = _extract_intent_key(prediction, actions)
-    if intent_key and intent_key == _last_intent_key:
-        _intent_repeat_count += 1
+    if intent_key and intent_key == slot._last_intent_key:
+        slot._intent_repeat_count += 1
     else:
-        _last_intent_key = intent_key
-        _intent_repeat_count = 1 if intent_key else 0
-    if intent_key and _intent_repeat_count >= COOKIE_BANNER_INTENT_THRESHOLD:
+        slot._last_intent_key = intent_key
+        slot._intent_repeat_count = 1 if intent_key else 0
+    if intent_key and slot._intent_repeat_count >= COOKIE_BANNER_INTENT_THRESHOLD:
         if intent_key == "cookie_banner_intent":
             format_reward = max(format_reward - COOKIE_BANNER_INTENT_PENALTY, -1.0)
             reward_components["cookie_banner_intent"] = (
                 reward_components.get("cookie_banner_intent", 0.0) - COOKIE_BANNER_INTENT_PENALTY
             )
             print(
-                f"step_trace: intent_repeat key={intent_key!r} count={_intent_repeat_count} "
+                f"step_trace: intent_repeat key={intent_key!r} count={slot._intent_repeat_count} "
                 f"penalty={COOKIE_BANNER_INTENT_PENALTY:.2f}"
             )
     if intent_key in {"browser_gear_icon_intent", "shortcut_save_target_as_intent"}:
         format_reward = max(format_reward - WRONG_AFFORDANCE_PENALTY, -1.0)
         reward_components["wrong_affordance"] = reward_components.get("wrong_affordance", 0.0) - WRONG_AFFORDANCE_PENALTY
-        print(
-            f"step_trace: wrong_affordance key={intent_key!r} penalty={WRONG_AFFORDANCE_PENALTY:.2f}"
-        )
+        print(f"step_trace: wrong_affordance key={intent_key!r} penalty={WRONG_AFFORDANCE_PENALTY:.2f}")
 
-    if _is_abab_cycle(_recent_action_signatures):
+    if _is_abab_cycle(slot._recent_action_signatures):
         format_reward = max(format_reward - CYCLE_REPEAT_PENALTY, -1.0)
         reward_components["abab_cycle"] = reward_components.get("abab_cycle", 0.0) - CYCLE_REPEAT_PENALTY
-        is_done = True
+        slot.is_done = True
         print(
-            f"loop_breaker: abab_cycle detected last4={list(_recent_action_signatures)!r}; "
+            f"loop_breaker: abab_cycle detected last4={list(slot._recent_action_signatures)!r}; "
             f"terminating episode with penalty {CYCLE_REPEAT_PENALTY:.2f}"
         )
-        _last_step_reward_components = reward_components
-        _log_step_reward_final(format_reward, is_done, step_counter)
-        return {"env_idx": 0, "obs_messages": None, "is_done": True, "format_reward": format_reward}
+        slot._last_step_reward_components = reward_components
+        _log_step_reward_final(slot, format_reward, slot.is_done)
+        final_obs = messages_to_wire(slot.history_messages) if slot.history_messages else None
+        return {"env_idx": slot_id, "obs_messages": final_obs, "is_done": True, "format_reward": format_reward}
 
     # Keep trajectory order consistent: assistant action text, then resulting screenshot(s).
-    history_messages.append({"role": "assistant", "content": [{"type": "text", "text": add_box_token(prediction)}]})
+    slot.history_messages.append({"role": "assistant", "content": [{"type": "text", "text": add_box_token(prediction)}]})
 
     repeat_limit = WAIT_REPEAT_THRESHOLD if _is_wait_action(actions) else REPEAT_ACTION_THRESHOLD
-    if _repeat_action_count >= repeat_limit:
-        # Cut off obvious local loops (same parsed action repeated with no progress signal).
+    if slot._repeat_action_count > repeat_limit:
         repeat_penalty = WAIT_REPEAT_PENALTY if _is_wait_action(actions) else REPEAT_ACTION_PENALTY
         format_reward = max(format_reward - repeat_penalty, -1.0)
         reward_components["repeat_loop"] = reward_components.get("repeat_loop", 0.0) - repeat_penalty
-        is_done = True
+        slot.is_done = True
         print(
-            f"loop_breaker: repeated action signature x{_repeat_action_count}; "
+            f"loop_breaker: repeated action signature x{slot._repeat_action_count}; "
             f"action={actions[0] if actions else None!r} threshold={repeat_limit} penalty={repeat_penalty:.2f}"
         )
-        _last_step_reward_components = reward_components
-        _log_step_reward_final(format_reward, is_done, step_counter)
-        return {"env_idx": 0, "obs_messages": None, "is_done": True, "format_reward": format_reward}
+        slot._last_step_reward_components = reward_components
+        _log_step_reward_final(slot, format_reward, slot.is_done)
+        final_obs = messages_to_wire(slot.history_messages) if slot.history_messages else None
+        return {"env_idx": slot_id, "obs_messages": final_obs, "is_done": True, "format_reward": format_reward}
 
     _safe_env_unpause(env)
     obs = None
@@ -1135,14 +1209,14 @@ def env_step(body: StepRequest):
     for action in actions:
         obs, reward, step_done, info = env.step(action, pause=ACTION_PAUSE_SEC)
         if step_done:
-            is_done = True
-        step_counter += 1
+            slot.is_done = True
+        slot.step_counter += 1
         has_screenshot = obs is not None and obs.get("screenshot") is not None
         if has_screenshot:
             step_successful = True
             curr_fp = _screenshot_fingerprint(obs.get("screenshot"))
             if _is_click_like_action(actions):
-                diff_score = _screenshot_diff_score(_last_screenshot_fingerprint, curr_fp)
+                diff_score = _screenshot_diff_score(slot._last_screenshot_fingerprint, curr_fp)
                 if diff_score < SCREENSHOT_STALL_DIFF_THRESHOLD:
                     format_reward = max(format_reward - SCREENSHOT_STALL_PENALTY, -1.0)
                     reward_components["stall"] = reward_components.get("stall", 0.0) - SCREENSHOT_STALL_PENALTY
@@ -1176,7 +1250,7 @@ def env_step(body: StepRequest):
                         if (
                             task_family in {"browser_privacy", "browser_settings", "browser_shortcut"}
                             and _looks_like_browser_menu_click(cx, cy)
-                            and _repeat_action_count >= 2
+                            and slot._repeat_action_count >= 2
                             and diff_score < SCREENSHOT_STALL_DIFF_THRESHOLD
                         ):
                             format_reward = max(format_reward - BROWSER_MENU_NOOPEN_PENALTY, -1.0)
@@ -1185,7 +1259,7 @@ def env_step(body: StepRequest):
                             )
                             print(
                                 "step_trace: browser_menu_noopen "
-                                f"repeat={_repeat_action_count} diff={diff_score:.3f} "
+                                f"repeat={slot._repeat_action_count} diff={diff_score:.3f} "
                                 f"penalty={BROWSER_MENU_NOOPEN_PENALTY:.2f}"
                             )
                         if (
@@ -1202,7 +1276,7 @@ def env_step(body: StepRequest):
                                 f"diff={diff_score:.3f} bonus={BROWSER_MENU_OPEN_PROGRESS_BONUS:.2f}"
                             )
                 if (
-                    _repeat_action_count >= 2
+                    slot._repeat_action_count >= 2
                     and diff_score <= SCREENSHOT_ZERO_DIFF_EPS
                     and not _is_wait_action(actions)
                 ):
@@ -1210,57 +1284,55 @@ def env_step(body: StepRequest):
                     reward_components["zero_diff_repeat_break"] = (
                         reward_components.get("zero_diff_repeat_break", 0.0) - ZERO_DIFF_REPEAT_BREAK_PENALTY
                     )
-                    is_done = True
+                    slot.is_done = True
                     print(
                         "loop_breaker: zero_diff_repeat_click;"
-                        f" repeat_count={_repeat_action_count} diff={diff_score:.3f} "
+                        f" repeat_count={slot._repeat_action_count} diff={diff_score:.3f} "
                         f"penalty={ZERO_DIFF_REPEAT_BREAK_PENALTY:.2f}"
                     )
-            _last_screenshot_fingerprint = curr_fp or _last_screenshot_fingerprint
-            # Capture intermediate GUI state after each executed action so the next decision
-            # sees UI changes even when one model response contains multiple actions.
-            if _append_screenshot_message(history_messages, obs.get("screenshot")):
+            slot._last_screenshot_fingerprint = curr_fp or slot._last_screenshot_fingerprint
+            if _append_screenshot_message(slot.history_messages, obs.get("screenshot")):
                 appended_any_step_screenshot = True
-        if step_counter >= max_steps:
-            is_done = True
-        if is_done:
+        if slot.step_counter >= max_steps:
+            slot.is_done = True
+        if slot.is_done:
             break
-    
+
     _safe_env_pause(env)
-    
-    # Enhance format_reward based on step execution success
+
     if step_successful and not step_stall_penalized and not parse_failed and not _is_wait_action(actions):
         format_reward += FORMAT_STEP_SUCCESS_BONUS
         reward_components["step_success"] = reward_components.get("step_success", 0.0) + FORMAT_STEP_SUCCESS_BONUS
-    
+
     if obs is None and not actions:
-        is_done = True
-        format_reward = max(format_reward - 0.1, -1.0)  # Penalty for no observation
+        slot.is_done = True
+        format_reward = max(format_reward - 0.1, -1.0)
         reward_components["no_obs"] = reward_components.get("no_obs", 0.0) - 0.1
 
-    if is_done:
-        _last_step_reward_components = reward_components
-        _log_step_reward_final(format_reward, is_done, step_counter)
-        return {"env_idx": 0, "obs_messages": None, "is_done": True, "format_reward": format_reward}
+    if slot.is_done:
+        slot._last_step_reward_components = reward_components
+        _log_step_reward_final(slot, format_reward, slot.is_done)
+        # Return history so the client can see the final observation even on episode end
+        final_obs = messages_to_wire(slot.history_messages) if slot.history_messages else None
+        return {"env_idx": slot_id, "obs_messages": final_obs, "is_done": True, "format_reward": format_reward}
 
     if obs is None or obs.get("screenshot") is None:
-        is_done = True
-        format_reward = max(format_reward - 0.1, -1.0)  # Penalty for missing screenshot
+        slot.is_done = True
+        format_reward = max(format_reward - 0.1, -1.0)
         reward_components["missing_screenshot"] = reward_components.get("missing_screenshot", 0.0) - 0.1
-        _last_step_reward_components = reward_components
-        _log_step_reward_final(format_reward, is_done, step_counter)
-        return {"env_idx": 0, "obs_messages": None, "is_done": True, "format_reward": format_reward}
+        slot._last_step_reward_components = reward_components
+        _log_step_reward_final(slot, format_reward, slot.is_done)
+        final_obs = messages_to_wire(slot.history_messages) if slot.history_messages else None
+        return {"env_idx": slot_id, "obs_messages": final_obs, "is_done": True, "format_reward": format_reward}
 
-    # Backward-compatible path: if no screenshot was appended in the action loop
-    # (e.g. unusual provider behavior), append the final screenshot now.
     if not appended_any_step_screenshot:
-        _append_screenshot_message(history_messages, obs["screenshot"])
+        _append_screenshot_message(slot.history_messages, obs["screenshot"])
 
-    _last_step_reward_components = reward_components
-    _log_step_reward_final(format_reward, False, step_counter)
+    slot._last_step_reward_components = reward_components
+    _log_step_reward_final(slot, format_reward, False)
     return {
-        "env_idx": 0,
-        "obs_messages": messages_to_wire(history_messages),
+        "env_idx": slot_id,
+        "obs_messages": messages_to_wire(slot.history_messages),
         "is_done": False,
         "format_reward": format_reward,
     }
@@ -1275,15 +1347,22 @@ def _env_ready_for_evaluate(env) -> bool:
 
 
 @app.post("/env/evaluate")
-def env_evaluate():
-    # Log immediately so server logs show evaluate was called (even if we 503 or return 0)
-    _instr = (instruction or "N/A")[:80]
-    print(f"POST /env/evaluate received (instruction={_instr!r}, step_counter={step_counter})")
-    env = _get_env()
-    global _eval_precondition_state
+def env_evaluate(body: SlotRequest):
+    slot_id = body.slot_id
+    endpoint_lock = _get_slot_endpoint_lock(slot_id)
+    with endpoint_lock:
+        return _env_evaluate_locked(slot_id)
+
+
+def _env_evaluate_locked(slot_id: int):
+    """Inner evaluate logic, called with the per-slot endpoint lock held."""
+    slot = _get_slot(slot_id)
+    env = slot.env
+    _instr = (slot.instruction or "N/A")[:80]
+    print(f"[slot {slot_id}] POST /env/evaluate received (instruction={_instr!r}, step_counter={slot.step_counter})")
     try:
         if not _env_ready_for_evaluate(env):
-            print("Evaluation skipped: env not fully started (no setup_controller); reset likely failed. Returning 503 so client can retry.")
+            print(f"[slot {slot_id}] Evaluation skipped: env not fully started; reset likely failed. Returning 503.")
             raise HTTPException(
                 status_code=503,
                 detail="Env not ready for evaluation (no setup_controller; reset may have failed). Client should retry.",
@@ -1291,8 +1370,8 @@ def env_evaluate():
         _safe_env_unpause(env)
         score = env.evaluate()
         post_evidence = _absence_metric_evidence(env, when="evaluate_post")
-        if post_evidence is not None and _eval_precondition_state is not None:
-            pre = _eval_precondition_state
+        if post_evidence is not None and slot._eval_precondition_state is not None:
+            pre = slot._eval_precondition_state
             pre_match_count = int(pre.get("matched_count", 0))
             post_match_count = int(post_evidence.get("matched_count", 0))
             pre_pass = pre.get("would_pass_is_cookie_deleted", pre.get("would_pass_check_history_deleted"))
@@ -1301,20 +1380,19 @@ def env_evaluate():
                 f" kind={pre.get('kind', 'cookie_deleted')} pre_matched_count={pre_match_count}"
                 f" post_matched_count={post_match_count} pre_would_pass={pre_pass} raw_score={score}"
             )
-            # Precondition check: if there were no matching cookies at reset, the task was already satisfied.
             if float(score) == 1.0 and pre_match_count == 0:
                 print(
                     "eval_precondition_fail: absence-only evaluator had no matching artifacts at reset; "
                     "treating as invalid success (score forced to 0.0)"
                 )
                 score = 0.0
-        print(f"Evaluation completed: score={score}, instruction={instruction}, step_counter={step_counter}")
-        return float(score)
+        print(f"[slot {slot_id}] Evaluation completed: score={score}, step_counter={slot.step_counter}")
+        return {"score": float(score)}
     except HTTPException:
         raise
     except AttributeError as e:
         if "setup_controller" in str(e):
-            print("Evaluation skipped: env has no setup_controller (reset failed). Returning 503 so client can retry.")
+            print(f"[slot {slot_id}] Evaluation skipped: env has no setup_controller (reset failed). Returning 503.")
             raise HTTPException(
                 status_code=503,
                 detail="Env not ready for evaluation (reset failed). Client should retry.",
@@ -1323,26 +1401,39 @@ def env_evaluate():
     except Exception as e:
         err_msg = str(e)
         if "setup_controller" in err_msg:
-            print("Evaluation skipped: env has no setup_controller (wrapped error). Returning 503 so client can retry.")
+            print(f"[slot {slot_id}] Evaluation skipped: env has no setup_controller (wrapped error). Returning 503.")
             raise HTTPException(
                 status_code=503,
                 detail="Env not ready for evaluation (no setup_controller). Client should retry.",
             ) from e
-        print("Evaluation error:", e)
+        print(f"[slot {slot_id}] Evaluation error:", e)
         print(traceback.format_exc())
-        return 0.0
+        return {"score": 0.0}
 
 
 @app.post("/env/history_messages")
-def env_history_messages():
-    return {"history_messages": messages_to_wire(history_messages) if history_messages else []}
+def env_history_messages(body: SlotRequest):
+    slot_id = body.slot_id
+    slot = _get_slot(slot_id)
+    return {"history_messages": messages_to_wire(slot.history_messages) if slot.history_messages else []}
+
+
+@app.get("/env/history_messages")
+def env_history_messages_get(slot_id: int = 0):
+    """GET variant for compatibility — defaults to slot 0."""
+    slot = _get_slot(slot_id)
+    msgs = messages_to_wire(slot.history_messages) if slot.history_messages else []
+    # Return under multiple keys for client compatibility
+    return {"history_messages": msgs, "messages": msgs, "history": msgs}
 
 
 @app.get("/health")
 def health():
-    """Health check: reports provider, observation_type (screenshot), and VM status. Same env as ARPO_OSWorld_Evaluation."""
+    """Health check: reports provider, pool size, and env statuses."""
     kvm_available = os.path.exists("/dev/kvm")
-    env_status = "initialized" if env is not None else "not_initialized"
+    with _slots_lock:
+        pool_size = len(_slots)
+        slot_statuses = {str(k): ("initialized" if v.env is not None else "not_initialized") for k, v in _slots.items()}
     return {
         "status": "ok",
         "provider": _provider_name,
@@ -1350,7 +1441,8 @@ def health():
         "screenshot_source": "DesktopEnv.controller.get_screenshot() (same as run_uitars)",
         "kvm_available": kvm_available,
         "kvm_device": "/dev/kvm" if kvm_available else None,
-        "env_status": env_status,
+        "pool_size": pool_size,
+        "slot_statuses": slot_statuses,
         "message": "KVM hardware acceleration enabled" if kvm_available else "KVM not available, using software emulation"
     }
 

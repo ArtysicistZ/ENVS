@@ -58,35 +58,36 @@ MAX_PIXELS = 16384 * 28 * 28
 MAX_RATIO = 200
 
 # 定义一个函数来解析每个 action
-def parse_action(action_str):
-    try:
-        # 解析字符串为 AST 节点
-        node = ast.parse(action_str, mode='eval')
+def _escape_backslashes_in_string_literals(s: str) -> str:
+    """Escape raw backslashes inside single-quoted string literals so ast.parse doesn't fail
+    on Windows-style paths like C:\\Users\\test where \\U is an invalid unicode escape."""
+    import re as _re
+    # Replace each single-quoted string's content: escape any \ that isn't already \\
+    def fix_str(m):
+        inner = m.group(1)
+        # Escape lone backslashes (not already doubled)
+        inner = _re.sub(r'\\(?!\\)', r'\\\\', inner)
+        return "'" + inner + "'"
+    return _re.sub(r"'([^']*)'", fix_str, s)
 
-        # 确保节点是一个表达式
+
+def parse_action(action_str):
+    def _do_parse(s):
+        node = ast.parse(s, mode='eval')
         if not isinstance(node, ast.Expression):
             raise ValueError("Not an expression")
-
-        # 获取表达式的主体
         call = node.body
-
-        # 确保主体是一个函数调用
         if not isinstance(call, ast.Call):
             raise ValueError("Not a function call")
-
-        # 获取函数名
         if isinstance(call.func, ast.Name):
             func_name = call.func.id
         elif isinstance(call.func, ast.Attribute):
             func_name = call.func.attr
         else:
             func_name = None
-
-        # 获取关键字参数
         kwargs = {}
         for kw in call.keywords:
             key = kw.arg
-            # 处理不同类型的值，这里假设都是常量
             if isinstance(kw.value, ast.Constant):
                 value = kw.value.value
             elif isinstance(kw.value, ast.Str):  # 兼容旧版本 Python
@@ -94,12 +95,17 @@ def parse_action(action_str):
             else:
                 value = None
             kwargs[key] = value
+        return {'function': func_name, 'args': kwargs}
 
-        return {
-            'function': func_name,
-            'args': kwargs
-        }
-
+    try:
+        return _do_parse(action_str)
+    except SyntaxError:
+        # Retry with backslashes escaped (handles Windows paths like C:\Users\test)
+        try:
+            return _do_parse(_escape_backslashes_in_string_literals(action_str))
+        except Exception as e2:
+            print(f"Failed to parse action '{action_str}' (after backslash escape): {e2}")
+            return None
     except Exception as e:
         print(f"Failed to parse action '{action_str}': {e}")
         return None
@@ -1250,7 +1256,7 @@ class RemoteEnvWorker:
         last_err = None
         for attempt in range(self.REMOTE_RESET_RETRIES + 1):
             try:
-                resp = self._post("/env/reset", {"task_config": task_config}, timeout=self.REMOTE_RESET_TIMEOUT)
+                resp = self._post("/env/reset", {"task_config": task_config, "slot_id": self.worker_idx}, timeout=self.REMOTE_RESET_TIMEOUT)
                 break
             except Exception as e:
                 last_err = e
@@ -1277,7 +1283,7 @@ class RemoteEnvWorker:
     def step(self, prediction):
         self._is_init = False
         try:
-            resp = self._post("/env/step", {"prediction": prediction}, timeout=self.REMOTE_STEP_TIMEOUT)
+            resp = self._post("/env/step", {"prediction": prediction, "slot_id": self.worker_idx}, timeout=self.REMOTE_STEP_TIMEOUT)
         except Exception as e:
             print(f"RemoteEnvWorker step HTTP error: {e}")
             return {"env_idx": self.worker_idx, "obs_messages": None, "is_done": True, "format_reward": -1.0}
@@ -1299,7 +1305,7 @@ class RemoteEnvWorker:
         last_err = None
         for attempt in range(self.REMOTE_EVALUATE_RETRIES + 1):
             try:
-                score = self._post("/env/evaluate", {}, timeout=self.REMOTE_EVALUATE_TIMEOUT)
+                score = self._post("/env/evaluate", {"slot_id": self.worker_idx}, timeout=self.REMOTE_EVALUATE_TIMEOUT)
                 score_float = float(score)
                 print(f"RemoteEnvWorker[{self.worker_idx}] evaluate: score={score_float}, instruction={self.instruction}")
                 return score_float

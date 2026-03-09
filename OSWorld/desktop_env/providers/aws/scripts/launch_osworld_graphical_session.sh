@@ -151,34 +151,53 @@ if [ ! -S "${DBUS_SOCKET}" ]; then
   exit 1
 fi
 
-runuser -u "${DESKTOP_USER}" -- env \
-  DISPLAY="${DISPLAY_NUM}" \
-  HOME="${DESKTOP_HOME}" \
-  XAUTHORITY="${DESKTOP_HOME}/.Xauthority" \
-  XDG_RUNTIME_DIR="${DESKTOP_RUNTIME_DIR}" \
-  DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_SOCKET}" \
-  XDG_SESSION_TYPE=x11 \
-  XDG_CURRENT_DESKTOP=ubuntu:GNOME \
-  XDG_SESSION_DESKTOP=ubuntu \
-  DESKTOP_SESSION=ubuntu \
-  GDK_BACKEND=x11 \
-  CLUTTER_BACKEND=x11 \
-  LIBGL_ALWAYS_SOFTWARE=1 \
-  MESA_LOADER_DRIVER_OVERRIDE=llvmpipe \
-  __GLX_VENDOR_LIBRARY_NAME=mesa \
-  GSK_RENDERER=cairo \
-  XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" \
-  XDG_CACHE_HOME="${XDG_CACHE_HOME}" \
-  XDG_DATA_HOME="${XDG_DATA_HOME}" \
-  XDG_STATE_HOME="${XDG_STATE_HOME}" \
-  /usr/bin/gnome-session --session=ubuntu &
-GNOME_PID=$!
+SESSION_COMMON_ENV=(
+  DISPLAY="${DISPLAY_NUM}"
+  HOME="${DESKTOP_HOME}"
+  XAUTHORITY="${DESKTOP_HOME}/.Xauthority"
+  XDG_RUNTIME_DIR="${DESKTOP_RUNTIME_DIR}"
+  DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_SOCKET}"
+  XDG_SESSION_TYPE=x11
+  GDK_BACKEND=x11
+  LIBGL_ALWAYS_SOFTWARE=1
+  MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
+  __GLX_VENDOR_LIBRARY_NAME=mesa
+  XDG_CONFIG_HOME="${XDG_CONFIG_HOME}"
+  XDG_CACHE_HOME="${XDG_CACHE_HOME}"
+  XDG_DATA_HOME="${XDG_DATA_HOME}"
+  XDG_STATE_HOME="${XDG_STATE_HOME}"
+)
 
-# GNOME on Xvfb can come up with a black root window. Re-assert a visible root
-# background after session startup so screenshots have a usable desktop surface.
+if command -v gnome-session >/dev/null 2>&1; then
+  runuser -u "${DESKTOP_USER}" -- env \
+    "${SESSION_COMMON_ENV[@]}" \
+    XDG_CURRENT_DESKTOP=ubuntu:GNOME \
+    XDG_SESSION_DESKTOP=ubuntu \
+    DESKTOP_SESSION=ubuntu \
+    CLUTTER_BACKEND=x11 \
+    GSK_RENDERER=cairo \
+    /usr/bin/gnome-session --session=ubuntu &
+  SESSION_PID=$!
+else
+  # Lightweight fallback: openbox window manager when gnome-session is unavailable
+  # (e.g., minimal Docker containers). Xorg is already running above.
+  WM_BIN="$(command -v openbox || command -v fluxbox || command -v twm || true)"
+  if [ -z "${WM_BIN}" ]; then
+    echo "No window manager found (gnome-session, openbox, fluxbox, twm); Xorg-only mode" >&2
+    # Stay alive as long as Xorg runs
+    wait "${XORG_PID}"
+    exit 0
+  fi
+  runuser -u "${DESKTOP_USER}" -- env \
+    "${SESSION_COMMON_ENV[@]}" \
+    "${WM_BIN}" &
+  SESSION_PID=$!
+fi
+
+# Re-assert a visible root background after session startup so screenshots have a usable desktop surface.
 (
   sleep 5
   DISPLAY="${DISPLAY_NUM}" xsetroot -solid "#2E3440" -cursor_name left_ptr >/dev/null 2>&1 || true
 ) &
 
-wait "${GNOME_PID}"
+wait "${SESSION_PID}"

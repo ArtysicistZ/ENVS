@@ -75,6 +75,114 @@ class AWSProvider(Provider):
         logger.warning("Port 5000 still down after fix via resetd.")
         return False
 
+    def _ensure_server_compat_patch(self, ip: str) -> bool:
+        """Ensure the VM's osworld-server has _normalize_command_for_runtime defined.
+
+        The installed VM image has an older main.py that calls _normalize_command_for_runtime
+        but never defines it (NameError → HTML 500 on /execute). After each overlay reset the
+        upper layer is wiped so any previous fix is gone.  We re-apply it by:
+          1. Writing usercustomize.py to the user site-packages (loaded at Python startup).
+          2. Killing the server process so systemd restarts it and picks up the new file.
+          3. Waiting for /health to confirm the server is back up.
+        Returns True if /execute is already healthy or was successfully repaired.
+        """
+        # Quick probe: is /execute already healthy?
+        try:
+            r = requests.post(
+                f"http://{ip}:5000/execute",
+                json={"command": ["python3", "-c", "print(42)"], "shell": False},
+                timeout=8,
+            )
+            if r.status_code == 200 and r.json().get("status") == "success":
+                return True
+        except Exception:
+            pass
+
+        logger.info("Applying osworld-server _normalize_command_for_runtime patch to %s ...", ip)
+
+        usercustomize_content = (
+            "# OSWorld server compatibility fix: provides missing _normalize_command_for_runtime\\n"
+            "import builtins, sys\\n"
+            "\\n"
+            "def _normalize_command_for_runtime(command, *, shell):\\n"
+            "    server_dir = '/opt/osworld/app/OSWorld/desktop_env/server'\\n"
+            "    if server_dir not in sys.path:\\n"
+            "        sys.path.insert(0, server_dir)\\n"
+            "    try:\\n"
+            "        from runtime_paths import normalize_command_for_runtime\\n"
+            "        return normalize_command_for_runtime(command, shell=shell)\\n"
+            "    except Exception:\\n"
+            "        return command\\n"
+            "\\n"
+            "builtins._normalize_command_for_runtime = _normalize_command_for_runtime\\n"
+        )
+
+        write_code = f"""
+import os
+site_dir = '/home/user/.local/lib/python3.10/site-packages'
+os.makedirs(site_dir, exist_ok=True)
+with open(site_dir + '/usercustomize.py', 'w') as f:
+    f.write({usercustomize_content!r})
+print('PATCH_WRITTEN')
+"""
+        try:
+            resp = requests.post(
+                f"http://{ip}:5000/run_python", json={"code": write_code}, timeout=15
+            )
+            if "PATCH_WRITTEN" not in resp.json().get("output", ""):
+                logger.warning("Failed to write usercustomize.py to %s", ip)
+                return False
+        except Exception as exc:
+            logger.warning("usercustomize.py write failed for %s: %s", ip, exc)
+            return False
+
+        # Kill the server so systemd restarts it with the new usercustomize.py loaded
+        kill_code = """
+import subprocess, os, signal
+r = subprocess.run(['pgrep', '-f', 'main.py'], capture_output=True, text=True)
+for pid in r.stdout.strip().split():
+    if int(pid) != os.getpid():
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except Exception:
+            pass
+print('KILLED')
+"""
+        try:
+            requests.post(
+                f"http://{ip}:5000/run_python", json={"code": kill_code}, timeout=10
+            )
+        except Exception:
+            pass  # Expected: server may die before response is sent
+
+        # Wait for the server to restart
+        time.sleep(4)
+        for _ in range(15):
+            try:
+                r = requests.get(f"http://{ip}:5000/health", timeout=3)
+                if r.status_code == 200:
+                    break
+            except Exception:
+                pass
+            time.sleep(2)
+
+        # Final verify
+        try:
+            r = requests.post(
+                f"http://{ip}:5000/execute",
+                json={"command": ["python3", "-c", "print(42)"], "shell": False},
+                timeout=8,
+            )
+            ok = r.status_code == 200 and r.json().get("status") == "success"
+            if ok:
+                logger.info("Execute endpoint patch verified on %s.", ip)
+            else:
+                logger.warning("Execute endpoint still broken on %s after patch.", ip)
+            return ok
+        except Exception as exc:
+            logger.warning("Execute endpoint verify failed on %s: %s", ip, exc)
+            return False
+
     def _wait_for_vm_server(self, ip: str, instance_id: str = "", port: int = 5000):
         """Wait until the OSWorld HTTP server inside the VM is reachable."""
         health_url = f"http://{ip}:{port}/health"
@@ -160,6 +268,7 @@ class AWSProvider(Provider):
 
                     if private_ip_address:
                         self._wait_for_vm_server(private_ip_address, instance_id=path_to_vm)
+                        self._ensure_server_compat_patch(private_ip_address)
                         try:
                             vm_reset.snapshot_home(private_ip_address, path_to_vm, port=AWS_RESETD_PORT)
                         except Exception as e:
@@ -214,10 +323,32 @@ class AWSProvider(Provider):
             )
 
         logger.info(f"Soft-resetting {path_to_vm} at {private_ip} via reset daemon...")
-        reset_result = vm_reset.soft_reset(
-            private_ip, path_to_vm,
-            vm_reset.ResetClientConfig(port=AWS_RESETD_PORT, timeout=30),
-        )
+        reset_client_config = vm_reset.ResetClientConfig(port=AWS_RESETD_PORT, timeout=60)
+        reset_result = vm_reset.soft_reset(private_ip, path_to_vm, reset_client_config)
+
+        # Verify retry: reset succeeded but verify timed out (osworld-server still starting up).
+        # Wait up to 90s more and retry just the verify step before giving up.
+        if reset_result.get("status") != "reused_clean" and reset_result.get("reason_code") == "verification_unreachable":
+            logger.warning(
+                "Verify failed for %s (server likely still starting) — waiting 60s and retrying verify...",
+                path_to_vm,
+            )
+            time.sleep(60)
+            verify_result = vm_reset.verify_state(private_ip, path_to_vm, reset_client_config)
+            if verify_result.get("status") == "ok":
+                logger.info("Verify retry succeeded for %s — reusing instance.", path_to_vm)
+                self._ensure_server_compat_patch(private_ip)
+                return path_to_vm
+            # One more attempt after 30s
+            logger.warning("Verify retry still failed (%s), waiting 30s for final attempt...", verify_result.get("reason_code"))
+            time.sleep(30)
+            verify_result = vm_reset.verify_state(private_ip, path_to_vm, reset_client_config)
+            if verify_result.get("status") == "ok":
+                logger.info("Verify final retry succeeded for %s — reusing instance.", path_to_vm)
+                self._ensure_server_compat_patch(private_ip)
+                return path_to_vm
+            reset_result = {**reset_result, "reason_code": verify_result.get("reason_code", "verification_unreachable")}
+
         if reset_result.get("status") == "reused_clean":
             logger.info(
                 "Soft reset complete for %s: %s (%s). Reusing instance.",
@@ -225,6 +356,7 @@ class AWSProvider(Provider):
                 reset_result.get("status"),
                 reset_result.get("reason_code"),
             )
+            self._ensure_server_compat_patch(private_ip)
             return path_to_vm
 
         raise RuntimeError(

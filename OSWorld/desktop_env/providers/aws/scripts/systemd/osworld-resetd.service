@@ -17,7 +17,7 @@ Environment=OSWORLD_CONTROL_PLANE_STAMP_PATH=__CONTROL_PLANE_STAMP_PATH__
 Environment=OSWORLD_RESET_HOME=__DESKTOP_HOME__
 Environment=OSWORLD_RESET_BASELINE_HOME=/opt/osworld/baseline/home-user
 Environment=OSWORLD_RESET_DCONF_SNAPSHOT=/opt/osworld/baseline/dconf/user.dconf
-Environment=OSWORLD_RESET_SESSION_ROOT=/var/lib/osworld/session
+Environment=OSWORLD_RESET_SESSION_ROOT=__SESSION_ROOT__
 Environment=OSWORLD_RESET_STATE_ROOT=/var/lib/osworld-reset
 Environment=OSWORLD_RESET_BASELINE_MODE=__BASELINE_MODE__
 Environment=OSWORLD_SERVER_URL=http://127.0.0.1:5000

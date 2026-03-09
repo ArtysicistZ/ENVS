@@ -148,6 +148,32 @@ def snapshot_home(ip: str, instance_id: str, port: int = AWS_RESETD_PORT) -> dic
     return prepare_baseline(ip, instance_id, ResetClientConfig(port=port))
 
 
+def verify_state(ip: str, instance_id: str, config: ResetClientConfig | None = None) -> dict[str, Any]:
+    """Call the reset daemon's /verify endpoint and return a structured result.
+
+    Useful for retrying verification separately from the reset step when the
+    osworld-server takes longer than the built-in timeout to restart.
+    """
+    config = config or ResetClientConfig()
+    payload = {"instance_id": instance_id}
+    try:
+        response = _request_json(method="POST", ip=ip, endpoint="/verify", payload=payload, config=config)
+        return _normalize_daemon_response(
+            response,
+            default_status="ok",
+            default_reason="verified_clean",
+            instance_id=instance_id,
+        )
+    except Exception as exc:
+        logger.warning("Reset daemon verify call failed for %s on %s: %s", instance_id, ip, exc)
+        return _result(
+            status="error",
+            reason_code="verification_unreachable",
+            instance_id=instance_id,
+            details={"error": str(exc)},
+        )
+
+
 def restore_home(ip: str, instance_id: str, port: int = AWS_RESETD_PORT) -> dict[str, Any]:
     """Compatibility alias for explicit restore+verify callers."""
     return soft_reset(ip, instance_id, ResetClientConfig(port=port))

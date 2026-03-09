@@ -231,6 +231,7 @@ render_unit() {
     -e "s|__REPO_ROOT__|${REPO_ROOT}|g" \
     -e "s|__PYTHON_BIN__|${PYTHON_BIN}|g" \
     -e "s|__SYSTEM_DIST_PACKAGES__|${SYSTEM_DIST_PACKAGES}|g" \
+    -e "s|__SESSION_ROOT__|${SESSION_ROOT}|g" \
     "${src}" > "${dst}"
 }
 
@@ -655,7 +656,9 @@ MISSING_STACK_COMPONENTS=()
 if mapfile -t MISSING_STACK_COMPONENTS < <(desktop_stack_missing_components); then
   :
 fi
-if ! has_x_socket "${DISPLAY_NUM}" || [ "${#MISSING_STACK_COMPONENTS[@]}" -gt 0 ]; then
+if [ "${OSWORLD_SKIP_X_SOCKET_CHECK:-0}" = "1" ]; then
+  echo "OSWORLD_SKIP_X_SOCKET_CHECK=1: skipping X socket check (Docker build mode)"
+elif ! has_x_socket "${DISPLAY_NUM}" || [ "${#MISSING_STACK_COMPONENTS[@]}" -gt 0 ]; then
   if [ "${PROVISION_DESKTOP_MODE}" = "0" ] || [ "${PROVISION_DESKTOP_MODE}" = "false" ]; then
     fail_no_desktop
   fi
@@ -711,62 +714,66 @@ fi
 echo "[4b/6] Normalizing baseline home ownership for ${DESKTOP_USER}"
 normalize_home_tree_ownership "${BASELINE_HOME}"
 
-if [ ! -f "${BASELINE_DCONF}" ]; then
-  echo "[5/6] Capturing baseline dconf"
-  runuser -u "${DESKTOP_USER}" -- dconf dump / > "${BASELINE_DCONF}" 2>/dev/null || true
+if [ "${OSWORLD_SKIP_RUNTIME_SETUP:-0}" = "1" ]; then
+  echo "OSWORLD_SKIP_RUNTIME_SETUP=1: skipping service start and prepare-baseline (Docker build mode)"
+  echo "Unit files have been rendered to /etc/systemd/system/; enable them before starting systemd."
 else
-  echo "[5/6] Baseline dconf already exists at ${BASELINE_DCONF}, skipping capture"
-fi
-
-echo "[6/6] Reloading services and preparing baseline metadata"
-# Mask legacy osworld.service to prevent port-5000 conflict with osworld-server.service
-if systemctl list-unit-files osworld.service >/dev/null 2>&1; then
-  systemctl stop osworld.service 2>/dev/null || true
-  systemctl disable osworld.service 2>/dev/null || true
-  rm -f /etc/systemd/system/osworld.service
+  if [ ! -f "${BASELINE_DCONF}" ]; then
+    echo "[5/6] Capturing baseline dconf"
+    runuser -u "${DESKTOP_USER}" -- dconf dump / > "${BASELINE_DCONF}" 2>/dev/null || true
+  else
+    echo "[5/6] Baseline dconf already exists at ${BASELINE_DCONF}, skipping capture"
+  fi
+  echo "[6/6] Reloading services and preparing baseline metadata"
+  # Mask legacy osworld.service to prevent port-5000 conflict with osworld-server.service
+  if systemctl list-unit-files osworld.service >/dev/null 2>&1; then
+    systemctl stop osworld.service 2>/dev/null || true
+    systemctl disable osworld.service 2>/dev/null || true
+    rm -f /etc/systemd/system/osworld.service
+    systemctl daemon-reload
+    systemctl mask osworld.service 2>/dev/null || true
+    echo "Masked legacy osworld.service to prevent port-5000 conflict."
+  fi
+  # Open port 5001 in UFW for the reset daemon
+  if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+    ufw allow 5001/tcp >/dev/null 2>&1 || true
+    echo "Opened port 5001/tcp in UFW for reset daemon."
+  fi
   systemctl daemon-reload
-  systemctl mask osworld.service 2>/dev/null || true
-  echo "Masked legacy osworld.service to prevent port-5000 conflict."
-fi
-# Open port 5001 in UFW for the reset daemon
-if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-  ufw allow 5001/tcp >/dev/null 2>&1 || true
-  echo "Opened port 5001/tcp in UFW for reset daemon."
-fi
-systemctl daemon-reload
-systemctl enable osworld-home-overlay.service
-systemctl enable osworld-resetd.service
-systemctl enable osworld-graphical-session.service
-systemctl enable osworld-server.service
-systemctl stop osworld-server.service || true
-systemctl stop osworld-graphical-session.service || true
-systemctl stop osworld-resetd.service || true
-modprobe overlay || true
-DISPLAY_MANAGER_UNIT="$(detect_display_manager_unit || true)"
-if [ -n "${DISPLAY_MANAGER_UNIT}" ]; then
-  echo "Stopping display manager so OSWorld can own :0 directly: ${DISPLAY_MANAGER_UNIT}"
-  systemctl stop "${DISPLAY_MANAGER_UNIT}" || true
-fi
-restart_or_dump osworld-home-overlay.service
-restart_or_dump osworld-graphical-session.service
-if ! wait_for_x_socket 30 "${DISPLAY_NUM}"; then
-  echo "OSWorld graphical session did not produce an X socket within 30s" >&2
-  echo "--- systemctl status osworld-graphical-session.service ---" >&2
-  systemctl --no-pager --full status osworld-graphical-session.service >&2 || true
-  echo "--- journalctl -u osworld-graphical-session.service -n 200 ---" >&2
-  journalctl -u osworld-graphical-session.service -n 200 --no-pager >&2 || true
-  fail_no_desktop
-fi
-restart_or_dump osworld-resetd.service
-restart_or_dump osworld-server.service
+  systemctl enable osworld-home-overlay.service
+  systemctl enable osworld-resetd.service
+  systemctl enable osworld-graphical-session.service
+  systemctl enable osworld-server.service
+  systemctl stop osworld-server.service || true
+  systemctl stop osworld-graphical-session.service || true
+  systemctl stop osworld-resetd.service || true
+  modprobe overlay || true
+  DISPLAY_MANAGER_UNIT="$(detect_display_manager_unit || true)"
+  if [ -n "${DISPLAY_MANAGER_UNIT}" ]; then
+    echo "Stopping display manager so OSWorld can own :0 directly: ${DISPLAY_MANAGER_UNIT}"
+    systemctl stop "${DISPLAY_MANAGER_UNIT}" || true
+  fi
+  restart_or_dump osworld-home-overlay.service
+  restart_or_dump osworld-graphical-session.service
+  if ! wait_for_x_socket 30 "${DISPLAY_NUM}"; then
+    echo "OSWorld graphical session did not produce an X socket within 30s" >&2
+    echo "--- systemctl status osworld-graphical-session.service ---" >&2
+    systemctl --no-pager --full status osworld-graphical-session.service >&2 || true
+    echo "--- journalctl -u osworld-graphical-session.service -n 200 ---" >&2
+    journalctl -u osworld-graphical-session.service -n 200 --no-pager >&2 || true
+    fail_no_desktop
+  fi
+  restart_or_dump osworld-resetd.service
+  restart_or_dump osworld-server.service
 
-OSWORLD_RESET_USER="${DESKTOP_USER}" \
-OSWORLD_RESET_HOME="${DESKTOP_HOME}" \
-OSWORLD_CONTROL_PLANE_ROOT="${CONTROL_PLANE_HASH_ROOT}" \
-OSWORLD_CONTROL_PLANE_STAMP_PATH="${CONTROL_PLANE_STAMP_PATH}" \
-OSWORLD_RESET_BASELINE_MODE="${BASELINE_MODE}" \
-OSWORLD_SERVER_URL="http://127.0.0.1:5000" \
-PYTHONPATH="${APP_ROOT}/OSWorld:${SYSTEM_DIST_PACKAGES}${PYTHONPATH:+:${PYTHONPATH}}" \
-"${PYTHON_BIN}" "${APP_ROOT}/OSWorld/desktop_env/providers/aws/reset_runtime.py" prepare-baseline
+  OSWORLD_RESET_USER="${DESKTOP_USER}" \
+  OSWORLD_RESET_HOME="${DESKTOP_HOME}" \
+  OSWORLD_CONTROL_PLANE_ROOT="${CONTROL_PLANE_HASH_ROOT}" \
+  OSWORLD_CONTROL_PLANE_STAMP_PATH="${CONTROL_PLANE_STAMP_PATH}" \
+  OSWORLD_RESET_BASELINE_MODE="${BASELINE_MODE}" \
+  OSWORLD_SERVER_URL="http://127.0.0.1:5000" \
+  PYTHONPATH="${APP_ROOT}/OSWorld:${SYSTEM_DIST_PACKAGES}${PYTHONPATH:+:${PYTHONPATH}}" \
+  "${PYTHON_BIN}" "${APP_ROOT}/OSWorld/desktop_env/providers/aws/reset_runtime.py" prepare-baseline
+fi
 
 echo "Reset stack install completed."

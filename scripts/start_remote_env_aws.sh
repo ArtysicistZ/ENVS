@@ -92,7 +92,18 @@ if [ -z "$AWS_SUBNET_ID" ] || [ -z "$AWS_SECURITY_GROUP_ID" ]; then
   exit 1
 fi
 
-echo "Starting remote env server (AWS provider) on 0.0.0.0:15001 ..."
-echo "  AMI for new VMs: $OSWORLD_SNAPSHOT_AMI"
+HOST="${REMOTE_ENV_HOST:-0.0.0.0}"
+PORT="${REMOTE_ENV_PORT:-15001}"
+echo "===== Remote Env Server Startup ====="
+echo "  Repo: $REPO_ROOT"
+echo "  Provider: aws"
+echo "  Host: $HOST"
+echo "  Port: $PORT"
 echo "  Python: $(which python)"
-exec env PROVIDER=aws python -m uvicorn scripts.remote_env_server:app --host 0.0.0.0 --port 15001
+echo "  AMI for new VMs: ${OSWORLD_SNAPSHOT_AMI:-<default-from-image-map>}"
+echo "  REMOTE_REPEAT_ACTION_THRESHOLD=$REMOTE_REPEAT_ACTION_THRESHOLD"
+echo "  REMOTE_REPEAT_ACTION_PENALTY=$REMOTE_REPEAT_ACTION_PENALTY"
+echo "  REMOTE_ACTION_PAUSE_SEC=$REMOTE_ACTION_PAUSE_SEC"
+echo "  Health check: curl -sS http://127.0.0.1:${PORT}/health"
+echo "====================================="
+exec env PROVIDER=aws python -m uvicorn scripts.remote_env_server:app --host "$HOST" --port "$PORT"

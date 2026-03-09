@@ -18,7 +18,7 @@
 | **Control plane** | Flask server (port 5000) | Same Flask server (port 5000) |
 | **Reset daemon** | None (no separate daemon) | `osworld-resetd.service` (port 5001) |
 | **Fallback** | N/A | Full EC2 terminate + relaunch (~89s) |
-| **Taint tracking** | None | Previously existed; **removed** (see §2.5) |
+| **Taint tracking** | None | Fully removed |
 | **AMI** | N/A | `ami-092bc7644b0debfcd` (us-east-1) |
 
 ### 1.2 Port Architecture
@@ -39,7 +39,6 @@ Training Host / Controller
                                        - /reset, /verify
                                        - /prepare_baseline
                                        - /health, /state
-                                       - /mark_tainted (vestigial)
 ```
 
 ### 1.3 OverlayFS Architecture
@@ -125,7 +124,7 @@ The original design included a taint system: if the agent ran privileged command
 
 **Problem**: The setup controller (`setup.py`) ran legitimate infrastructure commands via `sudo` (e.g., `apt install expect`), which triggered taint markers, blocking soft reset even though the OverlayFS wipe fully restores all state.
 
-**Decision**: Taint system removed from the soft reset decision path. The `/mark_tainted` endpoint still exists in the reset daemon but is never consulted before reset — all soft resets proceed, and the overlay wipe handles all state. Residual taint code can be fully removed in a future cleanup.
+**Decision**: Taint system fully removed. All soft resets proceed, and the overlay wipe handles all state.
 
 ### 2.3 Verify Strictness — Simplified
 
