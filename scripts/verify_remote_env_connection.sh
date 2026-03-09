@@ -1,9 +1,9 @@
 #!/bin/bash
 # Quick verification script: test cluster -> remote env server connectivity
 # Usage: ./scripts/verify_remote_env_connection.sh [SERVER_URL]
-# Default: http://35.175.248.181:15001
+# Default: http://67.202.26.249:15001
 
-SERVER_URL="${1:-http://35.175.248.181:15001}"
+SERVER_URL="${1:-http://67.202.26.249:15001}"
 SERVER_IP=$(echo "$SERVER_URL" | sed -E 's|https?://([^:/]+).*|\1|')
 SERVER_PORT=$(echo "$SERVER_URL" | sed -E 's|https?://[^:]+:([0-9]+).*|\1|' || echo "15001")
 

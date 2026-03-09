@@ -184,6 +184,13 @@ def _patch_docker_provider_ports() -> None:
     DockerProvider._ARPO_PORT_PATCHED = True  # type: ignore[attr-defined]
     logger.info("Docker provider patched successfully (no psutil; /dev/kvm optional for macOS).")
 
+def _default_provider() -> str:
+    """Use VMware on macOS (no KVM); Docker on Linux."""
+    if hasattr(os, "uname") and os.uname().sysname == "Darwin":
+        return "vmware"
+    return "docker"
+
+
 # --- Global constants (shared across all slots) ---
 _provider_name: str = (os.environ.get("PROVIDER") or _default_provider()).strip().lower()
 max_steps = int(os.environ.get("REMOTE_MAX_STEPS", "32"))
@@ -264,12 +271,6 @@ def _get_slot_endpoint_lock(slot_id: int) -> threading.RLock:
         if slot_id not in _slot_endpoint_locks:
             _slot_endpoint_locks[slot_id] = threading.RLock()
         return _slot_endpoint_locks[slot_id]
-
-def _default_provider() -> str:
-    """Use VMware on macOS (no KVM); Docker on Linux."""
-    if hasattr(os, "uname") and os.uname().sysname == "Darwin":
-        return "vmware"
-    return "docker"
 
 
 @asynccontextmanager

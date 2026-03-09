@@ -2,14 +2,14 @@
 """
 Test POST /env/evaluate from the cluster (same payload as RemoteEnvWorker).
 Usage: python scripts/test_evaluate_endpoint.py [BASE_URL]
-Default BASE_URL: http://35.175.248.181:15001
+Default BASE_URL: http://67.202.26.249:15001
 """
 import json
 import sys
 
 import requests
 
-BASE_URL = (sys.argv[1] if len(sys.argv) > 1 else "http://35.175.248.181:15001").rstrip("/")
+BASE_URL = (sys.argv[1] if len(sys.argv) > 1 else "http://67.202.26.249:15001").rstrip("/")
 EVALUATE_URL = f"{BASE_URL}/env/evaluate"
 TIMEOUT = 300  # same as REMOTE_EVALUATE_TIMEOUT
 

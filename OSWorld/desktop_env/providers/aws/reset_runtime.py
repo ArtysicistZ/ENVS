@@ -651,10 +651,18 @@ class ResetRuntime:
                 if child.is_symlink() or child.is_file():
                     child.unlink()
                 elif child.is_dir():
+                    # Try to unmount first in case it's a FUSE/bind mount
+                    # (e.g. /run/user/1000/doc from xdg-document-portal).
+                    # If umount fails, shutil.rmtree may still work; if it
+                    # too fails, we log and skip to avoid crashing the reset.
+                    try:
+                        self._run(["umount", "-l", child.as_posix()], check=False)
+                    except Exception:
+                        pass
                     shutil.rmtree(child)
                 else:
                     child.unlink(missing_ok=True)
-            except FileNotFoundError:
+            except OSError:
                 continue
 
     def _server_health_ok(self) -> bool:

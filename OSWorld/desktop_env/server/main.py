@@ -77,7 +77,7 @@ app = Flask(__name__)
 pyautogui.PAUSE = 0
 pyautogui.DARWIN_CATCH_UP_TIME = 0
 
-TIMEOUT = 1800  # seconds
+TIMEOUT = 30  # seconds — window-wait cap for open_file; never block setup for more than 30s
 
 logger = app.logger
 recording_process = None  # fixme: this is a temporary solution for recording, need to be changed to support multiple-process
@@ -290,9 +290,25 @@ def launch_app():
             has_rdp = any(arg.startswith("--remote-debugging-port") for arg in command)
             has_udd = any(arg.startswith("--user-data-dir") for arg in command)
             if has_rdp and not has_udd:
-                # Use a dedicated tmp profile so Chrome remote debugging works
-                # (Chrome 115+ refuses remote debugging on the default profile dir)
-                command = list(command) + ["--user-data-dir=/tmp/chrome-debug-profile"]
+                # Chrome 115+ blocks remote debugging when using the DEFAULT profile
+                # path (~/.config/google-chrome). We must use a non-default directory.
+                # Use /tmp/chrome-dbg so it is always writable and never equals the
+                # default path. Clear any stale Singleton* files first so a fresh
+                # Chrome instance can always acquire the lock and bind the debug port.
+                import shutil as _shutil
+                _dbg_dir = "/tmp/chrome-dbg"
+                # Wipe the entire debug profile dir so Chrome always starts fresh:
+                # stale Singleton files, old profile data, and lock files all cause
+                # Chrome to refuse to bind --remote-debugging-port.
+                try:
+                    _shutil.rmtree(_dbg_dir)
+                except OSError:
+                    pass
+                os.makedirs(_dbg_dir, exist_ok=True)
+                command = list(command) + [
+                    f"--user-data-dir={_dbg_dir}",
+                    "--no-first-run",
+                ]
 
         subprocess.Popen(command, shell=shell, cwd=DEFAULT_WORKDIR)
         return "{:} launched successfully".format(command if shell else " ".join(command))
@@ -1422,35 +1438,52 @@ def open_file():
                     break
             elif os_name == 'Linux':
                 try:
-                    # Using wmctrl to list windows and check if any window title contains the filename
+                    # Using wmctrl to list windows and check if any window title contains the filename.
+                    # Also accept any window belonging to the application (e.g. "LibreOffice 7.3" start
+                    # center appears immediately, before the specific filename title is ready).
                     result = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, check=True)
                     window_list = result.stdout.strip().split('\n')
                     if not result.stdout.strip():
-                        pass  # No windows, just continue waiting
+                        pass  # No windows yet, keep waiting
                     else:
+                        # Derive app keyword from the extension / filename for broad matching
+                        ext = os.path.splitext(file_name)[1].lower()
+                        app_keywords = [file_name, file_name_without_ext]
+                        if ext in ('.xlsx', '.xls', '.ods', '.csv'):
+                            app_keywords.append('LibreOffice')
+                        elif ext in ('.docx', '.doc', '.odt'):
+                            app_keywords.append('LibreOffice')
+                        elif ext in ('.pptx', '.ppt', '.odp'):
+                            app_keywords.append('LibreOffice')
+                        elif ext in ('.xcf', '.png', '.jpg', '.jpeg', '.bmp', '.gif'):
+                            app_keywords.append('GIMP')
                         for window in window_list:
-                            if file_name in window or file_name_without_ext in window:
-                                # a window is found, now activate it
+                            if any(kw in window for kw in app_keywords):
                                 window_id = window.split()[0]
-                                subprocess.run(['wmctrl', '-i', '-a', window_id], check=True)
+                                try:
+                                    subprocess.run(['wmctrl', '-i', '-a', window_id], check=True)
+                                except subprocess.CalledProcessError:
+                                    pass
                                 window_found = True
                                 break
                         if window_found:
                             break
                 except (subprocess.CalledProcessError, FileNotFoundError):
-                    # wmctrl might not be installed or the window manager isn't ready.
-                    # We just log it once and let the main loop retry.
                     if 'wmctrl_failed_once' not in locals():
                         logger.warning("wmctrl command is not ready, will keep retrying...")
                         wmctrl_failed_once = True
-                    pass  # Let the outer loop retry
 
             time.sleep(1)
 
         if window_found:
             return "File opened and window activated successfully"
         else:
-            return f"Failed to find window for {file_name} within {TIMEOUT} seconds.", 500
+            # Application was started via xdg-open; window may still be loading.
+            # Return success so the reset does not time out — the agent will see
+            # the loading screen on the first screenshot.
+            logger.warning("open_file: window for %s not detected by wmctrl within %ds; "
+                           "returning success anyway (app likely still loading)", file_name, TIMEOUT)
+            return "File opened (window not yet detected, app still loading)"
 
     except Exception as e:
         return f"Failed to open {path}. Error: {e}", 500

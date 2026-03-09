@@ -26,6 +26,9 @@ WorkingDirectory=__DESKTOP_HOME__
 ExecStart=__PYTHON_BIN__ __APP_ROOT__/OSWorld/desktop_env/providers/aws/scripts/start_osworld_server.py __PYTHON_BIN__ __APP_ROOT__/OSWorld/desktop_env/server/main.py
 Restart=always
 RestartSec=2
+# Kill quickly (5s) so overlay reset doesn't wait 90s for LibreOffice/Chrome children.
+TimeoutStopSec=5
+KillMode=control-group
 
 [Install]
 WantedBy=multi-user.target
