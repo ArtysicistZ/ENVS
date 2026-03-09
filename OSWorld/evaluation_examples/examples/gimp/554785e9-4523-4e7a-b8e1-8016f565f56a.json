@@ -37,7 +37,7 @@
           "command": [
             "python3",
             "-c",
-            "import pyautogui; pyautogui.hotkey([\"shift\", \"ctrl\", \"e\"]);"
+            "import pyautogui; pyautogui.hotkey(\"shift\", \"ctrl\", \"e\");"
           ]
         }
       },

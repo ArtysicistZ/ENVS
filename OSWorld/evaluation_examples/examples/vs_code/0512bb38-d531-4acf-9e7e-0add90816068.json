@@ -44,7 +44,8 @@
         "|",
         "grep",
         "undefined_publisher.test"
-      ]
+      ],
+      "shell": true
     },
     "expected": {
       "type": "rule",

@@ -39,17 +39,24 @@ logger.setLevel(logging.INFO)
 DEFAULT_REGION = "us-east-1"
 # todo: Add doc for the configuration of image, security group and network interface
 # todo: public the AMI images
+# OSWORLD_SNAPSHOT_AMI env var overrides the hardcoded AMI for all screen sizes/regions.
+_AMI_OVERRIDE = os.environ.get("OSWORLD_SNAPSHOT_AMI", "").strip()
 IMAGE_ID_MAP = {
     "us-east-1": {
-        (1920, 1080): "ami-0d23263edb96951d8",
-        # For CoACT-1, uncomment to use the following AMI
-        # (1920, 1080): "ami-0b505e9d0d99ba88c"
+        (1920, 1080): _AMI_OVERRIDE or "ami-092bc7644b0debfcd",
     },
     "ap-east-1": {
-        (1920, 1080): "ami-06850864d18fad836"
-        # Please transfer AMI by yourself from AWS us-east-1 for CoACT-1
+        (1920, 1080): _AMI_OVERRIDE or "ami-06850864d18fad836"
     }
 }
+
+# Cloud-init bootcmd runs BEFORE multi-user.target → before osworld.service starts.
+# This prevents the legacy service from ever grabbing port 5000.
+_VM_USER_DATA = """\
+#cloud-config
+bootcmd:
+  - systemctl mask osworld.service
+"""
 
 
 def _allocate_vm(region=DEFAULT_REGION, screen_size=(1920, 1080)):
@@ -109,6 +116,7 @@ def _allocate_vm(region=DEFAULT_REGION, screen_size=(1920, 1080)):
             "InstanceType": INSTANCE_TYPE,
             "EbsOptimized": True,
             "InstanceInitiatedShutdownBehavior": "terminate",
+            "UserData": _VM_USER_DATA,
             "NetworkInterfaces": [
                 {
                     "SubnetId": os.getenv('AWS_SUBNET_ID'),
@@ -121,7 +129,7 @@ def _allocate_vm(region=DEFAULT_REGION, screen_size=(1920, 1080)):
             ],
             "BlockDeviceMappings": [
                 {
-                    "DeviceName": "/dev/sda1", 
+                    "DeviceName": "/dev/sda1",
                     "Ebs": {
                         # "VolumeInitializationRate": 300
                         "VolumeSize": 30,  # Size in GB

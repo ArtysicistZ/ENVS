@@ -17,49 +17,92 @@ from desktop_env.providers.aws.config import (
 )
 from desktop_env.providers.aws.scheduler_utils import schedule_instance_termination
 from desktop_env.providers.aws import vm_reset
+from desktop_env.providers.aws.manager import _VM_USER_DATA
 
 logger = logging.getLogger("desktopenv.providers.aws.AWSProvider")
 logger.setLevel(logging.INFO)
 
 WAIT_DELAY = 15
 MAX_ATTEMPTS = 10
-VM_READY_TIMEOUT = 360  # seconds to wait for OSWorld server inside the VM to be reachable
-VM_READY_POLL = 10      # poll interval in seconds
+VM_READY_TIMEOUT = 120  # seconds to wait for OSWorld server inside the VM to be reachable
+VM_READY_POLL = 5       # poll interval in seconds
 
 
 class AWSProvider(Provider):
 
-    def _wait_for_vm_server(self, ip: str, port: int = 5000):
+    def _check_port_5000(self, ip: str) -> bool:
+        """Return True if port 5000 responds to /health or /screenshot."""
+        for endpoint in ("/health", "/screenshot"):
+            try:
+                r = requests.get(f"http://{ip}:5000{endpoint}", timeout=5)
+                if r.status_code == 200:
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def _resetd_reset(self, ip: str, instance_id: str) -> dict:
+        """Call /reset on the reset daemon directly (no verify). Returns response dict."""
+        config = vm_reset.ResetClientConfig(port=AWS_RESETD_PORT, timeout=60)
+        return vm_reset._request_json(
+            method="POST", ip=ip, endpoint="/reset",
+            payload={"instance_id": instance_id}, config=config,
+        )
+
+    def _fix_port_5000_via_resetd(self, ip: str, instance_id: str) -> bool:
+        """Use the reset daemon (port 5001) to fix port 5000.
+
+        Sends /reset to restart the correct service. Single attempt with
+        up to 60s wait for port 5000 to come up.
+        """
+        logger.info(
+            "Fix-port-5000: sending /reset to %s:%s ...", ip, AWS_RESETD_PORT,
+        )
+        try:
+            result = self._resetd_reset(ip, instance_id)
+            logger.info("Reset result: %s", result)
+        except Exception as exc:
+            logger.warning("Reset call failed: %s", exc)
+            return False
+
+        # Wait for the server wrapper to find X display and start Flask
+        for _ in range(12):  # 12 × 5s = 60s
+            time.sleep(5)
+            if self._check_port_5000(ip):
+                logger.info("Port 5000 is UP after fix via resetd.")
+                return True
+
+        logger.warning("Port 5000 still down after fix via resetd.")
+        return False
+
+    def _wait_for_vm_server(self, ip: str, instance_id: str = "", port: int = 5000):
         """Wait until the OSWorld HTTP server inside the VM is reachable."""
         health_url = f"http://{ip}:{port}/health"
-        screenshot_url = f"http://{ip}:{port}/screenshot"
         deadline = time.time() + VM_READY_TIMEOUT
-        logger.info(
-            "Waiting for VM server at %s (fallback %s, timeout=%ss)...",
-            health_url,
-            screenshot_url,
-            VM_READY_TIMEOUT,
-        )
-        while time.time() < deadline:
-            try:
-                r = requests.get(health_url, timeout=5)
-                if r.status_code == 200:
-                    logger.info(f"VM server at {health_url} is ready.")
-                    return
-            except Exception:
-                pass
-            try:
-                r = requests.get(screenshot_url, timeout=5)
-                if r.status_code == 200:
-                    logger.info(f"VM server at {screenshot_url} is ready.")
-                    return
-            except Exception:
-                pass
+        logger.info("Waiting for VM server at %s (timeout=%ss)...", health_url, VM_READY_TIMEOUT)
+
+        # Phase 1: quick check — port 5000 might already be up
+        for _ in range(6):  # 6 × 5s = 30s
+            if self._check_port_5000(ip):
+                logger.info(f"VM server at {ip}:5000 is ready.")
+                return
             logger.info(f"VM not ready yet, retrying in {VM_READY_POLL}s...")
             time.sleep(VM_READY_POLL)
+
+        # Phase 2: port 5000 is down — try fixing via reset daemon
+        if instance_id and self._is_resetd_reachable(ip):
+            if self._fix_port_5000_via_resetd(ip, instance_id):
+                return
+
+        # Phase 3: final check with remaining time
+        while time.time() < deadline:
+            if self._check_port_5000(ip):
+                logger.info(f"VM server at {ip}:5000 is ready.")
+                return
+            time.sleep(VM_READY_POLL)
+
         raise TimeoutError(
-            f"VM server at {health_url} (fallback {screenshot_url}) "
-            f"did not become ready within {VM_READY_TIMEOUT}s"
+            f"VM server at {health_url} did not become ready within {VM_READY_TIMEOUT}s"
         )
 
     def start_emulator(self, path_to_vm: str, headless: bool, *args, **kwargs):
@@ -116,7 +159,7 @@ class AWSProvider(Provider):
                         logger.warning("No public IP address available for VNC access")
 
                     if private_ip_address:
-                        self._wait_for_vm_server(private_ip_address)
+                        self._wait_for_vm_server(private_ip_address, instance_id=path_to_vm)
                         try:
                             vm_reset.snapshot_home(private_ip_address, path_to_vm, port=AWS_RESETD_PORT)
                         except Exception as e:
@@ -141,42 +184,54 @@ class AWSProvider(Provider):
             logger.error(f"Failed to create AMI from the instance {path_to_vm}: {str(e)}")
             raise
 
+    def _is_resetd_reachable(self, ip: str, timeout: int = 5) -> bool:
+        """Quick health probe of the reset daemon. Returns True only if port 5001 responds."""
+        try:
+            r = requests.get(f"http://{ip}:{AWS_RESETD_PORT}/health", timeout=timeout)
+            return r.status_code == 200
+        except Exception:
+            return False
+
     def revert_to_snapshot(self, path_to_vm: str, snapshot_name: str):
-        """Revert to clean state. Tries a fast soft reset (~5-8s) first; falls back to
-        full terminate+relaunch (~89s) if the instance is unreachable or unhealthy."""
+        """Revert to clean state via soft reset. No silent fallbacks — raises on failure."""
         ec2_client = boto3.client('ec2', region_name=self.region)
 
-        # --- Fast path: soft reset the running instance ---
-        try:
-            response = ec2_client.describe_instances(InstanceIds=[path_to_vm])
-            instance = response['Reservations'][0]['Instances'][0]
-            state = instance['State']['Name']
-            private_ip = instance.get('PrivateIpAddress', '')
+        response = ec2_client.describe_instances(InstanceIds=[path_to_vm])
+        instance = response['Reservations'][0]['Instances'][0]
+        state = instance['State']['Name']
+        private_ip = instance.get('PrivateIpAddress', '')
 
-            if state == 'running' and private_ip:
-                logger.info(f"Soft-resetting {path_to_vm} at {private_ip} via reset daemon...")
-                reset_result = vm_reset.soft_reset(private_ip, path_to_vm, vm_reset.ResetClientConfig(port=AWS_RESETD_PORT))
-                if reset_result.get("status") == "reused_clean":
-                    logger.info(
-                        "Soft reset complete for %s: %s (%s). Reusing instance.",
-                        path_to_vm,
-                        reset_result.get("status"),
-                        reset_result.get("reason_code"),
-                    )
-                    return path_to_vm
-                logger.warning(
-                    "Soft reset requested relaunch for %s: reason=%s details=%s",
-                    path_to_vm,
-                    reset_result.get("reason_code"),
-                    reset_result.get("details"),
-                )
-            else:
-                logger.info(f"Instance {path_to_vm} is in state '{state}'; falling back to full relaunch.")
-        except Exception as e:
-            logger.warning(f"Soft reset failed ({e}); falling back to full terminate+relaunch.")
+        if state != 'running' or not private_ip:
+            raise RuntimeError(
+                f"Instance {path_to_vm} is in state '{state}' (ip={private_ip!r}); "
+                f"cannot soft-reset a non-running instance."
+            )
 
-        # --- Slow path: terminate old instance and launch fresh from AMI ---
-        return self._full_relaunch(path_to_vm, snapshot_name)
+        if not self._is_resetd_reachable(private_ip):
+            raise RuntimeError(
+                f"Reset daemon not reachable on {private_ip}:{AWS_RESETD_PORT} "
+                f"(5s probe). Instance {path_to_vm} cannot be soft-reset."
+            )
+
+        logger.info(f"Soft-resetting {path_to_vm} at {private_ip} via reset daemon...")
+        reset_result = vm_reset.soft_reset(
+            private_ip, path_to_vm,
+            vm_reset.ResetClientConfig(port=AWS_RESETD_PORT, timeout=30),
+        )
+        if reset_result.get("status") == "reused_clean":
+            logger.info(
+                "Soft reset complete for %s: %s (%s). Reusing instance.",
+                path_to_vm,
+                reset_result.get("status"),
+                reset_result.get("reason_code"),
+            )
+            return path_to_vm
+
+        raise RuntimeError(
+            f"Soft reset failed for {path_to_vm}: "
+            f"reason={reset_result.get('reason_code')} "
+            f"details={reset_result.get('details')}"
+        )
 
     def _full_relaunch(self, path_to_vm: str, snapshot_name: str):
         """Terminate the existing instance and launch a fresh one from the AMI. ~89s."""
@@ -256,6 +311,7 @@ class AWSProvider(Provider):
                 "InstanceType": instance_type,
                 "EbsOptimized": True,
                 "InstanceInitiatedShutdownBehavior": "terminate",
+                "UserData": _VM_USER_DATA,
                 "NetworkInterfaces": [
                     {
                         "SubnetId": subnet_id,
@@ -280,41 +336,23 @@ class AWSProvider(Provider):
             new_instance = ec2_client.run_instances(**run_instances_params)
             new_instance_id = new_instance['Instances'][0]['InstanceId']
             logger.info(f"New instance {new_instance_id} launched from AMI {image_id}.")
-            logger.info(f"Waiting for instance {new_instance_id} to be running...")
-            ec2_client.get_waiter('instance_running').wait(InstanceIds=[new_instance_id])
+
+            try:
+                logger.info(f"Waiting for instance {new_instance_id} to be running...")
+                ec2_client.get_waiter('instance_running').wait(InstanceIds=[new_instance_id])
+            except Exception as wait_err:
+                logger.error(f"Waiter failed for {new_instance_id}, terminating leaked instance: {wait_err}")
+                try:
+                    ec2_client.terminate_instances(InstanceIds=[new_instance_id])
+                except Exception:
+                    pass
+                raise
 
             logger.info(f"Instance {new_instance_id} is ready.")
-            # Schedule cloud-side termination via EventBridge Scheduler (auto-resolve role ARN)
+            # Schedule cloud-side termination via EventBridge Scheduler
             try:
                 if enable_ttl:
                     schedule_instance_termination(self.region, new_instance_id, ttl_seconds, AWS_SCHEDULER_ROLE_ARN, logger)
-            except Exception as e:
-                logger.warning(f"Failed to create EventBridge Scheduler for {new_instance_id}: {e}")
-
-            # Schedule cloud-side termination via EventBridge Scheduler (same as allocation path)
-            try:
-                if enable_ttl and os.getenv('AWS_SCHEDULER_ROLE_ARN'):
-                    scheduler_client = boto3.client('scheduler', region_name=self.region)
-                    schedule_name = f"osworld-ttl-{new_instance_id}-{int(time.time())}"
-                    eta_scheduler = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
-                    schedule_expression = f"at({eta_scheduler.strftime('%Y-%m-%dT%H:%M:%S')})"
-                    target_arn = "arn:aws:scheduler:::aws-sdk:ec2:terminateInstances"
-                    input_payload = '{"InstanceIds":["' + new_instance_id + '"]}'
-                    scheduler_client.create_schedule(
-                        Name=schedule_name,
-                        ScheduleExpression=schedule_expression,
-                        FlexibleTimeWindow={"Mode": "OFF"},
-                        Target={
-                            "Arn": target_arn,
-                            "RoleArn": os.getenv('AWS_SCHEDULER_ROLE_ARN'),
-                            "Input": input_payload
-                        },
-                        State='ENABLED',
-                        Description=f"OSWorld TTL terminate for {new_instance_id}"
-                    )
-                    logger.info(f"Scheduled EC2 termination via EventBridge Scheduler for snapshot revert: name={schedule_name}, when={eta_scheduler.isoformat()} (UTC)")
-                else:
-                    logger.info("TTL enabled but AWS_SCHEDULER_ROLE_ARN not set; skipping scheduler for snapshot revert.")
             except Exception as e:
                 logger.warning(f"Failed to create EventBridge Scheduler for {new_instance_id}: {e}")
 
@@ -334,8 +372,8 @@ class AWSProvider(Provider):
 
             return new_instance_id
 
-        except ClientError as e:
-            logger.error(f"Failed to revert to snapshot {snapshot_name} for the instance {path_to_vm}: {str(e)}")
+        except Exception as e:
+            logger.error(f"Failed to revert to snapshot {snapshot_name} for the instance {path_to_vm}: {e}")
             raise
 
 

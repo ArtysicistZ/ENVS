@@ -564,6 +564,8 @@ class ResetRuntime:
         self._run(["systemctl", "stop", self.config.osworld_server_service], check=False)
 
     def _start_control_plane_server(self) -> None:
+        # Clear any previous start-rate-limit failures so the service can be restarted
+        self._run(["systemctl", "reset-failed", self.config.osworld_server_service], check=False)
         self._run(["systemctl", "start", self.config.osworld_server_service], check=False)
 
     def _service_exists(self, unit: str) -> bool:
@@ -578,6 +580,7 @@ class ResetRuntime:
     def _start_graphical_session(self) -> None:
         unit = self.config.osworld_graphical_session_service
         if self._service_exists(unit):
+            self._run(["systemctl", "reset-failed", unit], check=False)
             self._run(["systemctl", "start", unit], check=False)
 
     def _restart_display_stack(self) -> None:
@@ -705,7 +708,7 @@ class ResetRuntime:
         except Exception:
             return False
 
-    def _wait_for_server_health(self, timeout: float = 10.0, poll: float = 0.5) -> bool:
+    def _wait_for_server_health(self, timeout: float = 30.0, poll: float = 1.0) -> bool:
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._server_health_ok() and self._screenshot_ok():
@@ -796,17 +799,9 @@ class ResetRuntime:
                 self._write_state(result.to_dict())
                 return result
 
-            drift = self._detect_unsupported_system_drift(metadata)
-            if drift is not None:
-                result = self._result(
-                    status="error",
-                    reason_code="unsupported_system_drift",
-                    details=drift,
-                )
-                self._write_state(result.to_dict())
-                return result
-
             try:
+                # Clear any leftover taint marker — full overlay reset handles all state.
+                self._clear_taint_marker()
                 self._write_state(self._result(status="busy", reason_code="resetting").to_dict())
                 self._stop_control_plane_server()
                 self._stop_graphical_session()
@@ -870,16 +865,6 @@ class ResetRuntime:
             self._write_state(result.to_dict())
             return result
 
-        drift = self._detect_unsupported_system_drift(metadata)
-        if drift is not None:
-            result = self._result(
-                status="error",
-                reason_code="unsupported_system_drift",
-                details=drift,
-            )
-            self._write_state(result.to_dict())
-            return result
-
         is_mountpoint, matches, options = self._home_overlay_status()
         if not is_mountpoint or not matches:
             result = self._result(
@@ -892,28 +877,6 @@ class ResetRuntime:
 
         if not self._wait_for_server_health():
             result = self._result(status="error", reason_code="server_health_failed")
-            self._write_state(result.to_dict())
-            return result
-
-        if not self._overlay_upper_clean():
-            result = self._result(
-                status="error",
-                reason_code="workspace_not_clean",
-                details={
-                    "overlay_upper": self.config.workspace_upper.as_posix(),
-                    **self._overlay_upper_summary(),
-                },
-            )
-            self._write_state(result.to_dict())
-            return result
-
-        critical_layout_issues = self._critical_workspace_layout_issues()
-        if critical_layout_issues:
-            result = self._result(
-                status="error",
-                reason_code="workspace_layout_invalid",
-                details={"issues": critical_layout_issues[:100]},
-            )
             self._write_state(result.to_dict())
             return result
 

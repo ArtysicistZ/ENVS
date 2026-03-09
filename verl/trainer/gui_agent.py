@@ -248,6 +248,8 @@ def parse_action_to_structure_output(text, factor, origin_resized_height, origin
             
             if "start_box" in param_name or "end_box" in param_name:
                 ori_box = param
+                # Strip box tokens before parsing coordinates
+                ori_box = ori_box.replace("<|box_start|>", "").replace("<|box_end|>", "")
                 # Remove parentheses and split the string by commas
                 numbers = ori_box.replace("(", "").replace(")", "").split(",")
 
@@ -354,21 +356,17 @@ def parsing_response_to_pyautogui_code(responses, image_height: int, image_width
             else:
                 key_to_press = action_inputs.get("press", "")
 
-            if hotkey == "arrowleft":
-                hotkey = "left"
+            if key_to_press == "arrowleft":
+                key_to_press = "left"
+            elif key_to_press == "arrowright":
+                key_to_press = "right"
+            elif key_to_press == "arrowup":
+                key_to_press = "up"
+            elif key_to_press == "arrowdown":
+                key_to_press = "down"
+            elif key_to_press == "space":
+                key_to_press = " "
 
-            elif hotkey == "arrowright":
-                hotkey = "right"
-            
-            elif hotkey == "arrowup":
-                hotkey = "up"
-            
-            elif hotkey == "arrowdown":
-                hotkey = "down"
-            
-            elif hotkey == "space":
-                hotkey = " "
-                
             if key_to_press:
                 # Simulate pressing a single key
                 pyautogui_code += f"\npyautogui.press({repr(key_to_press)})"
@@ -391,13 +389,13 @@ def parsing_response_to_pyautogui_code(responses, image_height: int, image_width
             if content:
                 if input_swap:
                     pyautogui_code += f"\nimport pyperclip"
-                    pyautogui_code += f"\npyperclip.copy('{stripped_content}')"
+                    pyautogui_code += f"\npyperclip.copy({repr(stripped_content)})"
                     pyautogui_code += f"\npyautogui.hotkey('ctrl', 'v')"
                     pyautogui_code += f"\ntime.sleep(0.5)\n"
                     if content.endswith("\n") or content.endswith("\\n"):
                         pyautogui_code += f"\npyautogui.press('enter')"
                 else:
-                    pyautogui_code += f"\npyautogui.write('{stripped_content}', interval=0.1)"
+                    pyautogui_code += f"\npyautogui.write({repr(stripped_content)}, interval=0.1)"
                     pyautogui_code += f"\ntime.sleep(0.5)\n"
                     if content.endswith("\n") or content.endswith("\\n"):
                         pyautogui_code += f"\npyautogui.press('enter')"
@@ -448,9 +446,10 @@ def parsing_response_to_pyautogui_code(responses, image_height: int, image_width
         elif action_type in ["click", "left_single", "left_double", "right_single", "hover"]:
             # Parsing mouse click actions
             start_box = action_inputs.get("start_box")
-            start_box = str(start_box)
-            if start_box:
-                start_box = eval(start_box)
+            if start_box is None:
+                pass  # No coordinates provided, skip this action
+            else:
+                start_box = eval(str(start_box))
                 if len(start_box) == 4:
                     x1, y1, x2, y2 = start_box  # Assuming box is in [x1, y1, x2, y2]
                 elif len(start_box) == 2:

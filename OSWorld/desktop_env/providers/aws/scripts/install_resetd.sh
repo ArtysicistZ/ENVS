@@ -719,6 +719,20 @@ else
 fi
 
 echo "[6/6] Reloading services and preparing baseline metadata"
+# Mask legacy osworld.service to prevent port-5000 conflict with osworld-server.service
+if systemctl list-unit-files osworld.service >/dev/null 2>&1; then
+  systemctl stop osworld.service 2>/dev/null || true
+  systemctl disable osworld.service 2>/dev/null || true
+  rm -f /etc/systemd/system/osworld.service
+  systemctl daemon-reload
+  systemctl mask osworld.service 2>/dev/null || true
+  echo "Masked legacy osworld.service to prevent port-5000 conflict."
+fi
+# Open port 5001 in UFW for the reset daemon
+if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+  ufw allow 5001/tcp >/dev/null 2>&1 || true
+  echo "Opened port 5001/tcp in UFW for reset daemon."
+fi
 systemctl daemon-reload
 systemctl enable osworld-home-overlay.service
 systemctl enable osworld-resetd.service
