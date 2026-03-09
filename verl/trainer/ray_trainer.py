@@ -201,6 +201,41 @@ def _timer(name: str, timing_raw: Dict[str, float]):
     timing_raw[name] = timer.last
 
 
+def _ray_get_robust(futures: List, timeout: float, fallback_fn=None, label: str = "ray.get") -> List:
+    """ray.get() with timeout and per-future crash isolation for 64-VM robustness.
+
+    Args:
+        futures: list of Ray ObjectRefs (one per worker)
+        timeout: total wall-clock seconds to wait for all futures
+        fallback_fn: callable(idx) -> value to use for timed-out/crashed futures
+        label: log label for diagnostics
+    Returns:
+        list of results, same length as futures; failed entries use fallback_fn(idx)
+    """
+    if fallback_fn is None:
+        fallback_fn = lambda idx: None  # noqa: E731
+
+    try:
+        return ray.get(futures, timeout=timeout)
+    except ray.exceptions.GetTimeoutError:
+        print(f"[{label}] ray.get timed out after {timeout:.0f}s; collecting partial results from {len(futures)} futures")
+    except Exception as exc:
+        print(f"[{label}] ray.get error: {exc!r}; collecting partial results from {len(futures)} futures")
+
+    # Collect whatever completed; fill the rest with fallback
+    results = []
+    for idx, f in enumerate(futures):
+        try:
+            results.append(ray.get(f, timeout=0))
+        except ray.exceptions.GetTimeoutError:
+            print(f"[{label}] future[{idx}] timed out; using fallback")
+            results.append(fallback_fn(idx))
+        except Exception as exc:
+            print(f"[{label}] future[{idx}] error: {exc!r}; using fallback")
+            results.append(fallback_fn(idx))
+    return results
+
+
 def normalize_remote_server_urls(remote_server_url: Optional[str], remote_server_urls: Optional[List[str]]) -> List[str]:
     urls: List[str] = []
     if remote_server_url:
@@ -930,8 +965,15 @@ class RayPPOTrainer:
         batch_skipped = False
 
         with _timer("env_reset", local_timing):
-            reset_outputs = ray.get(
-                [worker.reset.remote(task_config) for worker, task_config in zip(active_workers, task_configs)]
+            # Timeout: RemoteEnvWorker reset does up to 3 attempts × 1200s each; give enough room
+            # for one full reset attempt per worker. If a worker hangs, _ray_get_robust returns
+            # obs_messages=None for it, which prepare_vllm_inputs_full handles gracefully.
+            _reset_timeout = float(os.environ.get("ROLLOUT_RESET_TIMEOUT", "1300"))
+            reset_outputs = _ray_get_robust(
+                [worker.reset.remote(task_config) for worker, task_config in zip(active_workers, task_configs)],
+                timeout=_reset_timeout,
+                fallback_fn=lambda idx: {"env_idx": idx, "obs_messages": None, "is_done": True, "format_reward": 0.0},
+                label=f"chunk{chunk_idx+1}/reset",
             )
         print(
             f"[chunk={chunk_idx + 1}/{total_chunks}] reset_time: {local_timing['env_reset']} "
@@ -944,7 +986,11 @@ class RayPPOTrainer:
 
         with _timer("gen", local_timing):
             for step_idx in range(self.config.env.max_steps):
-                is_done_stats = ray.get([worker.is_done.remote() for worker in active_workers])
+                is_done_stats = _ray_get_robust(
+                    [worker.is_done.remote() for worker in active_workers],
+                    timeout=30.0, fallback_fn=lambda _: True,
+                    label=f"chunk{chunk_idx+1}/is_done",
+                )
                 print(
                     f"[chunk={chunk_idx + 1}/{total_chunks}] step_idx: {step_idx}, "
                     f"finished: {sum(is_done_stats)}/{len(is_done_stats)}"
@@ -1022,8 +1068,13 @@ class RayPPOTrainer:
 
                 cur_valid_envs = [active_worker_by_env_idx[env_idx] for env_idx in valid_env_idx]
                 with _timer("env_step", local_timing):
-                    env_outputs = ray.get(
-                        [worker.step.remote(action_text) for worker, action_text in zip(cur_valid_envs, response_texts)]
+                    _step_timeout = float(os.environ.get("ROLLOUT_STEP_TIMEOUT", "330"))
+                    _step_futures = [worker.step.remote(action_text) for worker, action_text in zip(cur_valid_envs, response_texts)]
+                    env_outputs = _ray_get_robust(
+                        _step_futures,
+                        timeout=_step_timeout,
+                        fallback_fn=lambda idx: {"env_idx": valid_env_idx[idx], "obs_messages": None, "is_done": True, "format_reward": 0.0},
+                        label=f"chunk{chunk_idx+1}/step{step_idx}",
                     )
 
                 for single_output in env_outputs:
@@ -1049,13 +1100,29 @@ class RayPPOTrainer:
             if batch_skipped:
                 eval_results = [0.0] * len(task_configs)
             else:
-                eval_results = ray.get(eval_results_objects)
+                _eval_timeout = float(os.environ.get("ROLLOUT_EVAL_TIMEOUT", "350"))
+                eval_results = _ray_get_robust(
+                    eval_results_objects,
+                    timeout=_eval_timeout,
+                    fallback_fn=lambda _: 0.0,
+                    label=f"chunk{chunk_idx+1}/evaluate",
+                )
         print(
             f"[chunk={chunk_idx + 1}/{total_chunks}] evaluate_env_time: {local_timing['evaluate_env']} "
             f"| eval_results: {eval_results} | format_rewards: {format_rewards}"
         )
 
-        process_results = ray.get([worker.get_train_dict.remote() for worker in active_workers])
+        process_results = _ray_get_robust(
+            [worker.get_train_dict.remote() for worker in active_workers],
+            timeout=60.0,
+            fallback_fn=lambda _: {
+                "input_ids": torch.zeros((0,), dtype=torch.int64),
+                "labels": torch.full((0,), -100, dtype=torch.int64),
+                "attention_mask": torch.zeros((0,), dtype=torch.int64),
+                "position_ids": torch.zeros((3, 0), dtype=torch.int64),
+            },
+            label=f"chunk{chunk_idx+1}/get_train_dict",
+        )
         process_results = self._attach_rollout_step_metadata(process_results, rollout_step_metadata_by_job)
         merge_timing_raw(timing_raw, local_timing)
         return process_results, eval_results, format_rewards, task_configs
@@ -1161,9 +1228,22 @@ class RayPPOTrainer:
                     self.actor_rollout_wg.prepare_generate_sequences()
                     try:
                         for chunk_idx, task_configs_chunk in enumerate(rollout_chunks):
-                            process_results, eval_results, format_rewards, chunk_task_configs = self._run_rollout_chunk(
-                                task_configs_chunk, timing_raw, chunk_idx, len(rollout_chunks)
-                            )
+                            try:
+                                process_results, eval_results, format_rewards, chunk_task_configs = self._run_rollout_chunk(
+                                    task_configs_chunk, timing_raw, chunk_idx, len(rollout_chunks)
+                                )
+                            except Exception as chunk_exc:
+                                # Log and skip this chunk rather than crashing the training loop.
+                                # This handles unexpected errors (e.g. RayActorError, RayTaskError) not
+                                # already caught by _ray_get_robust. The training step will have
+                                # partial data; num_valid_tokens==0 check below will skip the update.
+                                print(
+                                    f"[chunk={chunk_idx + 1}/{len(rollout_chunks)}] "
+                                    f"CHUNK EXCEPTION — skipping chunk: {chunk_exc!r}"
+                                )
+                                import traceback as _tb
+                                _tb.print_exc()
+                                continue
                             start = chunk_idx * len(self.env_workers)
                             end = start + len(chunk_task_configs)
                             all_process_results[start:end] = process_results

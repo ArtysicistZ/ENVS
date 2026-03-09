@@ -48,6 +48,7 @@ checkpoints*/
 logs/
 *.log
 wandb/
+.claude/
 
 # OS files
 .DS_Store

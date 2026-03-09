@@ -280,6 +280,20 @@ def launch_app():
         # compatibility wrapper that points Chrome launches at the correct
         # browser binary while preserving the expected `~/.config/google-chrome`
         # profile layout used by the task corpus and evaluators.
+
+        # Chrome 115+ requires --user-data-dir when using --remote-debugging-port
+        # (DevTools remote debugging requires a non-default data directory).
+        # Inject it automatically if missing so task configs that omit it still work.
+        if not shell and isinstance(command, list) and command and (
+            "google-chrome" in command[0] or command[0].endswith("/google-chrome")
+        ):
+            has_rdp = any(arg.startswith("--remote-debugging-port") for arg in command)
+            has_udd = any(arg.startswith("--user-data-dir") for arg in command)
+            if has_rdp and not has_udd:
+                # Use a dedicated tmp profile so Chrome remote debugging works
+                # (Chrome 115+ refuses remote debugging on the default profile dir)
+                command = list(command) + ["--user-data-dir=/tmp/chrome-debug-profile"]
+
         subprocess.Popen(command, shell=shell, cwd=DEFAULT_WORKDIR)
         return "{:} launched successfully".format(command if shell else " ".join(command))
     except Exception as e:

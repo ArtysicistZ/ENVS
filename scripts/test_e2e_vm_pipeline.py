@@ -250,7 +250,8 @@ class Runner:
         has_obs = r.get("obs_messages") is not None
         self.check(has_obs, f"{desc}: obs_messages returned", f"{desc}: obs_messages is None")
         fmt = r.get("format_reward", -999)
-        self.check(fmt >= 0, f"{desc}: format_reward={fmt:.3f} (OK)", f"{desc}: format_reward={fmt:.3f} (parse/exec error)")
+        # > -0.2 allows stall(-0.08) + edge_noop(-0.08) = -0.11, while catching parse errors (-0.4)
+        self.check(fmt > -0.2, f"{desc}: format_reward={fmt:.3f} (OK)", f"{desc}: format_reward={fmt:.3f} (parse/exec error)")
         if expect_done:
             self.check(r.get("is_done"), f"{desc}: is_done=True", f"{desc}: is_done not True")
         elif r.get("is_done"):
@@ -623,8 +624,10 @@ class Runner:
             except Exception:
                 pass
 
-        for i in range(3):
-            self.step(pred_click(500, 400), f"episode-1 step {i+1}")
+        # Use varied coordinates to avoid cycle-repeat detection
+        ep1_coords = [(500, 400), (600, 300), (400, 500)]
+        for i, (cx, cy) in enumerate(ep1_coords):
+            self.step(pred_click(cx, cy), f"episode-1 step {i+1}")
         self.step(pred_finished("e1 done"), "episode-1 finished", expect_done=True)
 
         info("Episode 2: reset → 2 steps → finished")
@@ -644,8 +647,10 @@ class Runner:
             except Exception as exc:
                 warn(f"Reset generation check failed: {exc}"); self.warns += 1
 
-        for i in range(2):
-            self.step(pred_click(500, 400), f"episode-2 step {i+1}")
+        # Use varied coordinates to avoid cycle-repeat detection
+        ep2_coords = [(550, 450), (650, 350)]
+        for i, (cx, cy) in enumerate(ep2_coords):
+            self.step(pred_click(cx, cy), f"episode-2 step {i+1}")
         self.step(pred_finished("e2 done"), "episode-2 finished", expect_done=True)
 
     def t25_env_info(self):
