@@ -36,5 +36,13 @@ fi
 # This prevents a race where the overlay service runs before dirs exist.
 install -d -m 0755 /tmp/osworld/session/home-upper /tmp/osworld/session/home-work
 
+# Warn if inotify limit is too low (systemd needs ~10 instances per container).
+# This is the #1 cause of "exit 255" failures at scale (64+ containers).
+INOTIFY_LIMIT=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)
+if [ "$INOTIFY_LIMIT" -lt 1024 ] 2>/dev/null; then
+    echo "WARN: fs.inotify.max_user_instances=$INOTIFY_LIMIT is too low for multi-container operation." >&2
+    echo "WARN: Fix on HOST: sudo sysctl -w fs.inotify.max_user_instances=8192" >&2
+fi
+
 # Hand off to systemd as PID 1
 exec /sbin/init

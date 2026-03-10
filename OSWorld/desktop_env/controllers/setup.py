@@ -599,47 +599,47 @@ class SetupController:
         remote_debugging_url = f"http://{host}:{port}"
         logger.info("Connect to Chrome @: %s", remote_debugging_url)
         logger.debug("PLAYWRIGHT ENV: %s", repr(os.environ))
-        for attempt in range(15):
-            if attempt > 0:
-                time.sleep(5)
-
+        # Use a single Playwright context for all retries to avoid "Event loop is
+        # closed" errors when multiple threads create/destroy contexts concurrently.
+        with sync_playwright() as p:
             browser = None
-            with sync_playwright() as p:
+            for attempt in range(15):
+                if attempt > 0:
+                    time.sleep(5)
                 try:
                     browser = p.chromium.connect_over_cdp(remote_debugging_url)
-                    # break
+                    break
                 except Exception as e:
                     if attempt < 14:
                         logger.error(f"Attempt {attempt + 1}: Failed to connect, retrying. Error: {e}")
-                        # time.sleep(10)
                         continue
                     else:
                         logger.error(f"Failed to connect after multiple attempts: {e}")
                         raise e
 
-                if not browser:
-                    return
+            if not browser:
+                return
 
-                logger.info("Opening %s...", urls_to_open)
-                for i, url in enumerate(urls_to_open):
-                    # Use the first context (which should be the only one if using default profile)
-                    if i == 0:
-                        context = browser.contexts[0]
+            logger.info("Opening %s...", urls_to_open)
+            for i, url in enumerate(urls_to_open):
+                # Use the first context (which should be the only one if using default profile)
+                if i == 0:
+                    context = browser.contexts[0]
 
-                    page = context.new_page()  # Create a new page (tab) within the existing context
-                    try:
-                        page.goto(url, timeout=60000)
-                    except:
-                        logger.warning("Opening %s exceeds time limit", url)  # only for human test
-                    logger.info(f"Opened tab {i + 1}: {url}")
+                page = context.new_page()  # Create a new page (tab) within the existing context
+                try:
+                    page.goto(url, timeout=60000)
+                except:
+                    logger.warning("Opening %s exceeds time limit", url)  # only for human test
+                logger.info(f"Opened tab {i + 1}: {url}")
 
-                    if i == 0:
-                        # clear the default tab
-                        default_page = context.pages[0]
-                        default_page.close()
+                if i == 0:
+                    # clear the default tab
+                    default_page = context.pages[0]
+                    default_page.close()
 
-                # Do not close the context or browser; they will remain open after script ends
-                return browser, context
+            # Do not close the context or browser; they will remain open after script ends
+            return browser, context
 
     def _chrome_close_tabs_setup(self, urls_to_close: List[str]):
         time.sleep(5)  # Wait for Chrome to finish launching

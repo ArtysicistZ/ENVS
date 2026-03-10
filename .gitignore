@@ -50,6 +50,7 @@ logs/
 wandb/
 **.csv
 .claude/
+**test_64_screenshots/
 
 # OS files
 .DS_Store

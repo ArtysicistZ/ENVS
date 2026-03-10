@@ -259,6 +259,60 @@ def _get_machine_architecture() -> str:
         return 'unknown'
 
 
+_LAUNCH_WINDOW_WAIT = 15  # max seconds to wait for a launched app window
+
+
+def _wait_for_launched_window(command, shell: bool):
+    """Poll wmctrl until a new window appears or timeout.
+
+    This prevents blank screenshots when DesktopEnv.reset() takes a screenshot
+    right after launching an app via Popen.  Only runs on Linux.
+    """
+    if platform.system() != "Linux":
+        return
+
+    # Derive keywords to look for in wmctrl -l output
+    keywords = []
+    cmd_str = command if shell else (command[0] if command else "")
+    if "google-chrome" in str(cmd_str):
+        keywords = ["Google Chrome", "google-chrome", "Chromium", "New Tab"]
+    elif "libreoffice" in str(cmd_str):
+        keywords = ["LibreOffice"]
+    elif "gimp" in str(cmd_str):
+        keywords = ["GIMP", "GNU Image"]
+    elif "code" in str(cmd_str):
+        keywords = ["Visual Studio Code", "VS Code"]
+    elif "vlc" in str(cmd_str):
+        keywords = ["VLC"]
+    elif "thunderbird" in str(cmd_str):
+        keywords = ["Thunderbird"]
+
+    if not keywords:
+        # Unknown app — just wait a short fixed time for window to render
+        time.sleep(3)
+        return
+
+    deadline = time.time() + _LAUNCH_WINDOW_WAIT
+    while time.time() < deadline:
+        try:
+            result = subprocess.run(
+                ["wmctrl", "-l"], capture_output=True, text=True, timeout=3,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.strip().split("\n"):
+                    if any(kw.lower() in line.lower() for kw in keywords):
+                        # Window found — give it a moment to finish painting
+                        time.sleep(1)
+                        return
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+        time.sleep(1)
+
+    logger.warning("launch: window for %s not detected within %ds; continuing anyway",
+                    cmd_str if isinstance(cmd_str, str) else " ".join(cmd_str),
+                    _LAUNCH_WINDOW_WAIT)
+
+
 @app.route('/setup/launch', methods=["POST"])
 def launch_app():
     data = request.json
@@ -310,7 +364,22 @@ def launch_app():
                     "--no-first-run",
                 ]
 
+        # Add reuseaddr to socat to prevent bind failures from TIME_WAIT sockets
+        # left by a previous socat after overlay reset.
+        if not shell and isinstance(command, list) and command and command[0] == "socat":
+            command = list(command)
+            for i, arg in enumerate(command):
+                if "tcp-listen:" in arg and "reuseaddr" not in arg:
+                    command[i] = arg.replace(",fork", ",reuseaddr,fork") if ",fork" in arg else arg + ",reuseaddr"
+
         subprocess.Popen(command, shell=shell, cwd=DEFAULT_WORKDIR)
+
+        # Wait for the launched application's window to appear so the next
+        # screenshot captures a rendered desktop (not just the root background).
+        # Without this, DesktopEnv.reset() takes a blank screenshot because
+        # Popen returns before the X11 window is mapped and painted.
+        _wait_for_launched_window(command, shell)
+
         return "{:} launched successfully".format(command if shell else " ".join(command))
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500

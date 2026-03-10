@@ -192,12 +192,45 @@ else
     "${SESSION_COMMON_ENV[@]}" \
     "${WM_BIN}" &
   SESSION_PID=$!
-fi
 
-# Re-assert a visible root background after session startup so screenshots have a usable desktop surface.
-(
-  sleep 5
-  DISPLAY="${DISPLAY_NUM}" xsetroot -solid "#2E3440" -cursor_name left_ptr >/dev/null 2>&1 || true
-) &
+  # Start desktop accessories (panel + wallpaper) in the OpenBox fallback.
+  # These run in the same X session context so they can connect to the display.
+  (
+    sleep 3  # wait for openbox to initialize
+
+    # Wallpaper: generate an Ubuntu-like gradient if none exists, then apply it
+    WALLPAPER="${DESKTOP_HOME}/wallpaper.png"
+    if [ ! -f "${WALLPAPER}" ]; then
+      python3 -c "
+from PIL import Image, ImageDraw
+img = Image.new('RGB', (1920, 1080), (44, 0, 30))
+draw = ImageDraw.Draw(img)
+for y in range(1080):
+    r = int(44 + (77-44) * y / 1080)
+    g = int(0 + (20-0) * y / 1080)
+    b = int(30 + (60-30) * y / 1080)
+    draw.line([(0, y), (1919, y)], fill=(r, g, b))
+img.save('${WALLPAPER}')
+" 2>/dev/null || true
+      chown "${DESKTOP_USER}:${DESKTOP_USER}" "${WALLPAPER}" 2>/dev/null || true
+    fi
+
+    if command -v feh >/dev/null 2>&1 && [ -f "${WALLPAPER}" ]; then
+      runuser -u "${DESKTOP_USER}" -- env \
+        "${SESSION_COMMON_ENV[@]}" \
+        feh --bg-fill "${WALLPAPER}" >/dev/null 2>&1 || true
+    else
+      # Fallback: at least set a non-black root background
+      DISPLAY="${DISPLAY_NUM}" xsetroot -solid "#2C001E" -cursor_name left_ptr >/dev/null 2>&1 || true
+    fi
+
+    # Panel/taskbar: tint2 provides a Windows/GNOME-like taskbar at the bottom
+    if command -v tint2 >/dev/null 2>&1; then
+      runuser -u "${DESKTOP_USER}" -- env \
+        "${SESSION_COMMON_ENV[@]}" \
+        tint2 >/dev/null 2>&1 &
+    fi
+  ) &
+fi
 
 wait "${SESSION_PID}"

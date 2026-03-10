@@ -173,8 +173,17 @@ async def _lifespan(app: FastAPI):
     provider = (os.environ.get("PROVIDER") or _default_provider()).strip().lower() or "docker"
     if provider not in ("docker", "vmware", "aws"):
         provider = "docker"
-    logger.info("Startup: PROVIDER=%s", provider)
-    print(f"[remote_env_server] Startup: PROVIDER={provider}", file=sys.stderr, flush=True)
+
+    # Scale the anyio thread pool for concurrent sync endpoints.
+    # Each slot's reset/step/evaluate runs as a blocking sync def in the thread
+    # pool.  Default limit is 40; with 64 slots doing concurrent resets (each
+    # blocking up to 150s), requests queue and timeout.
+    import anyio
+    _max_slots = int(os.environ.get("REMOTE_MAX_SLOTS", "80"))
+    anyio.to_thread.current_default_thread_limiter().total_tokens = _max_slots
+
+    logger.info("Startup: PROVIDER=%s, thread_pool=%d", provider, _max_slots)
+    print(f"[remote_env_server] Startup: PROVIDER={provider}, thread_pool={_max_slots}", file=sys.stderr, flush=True)
     yield
 
 
@@ -1313,21 +1322,31 @@ def env_history_messages_get(slot_id: int = 0):
 
 @app.get("/health")
 def health():
-    """Health check: reports provider, pool size, and env statuses."""
-    kvm_available = os.path.exists("/dev/kvm")
+    """Lightweight health check for load balancers and monitoring."""
     with _slots_lock:
         pool_size = len(_slots)
-        slot_statuses = {str(k): ("initialized" if v.env is not None else "not_initialized") for k, v in _slots.items()}
+    return {"status": "ok", "provider": _provider_name, "pool_size": pool_size}
+
+
+@app.get("/status")
+def status():
+    """Detailed status for monitoring 64-container deployments."""
+    with _slots_lock:
+        pool_size = len(_slots)
+        slot_details = {}
+        for k, v in _slots.items():
+            slot_details[str(k)] = {
+                "initialized": v.env is not None,
+                "is_done": v.is_done,
+                "step_counter": v.step_counter,
+                "instruction": (v.instruction or "")[:80] if v.instruction else None,
+            }
     return {
         "status": "ok",
         "provider": _provider_name,
         "observation_type": OBSERVATION_TYPE,
-        "screenshot_source": "DesktopEnv.controller.get_screenshot() (same as run_uitars)",
-        "kvm_available": kvm_available,
-        "kvm_device": "/dev/kvm" if kvm_available else None,
         "pool_size": pool_size,
-        "slot_statuses": slot_statuses,
-        "message": "KVM hardware acceleration enabled" if kvm_available else "KVM not available, using software emulation"
+        "slots": slot_details,
     }
 
 
