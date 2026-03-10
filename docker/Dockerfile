@@ -30,15 +30,12 @@ RUN find /etc/systemd/system \
     -exec rm -f {} + 2>/dev/null || true
 
 # ── Desktop stack + OSWorld runtime dependencies ────────────────────────────
-# OpenBox + tint2 (taskbar) + feh (wallpaper) provide a functional desktop
-# for Docker containers.  The launch script auto-starts tint2 and sets a
-# wallpaper so screenshots show a real desktop with a taskbar.
-# If ubuntu-desktop-minimal is also installed (e.g. custom image), the launch
-# script will prefer GNOME session over OpenBox.
+# Xfce4 provides a complete desktop environment (panels, window decorations,
+# desktop wallpaper, file manager) that works with software rendering.
+# On AWS VMs with GNOME installed, the launch script prefers GNOME session.
 RUN apt-get update && apt-get install -y \
-    openbox \
-    tint2 \
-    feh \
+    xfce4 \
+    xfce4-whiskermenu-plugin \
     xinit \
     xvfb \
     xauth \

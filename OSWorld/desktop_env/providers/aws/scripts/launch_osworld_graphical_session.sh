@@ -57,6 +57,11 @@ ensure_writable_session_home() {
     "${XDG_DATA_HOME}/keyrings"
     "${XDG_STATE_HOME}"
     "${DESKTOP_HOME}/.thunderbird"
+    "${XDG_CONFIG_HOME}/xfce4"
+    "${XDG_CONFIG_HOME}/xfce4/xfconf"
+    "${XDG_CONFIG_HOME}/xfce4/xfconf/xfce-perchannel-xml"
+    "${XDG_CONFIG_HOME}/xfce4/panel"
+    "${XDG_CONFIG_HOME}/xfce4/desktop"
   )
   local path
   for path in "${paths[@]}"; do
@@ -81,6 +86,12 @@ ensure_writable_session_home() {
   install_autostart_override "gnome-initial-setup-copy-worker.desktop"
   install_autostart_override "update-notifier.desktop"
   install_autostart_override "tracker-miner-fs-3.desktop"
+  install_autostart_override "xfce4-screensaver.desktop"
+  install_autostart_override "xscreensaver.desktop"
+  install_autostart_override "light-locker.desktop"
+  install_autostart_override "gnome-keyring-secrets.desktop"
+  install_autostart_override "gnome-keyring-pkcs11.desktop"
+  install_autostart_override "gnome-keyring-ssh.desktop"
 }
 
 cleanup() {
@@ -169,6 +180,7 @@ SESSION_COMMON_ENV=(
 )
 
 if command -v gnome-session >/dev/null 2>&1; then
+  # Full GNOME desktop (AWS / VM environments)
   runuser -u "${DESKTOP_USER}" -- env \
     "${SESSION_COMMON_ENV[@]}" \
     XDG_CURRENT_DESKTOP=ubuntu:GNOME \
@@ -178,59 +190,29 @@ if command -v gnome-session >/dev/null 2>&1; then
     GSK_RENDERER=cairo \
     /usr/bin/gnome-session --session=ubuntu &
   SESSION_PID=$!
-else
-  # Lightweight fallback: openbox window manager when gnome-session is unavailable
-  # (e.g., minimal Docker containers). Xorg is already running above.
-  WM_BIN="$(command -v openbox || command -v fluxbox || command -v twm || true)"
-  if [ -z "${WM_BIN}" ]; then
-    echo "No window manager found (gnome-session, openbox, fluxbox, twm); Xorg-only mode" >&2
-    # Stay alive as long as Xorg runs
-    wait "${XORG_PID}"
-    exit 0
-  fi
+elif command -v xfce4-session >/dev/null 2>&1; then
+  # Xfce4 desktop (Docker containers with software rendering)
+  # Disable screensaver / screen lock before starting the session
   runuser -u "${DESKTOP_USER}" -- env \
     "${SESSION_COMMON_ENV[@]}" \
-    "${WM_BIN}" &
+    xfconf-query -c xfce4-screensaver -p /saver/enabled -s false --create -t bool 2>/dev/null || true
+  runuser -u "${DESKTOP_USER}" -- env \
+    "${SESSION_COMMON_ENV[@]}" \
+    xfconf-query -c xfce4-screensaver -p /lock/enabled -s false --create -t bool 2>/dev/null || true
+  runuser -u "${DESKTOP_USER}" -- env \
+    "${SESSION_COMMON_ENV[@]}" \
+    xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled -s false --create -t bool 2>/dev/null || true
+
+  runuser -u "${DESKTOP_USER}" -- env \
+    "${SESSION_COMMON_ENV[@]}" \
+    XDG_CURRENT_DESKTOP=XFCE \
+    XDG_SESSION_DESKTOP=xfce \
+    DESKTOP_SESSION=xfce \
+    xfce4-session &
   SESSION_PID=$!
-
-  # Start desktop accessories (panel + wallpaper) in the OpenBox fallback.
-  # These run in the same X session context so they can connect to the display.
-  (
-    sleep 3  # wait for openbox to initialize
-
-    # Wallpaper: generate an Ubuntu-like gradient if none exists, then apply it
-    WALLPAPER="${DESKTOP_HOME}/wallpaper.png"
-    if [ ! -f "${WALLPAPER}" ]; then
-      python3 -c "
-from PIL import Image, ImageDraw
-img = Image.new('RGB', (1920, 1080), (44, 0, 30))
-draw = ImageDraw.Draw(img)
-for y in range(1080):
-    r = int(44 + (77-44) * y / 1080)
-    g = int(0 + (20-0) * y / 1080)
-    b = int(30 + (60-30) * y / 1080)
-    draw.line([(0, y), (1919, y)], fill=(r, g, b))
-img.save('${WALLPAPER}')
-" 2>/dev/null || true
-      chown "${DESKTOP_USER}:${DESKTOP_USER}" "${WALLPAPER}" 2>/dev/null || true
-    fi
-
-    if command -v feh >/dev/null 2>&1 && [ -f "${WALLPAPER}" ]; then
-      runuser -u "${DESKTOP_USER}" -- env \
-        "${SESSION_COMMON_ENV[@]}" \
-        feh --bg-fill "${WALLPAPER}" >/dev/null 2>&1 || true
-    else
-      # Fallback: at least set a non-black root background
-      DISPLAY="${DISPLAY_NUM}" xsetroot -solid "#2C001E" -cursor_name left_ptr >/dev/null 2>&1 || true
-    fi
-
-    # Panel/taskbar: tint2 provides a Windows/GNOME-like taskbar at the bottom
-    if command -v tint2 >/dev/null 2>&1; then
-      runuser -u "${DESKTOP_USER}" -- env \
-        "${SESSION_COMMON_ENV[@]}" \
-        tint2 >/dev/null 2>&1 &
-    fi
-  ) &
+else
+  echo "FATAL: No supported desktop environment found (need gnome-session or xfce4-session)" >&2
+  exit 1
 fi
 
 wait "${SESSION_PID}"
