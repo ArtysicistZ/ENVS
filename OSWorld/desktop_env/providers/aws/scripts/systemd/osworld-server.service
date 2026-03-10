@@ -1,0 +1,34 @@
+[Unit]
+Description=OSWorld control-plane server
+After=network-online.target osworld-graphical-session.service
+Wants=network-online.target
+Requires=osworld-home-overlay.service
+Requires=osworld-graphical-session.service
+After=osworld-home-overlay.service
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=__DESKTOP_RUNTIME_DIR__/bus
+Environment=XDG_RUNTIME_DIR=__DESKTOP_RUNTIME_DIR__
+Environment=HOME=__DESKTOP_HOME__
+Environment=XAUTHORITY=__DESKTOP_HOME__/.Xauthority
+Environment=OSWORLD_SERVER_STATE_ROOT=/run/osworld-server
+Environment=OSWORLD_CONTROL_PLANE_ROOT=__CONTROL_PLANE_HASH_ROOT__
+Environment=OSWORLD_CONTROL_PLANE_STAMP_PATH=__CONTROL_PLANE_STAMP_PATH__
+Environment=PYTHONPATH=__APP_ROOT__/OSWorld:__SYSTEM_DIST_PACKAGES__
+User=__DESKTOP_USER__
+Group=__DESKTOP_USER__
+RuntimeDirectory=osworld-server
+RuntimeDirectoryMode=0700
+WorkingDirectory=__DESKTOP_HOME__
+ExecStart=__PYTHON_BIN__ __APP_ROOT__/OSWorld/desktop_env/providers/aws/scripts/start_osworld_server.py __PYTHON_BIN__ __APP_ROOT__/OSWorld/desktop_env/server/main.py
+Restart=always
+RestartSec=2
+# Kill quickly (5s) so overlay reset doesn't wait 90s for LibreOffice/Chrome children.
+TimeoutStopSec=5
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

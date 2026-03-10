@@ -1,0 +1,73 @@
+# Requirements for running remote_env_server.py with docker provider
+# Install: pip install -r scripts/requirements_remote_env_server.txt
+#
+# For PyTorch (CPU-only, avoids 900MB CUDA download on non-GPU hosts):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# Then install everything else:
+#   pip install -r scripts/requirements_remote_env_server.txt
+
+# ── Web framework ──────────────────────────────────────────────────────────
+fastapi
+uvicorn
+flask
+requests
+requests-toolbelt
+
+# ── Docker provider ─────────────────────────────────────────────────────────
+docker
+
+# ── ML/Vision ──────────────────────────────────────────────────────────────
+# torch + torchvision: install separately with --index-url for CPU build
+torchvision                # requires torch (install CPU build first)
+transformers
+tokenizers
+huggingface-hub
+qwen-vl-utils
+
+# ── OSWorld desktop evaluators ─────────────────────────────────────────────
+gymnasium
+Pillow
+pyautogui
+playwright
+pydrive2==1.6.0            # newer versions conflict with system OpenSSL
+opencv-python              # cv2; use opencv-python-headless on headless servers
+numpy
+scipy
+pandas
+scikit-image
+
+# ── Document/PDF evaluators ────────────────────────────────────────────────
+pypdf
+pdfplumber
+pdfminer.six
+pdf2image
+python-docx
+python-pptx
+openpyxl
+xlrd
+formulas
+lxml
+cssselect
+borb
+
+# ── Text/NLP evaluators ────────────────────────────────────────────────────
+beautifulsoup4
+rapidfuzz
+nltk
+word2number
+tldextract
+xmltodict
+imagehash
+
+# ── Audio evaluators ───────────────────────────────────────────────────────
+librosa
+pyacoustid
+
+# ── Ray (for RemoteEnvWorker in training) ─────────────────────────────────
+ray
+
+# ── Misc utilities ─────────────────────────────────────────────────────────
+python-dotenv
+psutil
+pyperclip
+fastdtw

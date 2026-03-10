@@ -1,0 +1,22 @@
+# Minimal OSWorld test image — mock servers only, no desktop stack.
+# Builds in ~3 minutes (no Chrome/VS Code/LibreOffice).
+# Used to verify DockerProvider container lifecycle end-to-end.
+#
+# Build:  docker build -t osworld:latest -f docker/Dockerfile.test .
+# Test:   PROVIDER=docker python scripts/remote_env_server.py
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir flask pillow requests
+
+COPY docker/mock_osworld_server.py /mock_osworld_server.py
+
+EXPOSE 5000 5001
+
+CMD ["python3", "/mock_osworld_server.py"]

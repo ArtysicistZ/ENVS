@@ -68,7 +68,7 @@
     "expected": {
       "type": "rule",
       "rules": {
-        "sql": "select sum(1) > 0 from messageAttributes where attributeID = 58 and value = 1 and messageID in (select id from messages where folderID = 13);"
+        "sql": "select (select count(*) from messageAttributes where attributeID = 58 and value = 1 and messageID in (select id from messages where folderID = 13)) = (select count(*) from messages where folderID = 13);"
       }
     }
   },

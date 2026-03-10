@@ -58,35 +58,36 @@ MAX_PIXELS = 16384 * 28 * 28
 MAX_RATIO = 200
 
 # 定义一个函数来解析每个 action
-def parse_action(action_str):
-    try:
-        # 解析字符串为 AST 节点
-        node = ast.parse(action_str, mode='eval')
+def _escape_backslashes_in_string_literals(s: str) -> str:
+    """Escape raw backslashes inside single-quoted string literals so ast.parse doesn't fail
+    on Windows-style paths like C:\\Users\\test where \\U is an invalid unicode escape."""
+    import re as _re
+    # Replace each single-quoted string's content: escape any \ that isn't already \\
+    def fix_str(m):
+        inner = m.group(1)
+        # Escape lone backslashes (not already doubled)
+        inner = _re.sub(r'\\(?!\\)', r'\\\\', inner)
+        return "'" + inner + "'"
+    return _re.sub(r"'([^']*)'", fix_str, s)
 
-        # 确保节点是一个表达式
+
+def parse_action(action_str):
+    def _do_parse(s):
+        node = ast.parse(s, mode='eval')
         if not isinstance(node, ast.Expression):
             raise ValueError("Not an expression")
-
-        # 获取表达式的主体
         call = node.body
-
-        # 确保主体是一个函数调用
         if not isinstance(call, ast.Call):
             raise ValueError("Not a function call")
-
-        # 获取函数名
         if isinstance(call.func, ast.Name):
             func_name = call.func.id
         elif isinstance(call.func, ast.Attribute):
             func_name = call.func.attr
         else:
             func_name = None
-
-        # 获取关键字参数
         kwargs = {}
         for kw in call.keywords:
             key = kw.arg
-            # 处理不同类型的值，这里假设都是常量
             if isinstance(kw.value, ast.Constant):
                 value = kw.value.value
             elif isinstance(kw.value, ast.Str):  # 兼容旧版本 Python
@@ -94,12 +95,17 @@ def parse_action(action_str):
             else:
                 value = None
             kwargs[key] = value
+        return {'function': func_name, 'args': kwargs}
 
-        return {
-            'function': func_name,
-            'args': kwargs
-        }
-
+    try:
+        return _do_parse(action_str)
+    except SyntaxError:
+        # Retry with backslashes escaped (handles Windows paths like C:\Users\test)
+        try:
+            return _do_parse(_escape_backslashes_in_string_literals(action_str))
+        except Exception as e2:
+            print(f"Failed to parse action '{action_str}' (after backslash escape): {e2}")
+            return None
     except Exception as e:
         print(f"Failed to parse action '{action_str}': {e}")
         return None
@@ -248,6 +254,8 @@ def parse_action_to_structure_output(text, factor, origin_resized_height, origin
             
             if "start_box" in param_name or "end_box" in param_name:
                 ori_box = param
+                # Strip box tokens before parsing coordinates
+                ori_box = ori_box.replace("<|box_start|>", "").replace("<|box_end|>", "")
                 # Remove parentheses and split the string by commas
                 numbers = ori_box.replace("(", "").replace(")", "").split(",")
 
@@ -354,21 +362,17 @@ def parsing_response_to_pyautogui_code(responses, image_height: int, image_width
             else:
                 key_to_press = action_inputs.get("press", "")
 
-            if hotkey == "arrowleft":
-                hotkey = "left"
+            if key_to_press == "arrowleft":
+                key_to_press = "left"
+            elif key_to_press == "arrowright":
+                key_to_press = "right"
+            elif key_to_press == "arrowup":
+                key_to_press = "up"
+            elif key_to_press == "arrowdown":
+                key_to_press = "down"
+            elif key_to_press == "space":
+                key_to_press = " "
 
-            elif hotkey == "arrowright":
-                hotkey = "right"
-            
-            elif hotkey == "arrowup":
-                hotkey = "up"
-            
-            elif hotkey == "arrowdown":
-                hotkey = "down"
-            
-            elif hotkey == "space":
-                hotkey = " "
-                
             if key_to_press:
                 # Simulate pressing a single key
                 pyautogui_code += f"\npyautogui.press({repr(key_to_press)})"
@@ -391,13 +395,13 @@ def parsing_response_to_pyautogui_code(responses, image_height: int, image_width
             if content:
                 if input_swap:
                     pyautogui_code += f"\nimport pyperclip"
-                    pyautogui_code += f"\npyperclip.copy('{stripped_content}')"
+                    pyautogui_code += f"\npyperclip.copy({repr(stripped_content)})"
                     pyautogui_code += f"\npyautogui.hotkey('ctrl', 'v')"
                     pyautogui_code += f"\ntime.sleep(0.5)\n"
                     if content.endswith("\n") or content.endswith("\\n"):
                         pyautogui_code += f"\npyautogui.press('enter')"
                 else:
-                    pyautogui_code += f"\npyautogui.write('{stripped_content}', interval=0.1)"
+                    pyautogui_code += f"\npyautogui.write({repr(stripped_content)}, interval=0.1)"
                     pyautogui_code += f"\ntime.sleep(0.5)\n"
                     if content.endswith("\n") or content.endswith("\\n"):
                         pyautogui_code += f"\npyautogui.press('enter')"
@@ -448,9 +452,10 @@ def parsing_response_to_pyautogui_code(responses, image_height: int, image_width
         elif action_type in ["click", "left_single", "left_double", "right_single", "hover"]:
             # Parsing mouse click actions
             start_box = action_inputs.get("start_box")
-            start_box = str(start_box)
-            if start_box:
-                start_box = eval(start_box)
+            if start_box is None:
+                pass  # No coordinates provided, skip this action
+            else:
+                start_box = eval(str(start_box))
                 if len(start_box) == 4:
                     x1, y1, x2, y2 = start_box  # Assuming box is in [x1, y1, x2, y2]
                 elif len(start_box) == 2:
@@ -1251,7 +1256,7 @@ class RemoteEnvWorker:
         last_err = None
         for attempt in range(self.REMOTE_RESET_RETRIES + 1):
             try:
-                resp = self._post("/env/reset", {"task_config": task_config}, timeout=self.REMOTE_RESET_TIMEOUT)
+                resp = self._post("/env/reset", {"task_config": task_config, "slot_id": self.worker_idx}, timeout=self.REMOTE_RESET_TIMEOUT)
                 break
             except Exception as e:
                 last_err = e
@@ -1278,7 +1283,7 @@ class RemoteEnvWorker:
     def step(self, prediction):
         self._is_init = False
         try:
-            resp = self._post("/env/step", {"prediction": prediction}, timeout=self.REMOTE_STEP_TIMEOUT)
+            resp = self._post("/env/step", {"prediction": prediction, "slot_id": self.worker_idx}, timeout=self.REMOTE_STEP_TIMEOUT)
         except Exception as e:
             print(f"RemoteEnvWorker step HTTP error: {e}")
             return {"env_idx": self.worker_idx, "obs_messages": None, "is_done": True, "format_reward": -1.0}
@@ -1300,7 +1305,7 @@ class RemoteEnvWorker:
         last_err = None
         for attempt in range(self.REMOTE_EVALUATE_RETRIES + 1):
             try:
-                score = self._post("/env/evaluate", {}, timeout=self.REMOTE_EVALUATE_TIMEOUT)
+                score = self._post("/env/evaluate", {"slot_id": self.worker_idx}, timeout=self.REMOTE_EVALUATE_TIMEOUT)
                 score_float = float(score)
                 print(f"RemoteEnvWorker[{self.worker_idx}] evaluate: score={score_float}, instruction={self.instruction}")
                 return score_float

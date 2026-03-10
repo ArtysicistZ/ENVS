@@ -5,7 +5,7 @@
 #   - Resource (GPUs, model, rollout): cluster.
 #   - Executions (reset/step/evaluate): remote server on EC2 (PROVIDER=aws); see docs/REMOTE_ENV_SERVER_RUNBOOK.md.
 #
-# 1) On EC2 (e.g. 18.206.172.166): cd ~/arpo_remote_env && source arpo_env/bin/activate && ./scripts/start_remote_env_aws.sh
+# 1) On EC2 (e.g. 18.206.172.166): cd ~/arpo_remote_env && source arpo_env/bin/activate && ./scripts/training/start_remote_env_aws.sh
 # 2) Test from cluster (reset can take 1-5 min: VM + Chrome): curl -s -w "\\nHTTP %{http_code} time %{time_total}s\\n" -X POST http://<EC2_IP>:15001/env/reset -H "Content-Type: application/json" -d '{"task_config":{}}' --max-time 300
 #    If 500 "VM failed to become ready within timeout": on server (no KVM) set DOCKER_VM_READY_TIMEOUT=1800 and create evaluation_examples/settings/proxy/dataimpulse.json (echo '{}').
 #    Common 503 cause: server needs AWS creds + boto3. Configure on the SERVER host (18.206.172.166), NOT on the training machine:

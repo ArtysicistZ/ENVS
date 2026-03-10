@@ -138,8 +138,8 @@ class PythonController:
         Executes a python command on the server.
         It can be used to execute the pyautogui commands, or... any other python command. who knows?
         """
-        # command_list = ["python", "-c", self.pkgs_prefix.format(command=command)]
-        command_list = ["python", "-c", self.pkgs_prefix.format(command=command)]
+        # Use string replace instead of .format() to avoid KeyError on { } in pyautogui commands
+        command_list = ["python", "-c", self.pkgs_prefix.replace("{command}", command)]
         payload = json.dumps({"command": command_list, "shell": False})
 
         for _ in range(self.retry_times):

@@ -33,7 +33,8 @@
         "|",
         "grep",
         "njpwerner.autodocstring"
-      ]
+      ],
+      "shell": true
     },
     "expected": {
       "type": "rule",

@@ -19,7 +19,7 @@ set -e
 # DeepX cluster: server indices 1–4. Server 2 is occupied — use 3 or 4.
 # Use hostnames so SSH works from inside the cluster (IPs may timeout from other nodes).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 SERVER_1="${ARPO_SERVER_1:-deepx-a100-40g-1}"
 SERVER_2="${ARPO_SERVER_2:-deepx-a100-40g-2}"   # occupied
@@ -66,8 +66,8 @@ run_training() {
   # ARPO-style Ray tuning: reduce false-positive worker kills from Ray's memory monitor.
   export RAY_memory_usage_threshold="${RAY_memory_usage_threshold:-0.8}"
   export RAY_memory_monitor_refresh_ms="${RAY_memory_monitor_refresh_ms:-0}"
-  if [[ -f scripts/clear_ray_logs.sh ]]; then
-    bash scripts/clear_ray_logs.sh || true
+  if [[ -f scripts/utils/clear_ray_logs.sh ]]; then
+    bash scripts/utils/clear_ray_logs.sh || true
   fi
   echo "Starting training on $(hostname) with config=configs/smoke_remote_env.yaml"
   python -m verl.trainer.main config=configs/smoke_remote_env.yaml
@@ -96,7 +96,7 @@ if [[ -n "${1:-}" ]]; then
   ssh -i "$key" -o StrictHostKeyChecking=accept-new "$host" "\
     export PYTHONUNBUFFERED=1 HYDRA_FULL_ERROR=1 VERL_LOGGING_LEVEL=DEBUG MKL_SERVICE_FORCE_INTEL=1 MKL_THREADING_LAYER=GNU \
       RAY_memory_usage_threshold=\${RAY_memory_usage_threshold:-0.8} RAY_memory_monitor_refresh_ms=\${RAY_memory_monitor_refresh_ms:-0}; \
-    cd $remote_dir && ( [ -f scripts/clear_ray_logs.sh ] && bash scripts/clear_ray_logs.sh || true ) && \
+    cd $remote_dir && ( [ -f scripts/utils/clear_ray_logs.sh ] && bash scripts/utils/clear_ray_logs.sh || true ) && \
     python -m verl.trainer.main config=configs/smoke_remote_env.yaml"
 else
   run_training "$REPO_ROOT"

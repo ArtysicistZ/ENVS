@@ -19,7 +19,7 @@ import os
 import sys
 
 # Add project root so we can import verl and load config
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
@@ -45,7 +45,7 @@ def main():
     except Exception as e:
         print(f"WARNING: Could not load config: {e}. Using defaults.")
         train_files = "OSWorld/evaluation_examples/test_smoke_4.json"
-        remote_url = "http://35.175.248.181:15001"
+        remote_url = "http://67.202.26.249:15001"
 
     if not os.path.isabs(train_files):
         train_files = os.path.join(_PROJECT_ROOT, train_files)

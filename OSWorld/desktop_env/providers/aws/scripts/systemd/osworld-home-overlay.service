@@ -1,0 +1,23 @@
+[Unit]
+Description=OSWorld disposable /home overlay
+DefaultDependencies=no
+After=local-fs.target
+Before=graphical.target osworld-resetd.service osworld-graphical-session.service osworld-server.service
+
+[Service]
+Type=oneshot
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=OSWORLD_RESET_USER=__DESKTOP_USER__
+Environment=OSWORLD_CONTROL_PLANE_ROOT=__CONTROL_PLANE_HASH_ROOT__
+Environment=OSWORLD_CONTROL_PLANE_STAMP_PATH=__CONTROL_PLANE_STAMP_PATH__
+Environment=OSWORLD_RESET_HOME=__DESKTOP_HOME__
+Environment=OSWORLD_RESET_BASELINE_HOME=/opt/osworld/baseline/home-user
+Environment=OSWORLD_RESET_SESSION_ROOT=__SESSION_ROOT__
+Environment=OSWORLD_RESET_STATE_ROOT=/var/lib/osworld-reset
+Environment=PYTHONPATH=__APP_ROOT__/OSWorld:__SYSTEM_DIST_PACKAGES__
+ExecStart=__PYTHON_BIN__ __APP_ROOT__/OSWorld/desktop_env/providers/aws/reset_runtime.py mount-home
+ExecStop=__PYTHON_BIN__ __APP_ROOT__/OSWorld/desktop_env/providers/aws/reset_runtime.py umount-home
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

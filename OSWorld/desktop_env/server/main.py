@@ -3,6 +3,7 @@ import os
 import platform
 import shlex
 import json
+import re
 import subprocess, signal
 import time
 from pathlib import Path
@@ -19,6 +20,10 @@ from PIL import Image, ImageGrab
 from Xlib import display, X
 from flask import Flask, request, jsonify, send_file, abort  # , send_from_directory
 from lxml.etree import _Element
+try:
+    from waitress import serve as waitress_serve
+except ImportError:
+    waitress_serve = None
 
 platform_name: str = platform.system()
 
@@ -58,6 +63,12 @@ else:
     BaseWrapper = Any
 
 from pyxcursor import Xcursor
+from runtime_paths import (
+    normalize_command_for_runtime,
+    resolve_user_path,
+    server_artifact_path,
+    user_home,
+)
 
 # todo: need to reformat and organize this whole file
 
@@ -66,11 +77,17 @@ app = Flask(__name__)
 pyautogui.PAUSE = 0
 pyautogui.DARWIN_CATCH_UP_TIME = 0
 
-TIMEOUT = 1800  # seconds
+TIMEOUT = 30  # seconds — window-wait cap for open_file; never block setup for more than 30s
 
 logger = app.logger
 recording_process = None  # fixme: this is a temporary solution for recording, need to be changed to support multiple-process
-recording_path = "/tmp/recording.mp4"
+recording_path = server_artifact_path("recording.mp4").as_posix()
+DEFAULT_WORKDIR = user_home().as_posix()
+
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"})
 
 
 @app.route('/setup/execute', methods=['POST'])
@@ -83,6 +100,8 @@ def execute_command():
 
     if isinstance(command, str) and not shell:
         command = shlex.split(command)
+
+    command = normalize_command_for_runtime(command, shell=shell)
 
     # Expand user directory
     for i, arg in enumerate(command):
@@ -102,6 +121,7 @@ def execute_command():
             shell=shell,
             text=True,
             timeout=120,
+            cwd=DEFAULT_WORKDIR,
             creationflags=flags,
         )
         return jsonify({
@@ -131,6 +151,8 @@ def execute_command_with_verification():
     if isinstance(command, str) and not shell:
         command = shlex.split(command)
 
+    command = normalize_command_for_runtime(command, shell=shell)
+
     # Expand user directory
     for i, arg in enumerate(command):
         if arg.startswith("~/"):
@@ -149,6 +171,7 @@ def execute_command_with_verification():
             shell=shell,
             text=True,
             timeout=120,
+            cwd=DEFAULT_WORKDIR,
             creationflags=flags,
         )
         
@@ -245,16 +268,49 @@ def launch_app():
     if isinstance(command, str) and not shell:
         command = shlex.split(command)
 
+    command = normalize_command_for_runtime(command, shell=shell)
+
     # Expand user directory
     for i, arg in enumerate(command):
         if arg.startswith("~/"):
             command[i] = os.path.expanduser(arg)
 
     try:
-        if 'google-chrome' in command and _get_machine_architecture() == 'arm':
-            index = command.index('google-chrome')
-            command[index] = 'chromium'  # arm64 chrome is not available yet, can only use chromium
-        subprocess.Popen(command, shell=shell)
+        # Keep `google-chrome` intact even on ARM. The AWS runtime provisions a
+        # compatibility wrapper that points Chrome launches at the correct
+        # browser binary while preserving the expected `~/.config/google-chrome`
+        # profile layout used by the task corpus and evaluators.
+
+        # Chrome 115+ requires --user-data-dir when using --remote-debugging-port
+        # (DevTools remote debugging requires a non-default data directory).
+        # Inject it automatically if missing so task configs that omit it still work.
+        if not shell and isinstance(command, list) and command and (
+            "google-chrome" in command[0] or command[0].endswith("/google-chrome")
+        ):
+            has_rdp = any(arg.startswith("--remote-debugging-port") for arg in command)
+            has_udd = any(arg.startswith("--user-data-dir") for arg in command)
+            if has_rdp and not has_udd:
+                # Chrome 115+ blocks remote debugging when using the DEFAULT profile
+                # path (~/.config/google-chrome). We must use a non-default directory.
+                # Use /tmp/chrome-dbg so it is always writable and never equals the
+                # default path. Clear any stale Singleton* files first so a fresh
+                # Chrome instance can always acquire the lock and bind the debug port.
+                import shutil as _shutil
+                _dbg_dir = "/tmp/chrome-dbg"
+                # Wipe the entire debug profile dir so Chrome always starts fresh:
+                # stale Singleton files, old profile data, and lock files all cause
+                # Chrome to refuse to bind --remote-debugging-port.
+                try:
+                    _shutil.rmtree(_dbg_dir)
+                except OSError:
+                    pass
+                os.makedirs(_dbg_dir, exist_ok=True)
+                command = list(command) + [
+                    f"--user-data-dir={_dbg_dir}",
+                    "--no-first-run",
+                ]
+
+        subprocess.Popen(command, shell=shell, cwd=DEFAULT_WORKDIR)
         return "{:} launched successfully".format(command if shell else " ".join(command))
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -264,7 +320,7 @@ def launch_app():
 def capture_screen_with_cursor():
     # fixme: when running on virtual machines, the cursor is not captured, don't know why
 
-    file_path = os.path.join(os.path.dirname(__file__), "screenshots", "screenshot.png")
+    file_path = server_artifact_path("screenshots", "screenshot.png").as_posix()
     user_platform = platform.system()
 
     # Ensure the screenshots directory exists
@@ -317,13 +373,53 @@ def capture_screen_with_cursor():
 
         img.save(file_path)
     elif user_platform == "Linux":
-        cursor_obj = Xcursor()
-        imgarray = cursor_obj.getCursorImageArrayFast()
-        cursor_img = Image.fromarray(imgarray)
-        screenshot = pyautogui.screenshot()
-        cursor_x, cursor_y = pyautogui.position()
-        screenshot.paste(cursor_img, (cursor_x, cursor_y), cursor_img)
-        screenshot.save(file_path)
+        include_cursor = request.args.get("cursor", "0") == "1" or os.getenv(
+            "OSWORLD_ENABLE_LINUX_CURSOR_OVERLAY", "0"
+        ) == "1"
+        screenshot_captured = False
+
+        def _capture_with_command(cmd: list[str], timeout_seconds: int) -> bool:
+            try:
+                subprocess.run(
+                    cmd,
+                    check=True,
+                    timeout=timeout_seconds,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return os.path.exists(file_path) and os.path.getsize(file_path) > 0
+            except Exception:
+                return False
+
+        # Prefer GNOME-native capture first (composited frame); fallback to
+        # X11 root capture only if GNOME's D-Bus screenshot interface is not
+        # reachable.
+        for cmd in (["gnome-screenshot", "-f", file_path], ["scrot", file_path]):
+            if _capture_with_command(cmd, timeout_seconds=2):
+                screenshot_captured = True
+                break
+
+        if not screenshot_captured:
+            return jsonify({
+                "status": "error",
+                "message": "Unable to capture screenshot on Linux",
+            }), 503
+
+        # Cursor overlay is optional on Linux. It is disabled by default because
+        # cursor/Xlib access is a frequent source of cold-start hangs under
+        # Xvfb-backed sessions. The main screenshot path should remain fast and
+        # reliable even if cursor capture is unavailable.
+        if include_cursor:
+            try:
+                cursor_obj = Xcursor()
+                imgarray = cursor_obj.getCursorImageArrayFast()
+                cursor_img = Image.fromarray(imgarray)
+                screenshot = Image.open(file_path).convert("RGBA")
+                cursor_x, cursor_y = pyautogui.position()
+                screenshot.paste(cursor_img, (cursor_x, cursor_y), cursor_img)
+                screenshot.save(file_path)
+            except Exception as e:
+                logger.warning(f"Failed to capture cursor on Linux, screenshot will not have a cursor. Error: {e}")
     elif user_platform == "Darwin":  # (Mac OS)
         # Use the screencapture utility to capture the screen with the cursor
         subprocess.run(["screencapture", "-C", file_path])
@@ -1116,7 +1212,7 @@ def get_directory_tree():
     if 'path' not in data:
         return jsonify(error="Missing 'path' parameter"), 400
 
-    start_path = data['path']
+    start_path = resolve_user_path(data['path']).as_posix()
     # Ensure the provided path is a directory
     if not os.path.isdir(start_path):
         return jsonify(error="The provided path is not a directory"), 400
@@ -1130,7 +1226,7 @@ def get_directory_tree():
 def get_file():
     # Retrieve filename from the POST request
     if 'file_path' in request.form:
-        file_path = os.path.expandvars(os.path.expanduser(request.form['file_path']))
+        file_path = resolve_user_path(request.form['file_path']).as_posix()
     else:
         return jsonify({"error": "file_path is required"}), 400
 
@@ -1156,7 +1252,7 @@ def get_file():
 def upload_file():
     # Retrieve filename from the POST request
     if 'file_path' in request.form and 'file_data' in request.files:
-        file_path = os.path.expandvars(os.path.expanduser(request.form['file_path']))
+        file_path = resolve_user_path(request.form['file_path']).as_posix()
         file = request.files["file_data"]
         
         try:
@@ -1203,7 +1299,7 @@ def change_wallpaper():
     if not path:
         return "Path not supplied!", 400
 
-    path = Path(os.path.expandvars(os.path.expanduser(path)))
+    path = resolve_user_path(path)
 
     if not path.exists():
         return f"File not found: {path}", 404
@@ -1234,7 +1330,7 @@ def download_file():
     if not url or not path:
         return "Path or URL not supplied!", 400
 
-    path = Path(os.path.expandvars(os.path.expanduser(path)))
+    path = resolve_user_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     max_retries = 3
@@ -1290,7 +1386,7 @@ def open_file():
     if not path:
         return "Path not supplied!", 400
 
-    path_obj = Path(os.path.expandvars(os.path.expanduser(path)))
+    path_obj = resolve_user_path(path)
 
     # Check if it's a file path that exists
     is_file_path = path_obj.exists()
@@ -1342,35 +1438,52 @@ def open_file():
                     break
             elif os_name == 'Linux':
                 try:
-                    # Using wmctrl to list windows and check if any window title contains the filename
+                    # Using wmctrl to list windows and check if any window title contains the filename.
+                    # Also accept any window belonging to the application (e.g. "LibreOffice 7.3" start
+                    # center appears immediately, before the specific filename title is ready).
                     result = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, check=True)
                     window_list = result.stdout.strip().split('\n')
                     if not result.stdout.strip():
-                        pass  # No windows, just continue waiting
+                        pass  # No windows yet, keep waiting
                     else:
+                        # Derive app keyword from the extension / filename for broad matching
+                        ext = os.path.splitext(file_name)[1].lower()
+                        app_keywords = [file_name, file_name_without_ext]
+                        if ext in ('.xlsx', '.xls', '.ods', '.csv'):
+                            app_keywords.append('LibreOffice')
+                        elif ext in ('.docx', '.doc', '.odt'):
+                            app_keywords.append('LibreOffice')
+                        elif ext in ('.pptx', '.ppt', '.odp'):
+                            app_keywords.append('LibreOffice')
+                        elif ext in ('.xcf', '.png', '.jpg', '.jpeg', '.bmp', '.gif'):
+                            app_keywords.append('GIMP')
                         for window in window_list:
-                            if file_name in window or file_name_without_ext in window:
-                                # a window is found, now activate it
+                            if any(kw in window for kw in app_keywords):
                                 window_id = window.split()[0]
-                                subprocess.run(['wmctrl', '-i', '-a', window_id], check=True)
+                                try:
+                                    subprocess.run(['wmctrl', '-i', '-a', window_id], check=True)
+                                except subprocess.CalledProcessError:
+                                    pass
                                 window_found = True
                                 break
                         if window_found:
                             break
                 except (subprocess.CalledProcessError, FileNotFoundError):
-                    # wmctrl might not be installed or the window manager isn't ready.
-                    # We just log it once and let the main loop retry.
                     if 'wmctrl_failed_once' not in locals():
                         logger.warning("wmctrl command is not ready, will keep retrying...")
                         wmctrl_failed_once = True
-                    pass  # Let the outer loop retry
 
             time.sleep(1)
 
         if window_found:
             return "File opened and window activated successfully"
         else:
-            return f"Failed to find window for {file_name} within {TIMEOUT} seconds.", 500
+            # Application was started via xdg-open; window may still be loading.
+            # Return success so the reset does not time out — the agent will see
+            # the loading screen on the first screenshot.
+            logger.warning("open_file: window for %s not detected by wmctrl within %ds; "
+                           "returning success anyway (app likely still loading)", file_name, TIMEOUT)
+            return "File opened (window not yet detected, app still loading)"
 
     except Exception as e:
         return f"Failed to open {path}. Error: {e}", 500
@@ -1680,7 +1793,7 @@ def run_bash_script():
     
     # Expand user directory if provided
     if working_dir:
-        working_dir = os.path.expanduser(working_dir)
+        working_dir = resolve_user_path(working_dir).as_posix()
         if not os.path.exists(working_dir):
             return jsonify({
                 'status': 'error',
@@ -1794,4 +1907,8 @@ def run_bash_script():
             pass
 
 if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0")
+    debug = os.environ.get("OSWORLD_SERVER_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+    if not debug and waitress_serve is not None:
+        waitress_serve(app, host="0.0.0.0", port=5000, threads=16)
+    else:
+        app.run(debug=debug, use_reloader=False, host="0.0.0.0")

@@ -2,7 +2,7 @@
 # Use this when the cluster cannot ping/curl your Mac (e.g. different VPN/subnet).
 #
 # Setup:
-#   1. On Mac: start env server:  python scripts/remote_env_server.py
+#   1. On Mac: start env server:  python scripts/servers/remote_env_server.py
 #   2. On Mac: open tunnel to cluster (keeps running):
 #        ssh -R 15001:localhost:15001 kevinzyz@<CLUSTER_IP_or_HOSTNAME>
 #   3. On cluster: run this config:

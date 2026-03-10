@@ -16,7 +16,9 @@ Note that we don't combine the main with ray_trainer as ray_trainer is used by o
 
 python -m verl.trainer.main config=configs/smoke_remote_env_8gpu_a100.yaml
 
-bash /home/kevinzyz/yincheng/arpo/scripts/run_smoke_remote_env_8gpu_a100.sh
+bash scripts/training/run_smoke_remote_env_8gpu_a100.sh
+
+bash scripts/training/run_smoke_remote_env_8gpu_a100_paper_candidate.sh
 """
 
 import json
@@ -168,7 +170,7 @@ def main():
             print(f"Task error cause:\n{e.cause}")
         else:
             print(f"Exception: {type(e).__name__}: {e}")
-        print("Tip: run scripts/clear_ray_logs.sh before training to remove previous logs and get a fresh session.")
+        print("Tip: run scripts/utils/clear_ray_logs.sh before training to remove previous logs and get a fresh session.")
         os._exit(0)
     finally:
         try:

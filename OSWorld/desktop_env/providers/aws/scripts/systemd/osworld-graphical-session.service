@@ -1,0 +1,20 @@
+[Unit]
+Description=OSWorld graphical desktop session
+After=network-online.target osworld-home-overlay.service
+Wants=network-online.target
+Requires=osworld-home-overlay.service
+
+[Service]
+Type=simple
+Environment=HOME=__DESKTOP_HOME__
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=__DESKTOP_HOME__/.Xauthority
+Environment=XDG_RUNTIME_DIR=__DESKTOP_RUNTIME_DIR__
+Environment=XDG_SESSION_TYPE=x11
+Environment=DESKTOP_SESSION=ubuntu
+ExecStart=/bin/bash __APP_ROOT__/OSWorld/desktop_env/providers/aws/scripts/launch_osworld_graphical_session.sh __DESKTOP_USER__ __DESKTOP_HOME__ __DESKTOP_RUNTIME_DIR__
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

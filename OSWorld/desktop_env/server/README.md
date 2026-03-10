@@ -369,17 +369,18 @@ sudo systemctl start osworld_server.service
 
 ### Accessibility Tree Support
 
-To support the accessibility tree functionality, you'll need to install pyastpi2 in your Ubuntu environment. This package enables access to accessibility information and tree structures.
+To support the accessibility tree functionality on Ubuntu, install the distro
+package `python3-pyatspi`. This provides the `pyatspi` module used by the
+server.
 
 Installation steps:
 
 ```bash
-# Update package list and ensure pip is installed
+# Update package list
 sudo apt-get update
-sudo apt-get install python3-pip
 
-# Install pyastpi2 using pip
-pip3 install pyastpi2
+# Install the Ubuntu package that provides the pyatspi module
+sudo apt-get install python3-pyatspi
 ```
 
 ### Xorg Configuration

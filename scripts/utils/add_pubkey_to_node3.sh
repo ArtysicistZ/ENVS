@@ -4,7 +4,7 @@
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 KEY="$REPO_ROOT/ssh_keys_for_users/ssh_keys_for_users_172.174.34.71/ssh_keys_for_users/kevinzyz_id_ed25519"
 
 if [[ ! -f "$KEY" ]]; then

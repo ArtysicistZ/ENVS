@@ -20,6 +20,7 @@ venv/
 .venv/
 .venv
 *.venv/
+*arpo_env/
 env/
 vmware_vm_data
 
@@ -47,6 +48,8 @@ checkpoints*/
 logs/
 *.log
 wandb/
+**.csv
+.claude/
 
 # OS files
 .DS_Store
@@ -59,8 +62,6 @@ models--*/
 
 # Temporary files
 *.tmp
-single_task_test.json
-QUICK_START.txt
 
 # Keep structure but not large files
 !.gitkeep

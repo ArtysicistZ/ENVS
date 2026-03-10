@@ -9,36 +9,209 @@ from datetime import datetime, timedelta, timezone
 from desktop_env.providers.base import Provider
 
 # TTL configuration
-from desktop_env.providers.aws.config import ENABLE_TTL, DEFAULT_TTL_MINUTES, AWS_SCHEDULER_ROLE_ARN
+from desktop_env.providers.aws.config import (
+    AWS_RESETD_PORT,
+    AWS_SCHEDULER_ROLE_ARN,
+    DEFAULT_TTL_MINUTES,
+    ENABLE_TTL,
+)
 from desktop_env.providers.aws.scheduler_utils import schedule_instance_termination
+from desktop_env.providers.aws import vm_reset
+from desktop_env.providers.aws.manager import _VM_USER_DATA
 
 logger = logging.getLogger("desktopenv.providers.aws.AWSProvider")
 logger.setLevel(logging.INFO)
 
 WAIT_DELAY = 15
 MAX_ATTEMPTS = 10
-VM_READY_TIMEOUT = 360  # seconds to wait for OSWorld server inside the VM to be reachable
-VM_READY_POLL = 10      # poll interval in seconds
+VM_READY_TIMEOUT = 120  # seconds to wait for OSWorld server inside the VM to be reachable
+VM_READY_POLL = 5       # poll interval in seconds
 
 
 class AWSProvider(Provider):
 
-    def _wait_for_vm_server(self, ip: str, port: int = 5000):
-        """Wait until the OSWorld HTTP server inside the VM is reachable on port 5000."""
-        url = f"http://{ip}:{port}/screenshot"
-        deadline = time.time() + VM_READY_TIMEOUT
-        logger.info(f"Waiting for VM server at {url} (timeout={VM_READY_TIMEOUT}s)...")
-        while time.time() < deadline:
+    def _check_port_5000(self, ip: str) -> bool:
+        """Return True if port 5000 responds to /health or /screenshot."""
+        for endpoint in ("/health", "/screenshot"):
             try:
-                r = requests.get(url, timeout=5)
+                r = requests.get(f"http://{ip}:5000{endpoint}", timeout=5)
                 if r.status_code == 200:
-                    logger.info(f"VM server at {url} is ready.")
-                    return
+                    return True
             except Exception:
                 pass
+        return False
+
+    def _resetd_reset(self, ip: str, instance_id: str) -> dict:
+        """Call /reset on the reset daemon directly (no verify). Returns response dict."""
+        config = vm_reset.ResetClientConfig(port=AWS_RESETD_PORT, timeout=60)
+        return vm_reset._request_json(
+            method="POST", ip=ip, endpoint="/reset",
+            payload={"instance_id": instance_id}, config=config,
+        )
+
+    def _fix_port_5000_via_resetd(self, ip: str, instance_id: str) -> bool:
+        """Use the reset daemon (port 5001) to fix port 5000.
+
+        Sends /reset to restart the correct service. Single attempt with
+        up to 60s wait for port 5000 to come up.
+        """
+        logger.info(
+            "Fix-port-5000: sending /reset to %s:%s ...", ip, AWS_RESETD_PORT,
+        )
+        try:
+            result = self._resetd_reset(ip, instance_id)
+            logger.info("Reset result: %s", result)
+        except Exception as exc:
+            logger.warning("Reset call failed: %s", exc)
+            return False
+
+        # Wait for the server wrapper to find X display and start Flask
+        for _ in range(12):  # 12 × 5s = 60s
+            time.sleep(5)
+            if self._check_port_5000(ip):
+                logger.info("Port 5000 is UP after fix via resetd.")
+                return True
+
+        logger.warning("Port 5000 still down after fix via resetd.")
+        return False
+
+    def _ensure_server_compat_patch(self, ip: str) -> bool:
+        """Ensure the VM's osworld-server has _normalize_command_for_runtime defined.
+
+        The installed VM image has an older main.py that calls _normalize_command_for_runtime
+        but never defines it (NameError → HTML 500 on /execute). After each overlay reset the
+        upper layer is wiped so any previous fix is gone.  We re-apply it by:
+          1. Writing usercustomize.py to the user site-packages (loaded at Python startup).
+          2. Killing the server process so systemd restarts it and picks up the new file.
+          3. Waiting for /health to confirm the server is back up.
+        Returns True if /execute is already healthy or was successfully repaired.
+        """
+        # Quick probe: is /execute already healthy?
+        try:
+            r = requests.post(
+                f"http://{ip}:5000/execute",
+                json={"command": ["python3", "-c", "print(42)"], "shell": False},
+                timeout=8,
+            )
+            if r.status_code == 200 and r.json().get("status") == "success":
+                return True
+        except Exception:
+            pass
+
+        logger.info("Applying osworld-server _normalize_command_for_runtime patch to %s ...", ip)
+
+        usercustomize_content = (
+            "# OSWorld server compatibility fix: provides missing _normalize_command_for_runtime\\n"
+            "import builtins, sys\\n"
+            "\\n"
+            "def _normalize_command_for_runtime(command, *, shell):\\n"
+            "    server_dir = '/opt/osworld/app/OSWorld/desktop_env/server'\\n"
+            "    if server_dir not in sys.path:\\n"
+            "        sys.path.insert(0, server_dir)\\n"
+            "    try:\\n"
+            "        from runtime_paths import normalize_command_for_runtime\\n"
+            "        return normalize_command_for_runtime(command, shell=shell)\\n"
+            "    except Exception:\\n"
+            "        return command\\n"
+            "\\n"
+            "builtins._normalize_command_for_runtime = _normalize_command_for_runtime\\n"
+        )
+
+        write_code = f"""
+import os
+site_dir = '/home/user/.local/lib/python3.10/site-packages'
+os.makedirs(site_dir, exist_ok=True)
+with open(site_dir + '/usercustomize.py', 'w') as f:
+    f.write({usercustomize_content!r})
+print('PATCH_WRITTEN')
+"""
+        try:
+            resp = requests.post(
+                f"http://{ip}:5000/run_python", json={"code": write_code}, timeout=15
+            )
+            if "PATCH_WRITTEN" not in resp.json().get("output", ""):
+                logger.warning("Failed to write usercustomize.py to %s", ip)
+                return False
+        except Exception as exc:
+            logger.warning("usercustomize.py write failed for %s: %s", ip, exc)
+            return False
+
+        # Kill the server so systemd restarts it with the new usercustomize.py loaded
+        kill_code = """
+import subprocess, os, signal
+r = subprocess.run(['pgrep', '-f', 'main.py'], capture_output=True, text=True)
+for pid in r.stdout.strip().split():
+    if int(pid) != os.getpid():
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except Exception:
+            pass
+print('KILLED')
+"""
+        try:
+            requests.post(
+                f"http://{ip}:5000/run_python", json={"code": kill_code}, timeout=10
+            )
+        except Exception:
+            pass  # Expected: server may die before response is sent
+
+        # Wait for the server to restart
+        time.sleep(4)
+        for _ in range(15):
+            try:
+                r = requests.get(f"http://{ip}:5000/health", timeout=3)
+                if r.status_code == 200:
+                    break
+            except Exception:
+                pass
+            time.sleep(2)
+
+        # Final verify
+        try:
+            r = requests.post(
+                f"http://{ip}:5000/execute",
+                json={"command": ["python3", "-c", "print(42)"], "shell": False},
+                timeout=8,
+            )
+            ok = r.status_code == 200 and r.json().get("status") == "success"
+            if ok:
+                logger.info("Execute endpoint patch verified on %s.", ip)
+            else:
+                logger.warning("Execute endpoint still broken on %s after patch.", ip)
+            return ok
+        except Exception as exc:
+            logger.warning("Execute endpoint verify failed on %s: %s", ip, exc)
+            return False
+
+    def _wait_for_vm_server(self, ip: str, instance_id: str = "", port: int = 5000):
+        """Wait until the OSWorld HTTP server inside the VM is reachable."""
+        health_url = f"http://{ip}:{port}/health"
+        deadline = time.time() + VM_READY_TIMEOUT
+        logger.info("Waiting for VM server at %s (timeout=%ss)...", health_url, VM_READY_TIMEOUT)
+
+        # Phase 1: quick check — port 5000 might already be up
+        for _ in range(6):  # 6 × 5s = 30s
+            if self._check_port_5000(ip):
+                logger.info(f"VM server at {ip}:5000 is ready.")
+                return
             logger.info(f"VM not ready yet, retrying in {VM_READY_POLL}s...")
             time.sleep(VM_READY_POLL)
-        raise TimeoutError(f"VM server at {url} did not become ready within {VM_READY_TIMEOUT}s")
+
+        # Phase 2: port 5000 is down — try fixing via reset daemon
+        if instance_id and self._is_resetd_reachable(ip):
+            if self._fix_port_5000_via_resetd(ip, instance_id):
+                return
+
+        # Phase 3: final check with remaining time
+        while time.time() < deadline:
+            if self._check_port_5000(ip):
+                logger.info(f"VM server at {ip}:5000 is ready.")
+                return
+            time.sleep(VM_READY_POLL)
+
+        raise TimeoutError(
+            f"VM server at {health_url} did not become ready within {VM_READY_TIMEOUT}s"
+        )
 
     def start_emulator(self, path_to_vm: str, headless: bool, *args, **kwargs):
         logger.info("Starting AWS VM...")
@@ -51,16 +224,13 @@ class AWSProvider(Provider):
             logger.info(f"Instance {path_to_vm} current state: {state}")
 
             if state == 'running':
-                # If the instance is already running, skip starting it
                 logger.info(f"Instance {path_to_vm} is already running. Skipping start.")
                 return
 
             if state == 'stopped':
-                # Start the instance if it's currently stopped
                 ec2_client.start_instances(InstanceIds=[path_to_vm])
                 logger.info(f"Instance {path_to_vm} is starting...")
 
-                # Wait until the instance reaches 'running' state
                 waiter = ec2_client.get_waiter('instance_running')
                 waiter.wait(
                     InstanceIds=[path_to_vm],
@@ -68,7 +238,6 @@ class AWSProvider(Provider):
                 )
                 logger.info(f"Instance {path_to_vm} is now running.")
             else:
-                # For all other states (terminated, pending, etc.), log a warning
                 logger.warning(f"Instance {path_to_vm} is in state '{state}' and cannot be started.")
 
         except ClientError as e:
@@ -90,21 +259,23 @@ class AWSProvider(Provider):
                     if public_ip_address:
                         vnc_url = f"http://{public_ip_address}:5910/vnc.html"
                         logger.info("="*80)
-                        logger.info(f"🖥️  VNC Web Access URL: {vnc_url}")
-                        logger.info(f"📡 Public IP: {public_ip_address}")
-                        logger.info(f"🏠 Private IP: {private_ip_address}")
+                        logger.info(f"VNC Web Access URL: {vnc_url}")
+                        logger.info(f"Public IP: {public_ip_address}")
+                        logger.info(f"Private IP: {private_ip_address}")
                         logger.info("="*80)
-                        print(f"\n🌐 VNC Web Access URL: {vnc_url}")
-                        print(f"📍 Please open the above address in the browser for remote desktop access\n")
                     else:
                         logger.warning("No public IP address available for VNC access")
 
                     if private_ip_address:
-                        self._wait_for_vm_server(private_ip_address)
+                        self._wait_for_vm_server(private_ip_address, instance_id=path_to_vm)
+                        self._ensure_server_compat_patch(private_ip_address)
+                        try:
+                            vm_reset.snapshot_home(private_ip_address, path_to_vm, port=AWS_RESETD_PORT)
+                        except Exception as e:
+                            logger.warning(f"Failed to prepare reset baseline on {private_ip_address}: {e}")
 
                     return private_ip_address
-                    # return public_ip_address
-            return ''  # Return an empty string if no IP address is found
+            return ''
         except ClientError as e:
             logger.error(f"Failed to retrieve IP address for the instance {path_to_vm}: {str(e)}")
             raise
@@ -122,49 +293,77 @@ class AWSProvider(Provider):
             logger.error(f"Failed to create AMI from the instance {path_to_vm}: {str(e)}")
             raise
 
-    # Apps to kill during soft reset — desktop applications only; never kills python/server processes
-    _SOFT_RESET_KILL_PATTERN = (
-        "chromium|firefox|libreoffice|soffice|vlc|gedit|mousepad|"
-        "thunar|nautilus|nemo|evince|eog|gimp|inkscape|code|kate|xed"
-    )
-
-    def _soft_reset_vm(self, ip: str, port: int = 5000):
-        """Kill all desktop apps inside the running VM via its HTTP API.
-
-        Does NOT kill python/server processes, so the VM's port-5000 server stays up.
-        Raises RuntimeError if the HTTP call fails (caller should fall back to full relaunch).
-        """
-        cmd = f"pkill -9 -f '{self._SOFT_RESET_KILL_PATTERN}' || true; sleep 1"
-        url = f"http://{ip}:{port}/setup/execute"
-        resp = requests.post(url, json={"command": cmd, "shell": True}, timeout=15)
-        if resp.status_code != 200:
-            raise RuntimeError(f"Soft reset returned HTTP {resp.status_code}: {resp.text[:200]}")
-        logger.info(f"Soft reset sent to {ip}:{port} — desktop apps killed.")
+    def _is_resetd_reachable(self, ip: str, timeout: int = 5) -> bool:
+        """Quick health probe of the reset daemon. Returns True only if port 5001 responds."""
+        try:
+            r = requests.get(f"http://{ip}:{AWS_RESETD_PORT}/health", timeout=timeout)
+            return r.status_code == 200
+        except Exception:
+            return False
 
     def revert_to_snapshot(self, path_to_vm: str, snapshot_name: str):
-        """Revert to clean state. Tries a fast soft reset (~5s) first; falls back to
-        full terminate+relaunch (~89s) if the instance is unreachable or unhealthy."""
+        """Revert to clean state via soft reset. No silent fallbacks — raises on failure."""
         ec2_client = boto3.client('ec2', region_name=self.region)
 
-        # --- Fast path: soft reset the running instance ---
-        try:
-            response = ec2_client.describe_instances(InstanceIds=[path_to_vm])
-            instance = response['Reservations'][0]['Instances'][0]
-            state = instance['State']['Name']
-            private_ip = instance.get('PrivateIpAddress', '')
+        response = ec2_client.describe_instances(InstanceIds=[path_to_vm])
+        instance = response['Reservations'][0]['Instances'][0]
+        state = instance['State']['Name']
+        private_ip = instance.get('PrivateIpAddress', '')
 
-            if state == 'running' and private_ip:
-                logger.info(f"Soft-resetting {path_to_vm} at {private_ip} (skipping terminate+relaunch)...")
-                self._soft_reset_vm(private_ip)
-                logger.info(f"Soft reset complete. Reusing instance {path_to_vm}.")
+        if state != 'running' or not private_ip:
+            raise RuntimeError(
+                f"Instance {path_to_vm} is in state '{state}' (ip={private_ip!r}); "
+                f"cannot soft-reset a non-running instance."
+            )
+
+        if not self._is_resetd_reachable(private_ip):
+            raise RuntimeError(
+                f"Reset daemon not reachable on {private_ip}:{AWS_RESETD_PORT} "
+                f"(5s probe). Instance {path_to_vm} cannot be soft-reset."
+            )
+
+        logger.info(f"Soft-resetting {path_to_vm} at {private_ip} via reset daemon...")
+        reset_client_config = vm_reset.ResetClientConfig(port=AWS_RESETD_PORT, timeout=60)
+        reset_result = vm_reset.soft_reset(private_ip, path_to_vm, reset_client_config)
+
+        # Verify retry: reset succeeded but verify timed out (osworld-server still starting up).
+        # Wait up to 90s more and retry just the verify step before giving up.
+        if reset_result.get("status") != "reused_clean" and reset_result.get("reason_code") == "verification_unreachable":
+            logger.warning(
+                "Verify failed for %s (server likely still starting) — waiting 60s and retrying verify...",
+                path_to_vm,
+            )
+            time.sleep(60)
+            verify_result = vm_reset.verify_state(private_ip, path_to_vm, reset_client_config)
+            if verify_result.get("status") == "ok":
+                logger.info("Verify retry succeeded for %s — reusing instance.", path_to_vm)
+                self._ensure_server_compat_patch(private_ip)
                 return path_to_vm
-            else:
-                logger.info(f"Instance {path_to_vm} is in state '{state}'; falling back to full relaunch.")
-        except Exception as e:
-            logger.warning(f"Soft reset failed ({e}); falling back to full terminate+relaunch.")
+            # One more attempt after 30s
+            logger.warning("Verify retry still failed (%s), waiting 30s for final attempt...", verify_result.get("reason_code"))
+            time.sleep(30)
+            verify_result = vm_reset.verify_state(private_ip, path_to_vm, reset_client_config)
+            if verify_result.get("status") == "ok":
+                logger.info("Verify final retry succeeded for %s — reusing instance.", path_to_vm)
+                self._ensure_server_compat_patch(private_ip)
+                return path_to_vm
+            reset_result = {**reset_result, "reason_code": verify_result.get("reason_code", "verification_unreachable")}
 
-        # --- Slow path: terminate old instance and launch fresh from AMI ---
-        return self._full_relaunch(path_to_vm, snapshot_name)
+        if reset_result.get("status") == "reused_clean":
+            logger.info(
+                "Soft reset complete for %s: %s (%s). Reusing instance.",
+                path_to_vm,
+                reset_result.get("status"),
+                reset_result.get("reason_code"),
+            )
+            self._ensure_server_compat_patch(private_ip)
+            return path_to_vm
+
+        raise RuntimeError(
+            f"Soft reset failed for {path_to_vm}: "
+            f"reason={reset_result.get('reason_code')} "
+            f"details={reset_result.get('details')}"
+        )
 
     def _full_relaunch(self, path_to_vm: str, snapshot_name: str):
         """Terminate the existing instance and launch a fresh one from the AMI. ~89s."""
@@ -231,7 +430,7 @@ class AWSProvider(Provider):
 
             # Step 3: Launch a new instance from the snapshot(AMI) with performance optimization
             logger.info(f"Launching a new instance from AMI {image_id}...")
-            
+
             # TTL configuration follows the same env flags as allocation (centralized)
             enable_ttl = ENABLE_TTL
             default_ttl_minutes = DEFAULT_TTL_MINUTES
@@ -244,6 +443,7 @@ class AWSProvider(Provider):
                 "InstanceType": instance_type,
                 "EbsOptimized": True,
                 "InstanceInitiatedShutdownBehavior": "terminate",
+                "UserData": _VM_USER_DATA,
                 "NetworkInterfaces": [
                     {
                         "SubnetId": subnet_id,
@@ -254,56 +454,37 @@ class AWSProvider(Provider):
                 ],
                 "BlockDeviceMappings": [
                     {
-                        "DeviceName": "/dev/sda1", 
+                        "DeviceName": "/dev/sda1",
                         "Ebs": {
-                            # "VolumeInitializationRate": 300
-                            "VolumeSize": 30,  # Size in GB
-                            "VolumeType": "gp3",  # General Purpose SSD
+                            "VolumeSize": 30,
+                            "VolumeType": "gp3",
                             "Throughput": 1000,
-                            "Iops": 4000  # Adjust IOPS as needed
+                            "Iops": 4000
                         }
                     }
                 ]
             }
-            
+
             new_instance = ec2_client.run_instances(**run_instances_params)
             new_instance_id = new_instance['Instances'][0]['InstanceId']
             logger.info(f"New instance {new_instance_id} launched from AMI {image_id}.")
-            logger.info(f"Waiting for instance {new_instance_id} to be running...")
-            ec2_client.get_waiter('instance_running').wait(InstanceIds=[new_instance_id])
+
+            try:
+                logger.info(f"Waiting for instance {new_instance_id} to be running...")
+                ec2_client.get_waiter('instance_running').wait(InstanceIds=[new_instance_id])
+            except Exception as wait_err:
+                logger.error(f"Waiter failed for {new_instance_id}, terminating leaked instance: {wait_err}")
+                try:
+                    ec2_client.terminate_instances(InstanceIds=[new_instance_id])
+                except Exception:
+                    pass
+                raise
 
             logger.info(f"Instance {new_instance_id} is ready.")
-            # Schedule cloud-side termination via EventBridge Scheduler (auto-resolve role ARN)
+            # Schedule cloud-side termination via EventBridge Scheduler
             try:
                 if enable_ttl:
                     schedule_instance_termination(self.region, new_instance_id, ttl_seconds, AWS_SCHEDULER_ROLE_ARN, logger)
-            except Exception as e:
-                logger.warning(f"Failed to create EventBridge Scheduler for {new_instance_id}: {e}")
-
-            # Schedule cloud-side termination via EventBridge Scheduler (same as allocation path)
-            try:
-                if enable_ttl and os.getenv('AWS_SCHEDULER_ROLE_ARN'):
-                    scheduler_client = boto3.client('scheduler', region_name=self.region)
-                    schedule_name = f"osworld-ttl-{new_instance_id}-{int(time.time())}"
-                    eta_scheduler = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
-                    schedule_expression = f"at({eta_scheduler.strftime('%Y-%m-%dT%H:%M:%S')})"
-                    target_arn = "arn:aws:scheduler:::aws-sdk:ec2:terminateInstances"
-                    input_payload = '{"InstanceIds":["' + new_instance_id + '"]}'
-                    scheduler_client.create_schedule(
-                        Name=schedule_name,
-                        ScheduleExpression=schedule_expression,
-                        FlexibleTimeWindow={"Mode": "OFF"},
-                        Target={
-                            "Arn": target_arn,
-                            "RoleArn": os.getenv('AWS_SCHEDULER_ROLE_ARN'),
-                            "Input": input_payload
-                        },
-                        State='ENABLED',
-                        Description=f"OSWorld TTL terminate for {new_instance_id}"
-                    )
-                    logger.info(f"Scheduled EC2 termination via EventBridge Scheduler for snapshot revert: name={schedule_name}, when={eta_scheduler.isoformat()} (UTC)")
-                else:
-                    logger.info("TTL enabled but AWS_SCHEDULER_ROLE_ARN not set; skipping scheduler for snapshot revert.")
             except Exception as e:
                 logger.warning(f"Failed to create EventBridge Scheduler for {new_instance_id}: {e}")
 
@@ -314,19 +495,17 @@ class AWSProvider(Provider):
                 if public_ip:
                     vnc_url = f"http://{public_ip}:5910/vnc.html"
                     logger.info("="*80)
-                    logger.info(f"🖥️  New Instance VNC Web Access URL: {vnc_url}")
-                    logger.info(f"📡 Public IP: {public_ip}")
-                    logger.info(f"🆔 New Instance ID: {new_instance_id}")
+                    logger.info(f"New Instance VNC Web Access URL: {vnc_url}")
+                    logger.info(f"Public IP: {public_ip}")
+                    logger.info(f"New Instance ID: {new_instance_id}")
                     logger.info("="*80)
-                    print(f"\n🌐 New Instance VNC Web Access URL: {vnc_url}")
-                    print(f"📍 Please open the above address in the browser for remote desktop access\n")
             except Exception as e:
                 logger.warning(f"Failed to get VNC address for new instance {new_instance_id}: {e}")
 
             return new_instance_id
 
-        except ClientError as e:
-            logger.error(f"Failed to revert to snapshot {snapshot_name} for the instance {path_to_vm}: {str(e)}")
+        except Exception as e:
+            logger.error(f"Failed to revert to snapshot {snapshot_name} for the instance {path_to_vm}: {e}")
             raise
 
 
