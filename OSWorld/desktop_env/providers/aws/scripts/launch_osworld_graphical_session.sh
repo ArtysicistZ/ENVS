@@ -202,4 +202,22 @@ else
   exit 1
 fi
 
+# Disable screensaver and lock screen at runtime (belt-and-suspenders with gsettings override).
+# gnome-screensaver activates after idle-delay seconds and locks the screen, blocking the agent.
+(
+  sleep 5  # wait for D-Bus session to be fully active
+  runuser -u "${DESKTOP_USER}" -- env \
+    DISPLAY="${DISPLAY_NUM}" \
+    HOME="${DESKTOP_HOME}" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_SOCKET}" \
+    XDG_RUNTIME_DIR="${DESKTOP_RUNTIME_DIR}" \
+    bash -c '
+      gsettings set org.gnome.desktop.screensaver lock-enabled false 2>/dev/null || true
+      gsettings set org.gnome.desktop.screensaver idle-activation-enabled false 2>/dev/null || true
+      gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
+      # Kill gnome-screensaver if it managed to start
+      killall gnome-screensaver 2>/dev/null || true
+    '
+) &
+
 wait "${SESSION_PID}"

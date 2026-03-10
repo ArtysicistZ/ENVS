@@ -55,7 +55,7 @@ CONTAINER_TMP_SIZE = os.environ.get("OSWORLD_CONTAINER_TMP_SIZE", "512m")
 # Timeouts (P3: server-side reset is capped at 120s so client must be longer)
 RESETD_RESET_TIMEOUT = 150          # HTTP timeout for POST /reset on resetd
 RESETD_PREPARE_BASELINE_TIMEOUT = 60
-CONTAINER_STARTUP_TIMEOUT = 180     # wait for container services to be ready
+CONTAINER_STARTUP_TIMEOUT = 240     # wait for container services to be ready
 CONTAINER_STARTUP_POLL = 3          # poll interval in seconds
 RESET_VERIFY_POLL = 3
 RESET_VERIFY_TIMEOUT = 90           # wait for port 5000 to respond after reset
@@ -65,9 +65,11 @@ RESET_VERIFY_TIMEOUT = 90           # wait for port 5000 to respond after reset
 # Docker daemon.  Set higher if the host has ample resources.
 MAX_CONCURRENT_CREATES = int(os.environ.get("OSWORLD_MAX_CONCURRENT_CREATES", "8"))
 
-# Minimum required inotify instances per container (systemd + services)
-_INOTIFY_PER_CONTAINER = 15
-_MIN_INOTIFY_INSTANCES = 1024  # absolute minimum for any multi-container setup
+# Minimum required inotify instances per container (systemd + GNOME + Chrome + services).
+# Each container's systemd alone needs ~10 instances, but GNOME session components
+# (gnome-settings-daemon, nautilus, etc.) and Chrome add 40-90 more.
+_INOTIFY_PER_CONTAINER = 150
+_MIN_INOTIFY_INSTANCES = 4096  # absolute minimum for any multi-container setup
 
 
 def _slot_id_from_path(path_to_vm: str) -> int:
@@ -136,7 +138,7 @@ def _check_host_inotify_limits(n_containers: int = 64) -> None:
         "Containers will crash with exit 255. Attempting to increase...",
         current, n_containers, needed,
     )
-    target = max(needed, 8192)
+    target = max(needed, 65536)
     try:
         subprocess.run(
             ["sudo", "-n", "sysctl", "-w", f"fs.inotify.max_user_instances={target}"],
@@ -150,6 +152,31 @@ def _check_host_inotify_limits(n_containers: int = 64) -> None:
             "  echo 'fs.inotify.max_user_instances=%d' | sudo tee /etc/sysctl.d/99-osworld-containers.conf",
             target, target,
         )
+
+    # Also check max_user_watches (each container watches hundreds of files)
+    try:
+        with open("/proc/sys/fs/inotify/max_user_watches") as f:
+            watches = int(f.read().strip())
+        watches_needed = n_containers * 8192  # ~8K watches per container (systemd + GNOME + apps)
+        if watches < watches_needed:
+            logger.warning(
+                "inotify max_user_watches=%d is low for %d containers (need %d). Attempting to increase...",
+                watches, n_containers, watches_needed,
+            )
+            watches_target = max(watches_needed, 1048576)
+            try:
+                subprocess.run(
+                    ["sudo", "-n", "sysctl", "-w", f"fs.inotify.max_user_watches={watches_target}"],
+                    check=True, capture_output=True, timeout=5,
+                )
+                logger.info("Increased fs.inotify.max_user_watches to %d", watches_target)
+            except Exception:
+                logger.error(
+                    "CANNOT auto-fix max_user_watches. Fix manually:\n"
+                    "  sudo sysctl -w fs.inotify.max_user_watches=%d", watches_target,
+                )
+    except (OSError, ValueError):
+        pass
 
 
 class DockerProvider(Provider):
@@ -213,10 +240,11 @@ class DockerProvider(Provider):
         return f"osworld-slot-{slot_id}"
 
     # Maximum time (seconds) to wait inside the creation lock for a newly
-    # created container's resetd to become healthy.  This is intentionally
-    # generous: systemd boot + Xvfb + VNC + resetd can take 15-30s on a
-    # loaded host, and we *must* confirm health before releasing the lock.
-    _CREATION_HEALTH_TIMEOUT = 90
+    # created container's resetd to become healthy.  At 64 containers the
+    # CPU load can exceed 1000 during mass boot; 300s gives enough headroom.
+    # If this times out, the container is NOT removed — start_emulator has
+    # its own wait_for_port that gives an additional chance.
+    _CREATION_HEALTH_TIMEOUT = 300
 
     def _get_or_start_container(self, slot_id: int):
         """Return the container for this slot, starting it if it doesn't exist.
@@ -376,19 +404,13 @@ class DockerProvider(Provider):
                 time.sleep(2)
 
             if not healthy:
-                logger.error(
-                    "[slot %d] Container %s resetd did not become healthy within %ds. Removing.",
+                # Do NOT remove the container — it may still be booting under
+                # heavy CPU load (64-container mass boot).  start_emulator has
+                # its own _wait_for_port call that gives another chance.
+                logger.warning(
+                    "[slot %d] Container %s resetd not healthy within %ds during creation; "
+                    "leaving container running for start_emulator retry.",
                     slot_id, name, self._CREATION_HEALTH_TIMEOUT,
-                )
-                try:
-                    container.stop(timeout=5)
-                except Exception:
-                    pass
-                container.remove(force=True)
-                self._invalidate_cached_ip(slot_id)
-                raise RuntimeError(
-                    f"[slot {slot_id}] resetd did not become healthy within "
-                    f"{self._CREATION_HEALTH_TIMEOUT}s"
                 )
 
             logger.info(

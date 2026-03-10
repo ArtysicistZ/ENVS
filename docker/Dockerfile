@@ -107,6 +107,18 @@ cursor-theme="Yaru"\n\
 \n\
 [org.gnome.gnome-panel.general:GNOME-Flashback]\n\
 default-layout="gnome-flashback"\n\
+\n\
+[org.gnome.desktop.screensaver]\n\
+lock-enabled=false\n\
+idle-activation-enabled=false\n\
+\n\
+[org.gnome.desktop.session]\n\
+idle-delay=uint32 0\n\
+\n\
+[org.gnome.settings-daemon.plugins.power]\n\
+sleep-inactive-ac-type="nothing"\n\
+sleep-inactive-battery-type="nothing"\n\
+idle-dim=false\n\
 ' > /usr/share/glib-2.0/schemas/90_osworld.gschema.override \
     && glib-compile-schemas /usr/share/glib-2.0/schemas/
 
