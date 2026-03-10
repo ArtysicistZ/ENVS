@@ -623,6 +623,132 @@ class DockerProvider(Provider):
 
         return path_to_vm
 
+    # ── Health check & recovery ─────────────────────────────────────────────
+
+    def health_check_slot(self, slot_id: int) -> dict:
+        """Check health of a specific container slot.
+
+        Returns a dict with keys:
+          slot_id, container, status, docker_status, ip, resetd, server, ts
+        Status is one of: healthy, degraded, down, missing, error.
+        """
+        name = self._container_name(slot_id)
+        result = {"slot_id": slot_id, "container": name, "status": "unknown", "ts": time.time()}
+
+        try:
+            container = self.client.containers.get(name)
+            container.reload()
+            result["docker_status"] = container.status
+            result["restart_count"] = container.attrs.get("RestartCount", 0)
+
+            if container.status != "running":
+                result["status"] = "down"
+                result["exit_code"] = container.attrs.get("State", {}).get("ExitCode")
+                return result
+
+            # Resolve IP
+            try:
+                ip = self._get_container_ip(slot_id)
+                result["ip"] = ip
+            except Exception as e:
+                result["status"] = "degraded"
+                result["ip_error"] = str(e)
+                return result
+
+            # Check resetd (port 5001)
+            try:
+                r = requests.get(f"http://{ip}:{CONTAINER_RESETD_PORT}/health", timeout=5)
+                result["resetd"] = "ok" if r.status_code == 200 else f"http_{r.status_code}"
+            except Exception:
+                result["resetd"] = "unreachable"
+                result["status"] = "degraded"
+                return result
+
+            # Check osworld-server (port 5000)
+            try:
+                r = requests.get(f"http://{ip}:{CONTAINER_SERVER_PORT}/health", timeout=5)
+                result["server"] = "ok" if r.status_code == 200 else f"http_{r.status_code}"
+            except Exception:
+                result["server"] = "unreachable"
+                result["status"] = "degraded"
+                return result
+
+            result["status"] = "healthy"
+            return result
+
+        except self._docker.errors.NotFound:
+            result["status"] = "missing"
+            return result
+        except Exception as e:
+            result["status"] = "error"
+            result["error"] = str(e)
+            return result
+
+    def recover_slot(self, slot_id: int) -> bool:
+        """Remove a dead/unhealthy container and recreate it.
+
+        Waits for both resetd and osworld-server to become healthy, then
+        re-runs prepare_baseline.  Returns True on success.
+        """
+        name = self._container_name(slot_id)
+        lock = self._get_slot_lock(slot_id)
+        with lock:
+            logger.info("[slot %d] Starting recovery of %s ...", slot_id, name)
+
+            # 1. Remove dead container
+            try:
+                container = self.client.containers.get(name)
+                try:
+                    container.stop(timeout=5)
+                except Exception:
+                    pass
+                container.remove(force=True)
+                logger.info("[slot %d] Removed dead container %s", slot_id, name)
+            except self._docker.errors.NotFound:
+                pass
+            except Exception as e:
+                logger.warning("[slot %d] Error removing container: %s", slot_id, e)
+
+            # 2. Clear cached state
+            self._invalidate_cached_ip(slot_id)
+            with self._baseline_prepared_lock:
+                self._baseline_prepared.discard(slot_id)
+
+            # 3. Recreate container
+            try:
+                container = self._get_or_start_container(slot_id)
+                ip = self._get_container_ip(slot_id)
+
+                # 4. Wait for services
+                if not self._wait_for_port(ip, CONTAINER_RESETD_PORT,
+                                           timeout=CONTAINER_STARTUP_TIMEOUT,
+                                           poll=CONTAINER_STARTUP_POLL, slot_id=slot_id):
+                    logger.error("[slot %d] Recovery: resetd did not come up", slot_id)
+                    return False
+
+                if not self._wait_for_port(ip, CONTAINER_SERVER_PORT,
+                                           timeout=CONTAINER_STARTUP_TIMEOUT,
+                                           poll=CONTAINER_STARTUP_POLL, slot_id=slot_id):
+                    logger.error("[slot %d] Recovery: osworld-server did not come up", slot_id)
+                    return False
+
+                # 5. Prepare baseline
+                try:
+                    result = self._call_resetd(ip, "/prepare_baseline",
+                                               timeout=RESETD_PREPARE_BASELINE_TIMEOUT)
+                    logger.info("[slot %d] Recovery: prepare_baseline: %s", slot_id, result.get("status"))
+                    with self._baseline_prepared_lock:
+                        self._baseline_prepared.add(slot_id)
+                except Exception as e:
+                    logger.warning("[slot %d] Recovery: prepare_baseline failed (non-fatal): %s", slot_id, e)
+
+                logger.info("[slot %d] Recovery complete — container healthy at %s", slot_id, ip)
+                return True
+
+            except Exception as e:
+                logger.error("[slot %d] Recovery failed: %s", slot_id, e)
+                return False
+
     def stop_emulator(self, path_to_vm: str):
         slot_id = _slot_id_from_path(path_to_vm)
         with self._slot_ips_lock:
