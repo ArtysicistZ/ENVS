@@ -48,6 +48,7 @@ checkpoints*/
 logs/
 *.log
 wandb/
+**.csv
 .claude/
 
 # OS files
@@ -61,8 +62,6 @@ models--*/
 
 # Temporary files
 *.tmp
-single_task_test.json
-QUICK_START.txt
 
 # Keep structure but not large files
 !.gitkeep

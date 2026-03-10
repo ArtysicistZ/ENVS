@@ -1,0 +1,24 @@
+# Exclude everything not needed for the OSWorld Docker image
+.git
+.env
+.env.example
+.pre-commit-config.yaml
+wandb/
+checkpoints/
+notebooks/
+test_data/
+tests/
+docs/
+examples/
+configs/
+scripts/
+verl/
+osworld_patches/
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.venv/
+*.pdf
+*.md
+LICENSE

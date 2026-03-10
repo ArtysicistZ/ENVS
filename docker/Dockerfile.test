@@ -1,9 +1,9 @@
 # Minimal OSWorld test image — mock servers only, no desktop stack.
 # Builds in ~3 minutes (no Chrome/VS Code/LibreOffice).
-# Used to verify ArpoDockerProvider container lifecycle end-to-end.
+# Used to verify DockerProvider container lifecycle end-to-end.
 #
 # Build:  docker build -t osworld:latest -f docker/Dockerfile.test .
-# Test:   PROVIDER=arpo_docker python scripts/remote_env_server.py
+# Test:   PROVIDER=docker python scripts/remote_env_server.py
 
 FROM ubuntu:22.04
 

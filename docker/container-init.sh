@@ -32,5 +32,9 @@ else
     fi
 fi
 
+# Pre-create overlay session dirs on /tmp (Docker tmpfs) before systemd starts.
+# This prevents a race where the overlay service runs before dirs exist.
+install -d -m 0755 /tmp/osworld/session/home-upper /tmp/osworld/session/home-work
+
 # Hand off to systemd as PID 1
 exec /sbin/init

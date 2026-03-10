@@ -126,6 +126,16 @@ RUN OSWORLD_SKIP_X_SOCKET_CHECK=1 \
     PYTHON_BIN=/usr/bin/python3 \
     bash /opt/osworld/app/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh
 
+# Mask tmp.mount — Docker already provides /tmp as tmpfs via --tmpfs /tmp.
+# Without this, systemd remounts /tmp after the overlay service creates its
+# session dirs, causing the overlay upper/work dirs to disappear.
+RUN ln -sf /dev/null /etc/systemd/system/tmp.mount
+
+# Override tmpfiles.d/tmp.conf: change D (wipe contents) to d (create only).
+# systemd-tmpfiles-setup.service runs the D directive at boot and clears /tmp,
+# destroying overlay session dirs created by container-init.sh.
+RUN printf 'd /tmp 1777 root root -\n' > /etc/tmpfiles.d/tmp.conf
+
 # Enable OSWorld services (create multi-user.target.wants symlinks without systemd running)
 RUN install -d -m 0755 /etc/systemd/system/multi-user.target.wants && \
     for svc in osworld-home-overlay osworld-resetd osworld-graphical-session osworld-server; do \

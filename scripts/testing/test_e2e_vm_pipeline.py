@@ -564,7 +564,7 @@ class Runner:
 
     def t23_real_task(self):
         section("Real Task Lifecycle — reset+step+evaluate", "23")
-        repo = Path(__file__).resolve().parent.parent
+        repo = Path(__file__).resolve().parent.parent.parent
         examples = repo / "OSWorld" / "evaluation_examples" / "examples"
         if not examples.exists():
             warn("evaluation_examples/examples not found — skipping"); self.warns += 1

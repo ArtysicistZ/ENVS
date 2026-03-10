@@ -10,12 +10,18 @@ Aligns with ARPO_OSWorld_Evaluation / run_uitars.py:
 - Provider: On macOS (Darwin), defaults to VMware (no /dev/kvm; use VMware Fusion).
   On Linux, defaults to Docker. Override with env PROVIDER=aws (EC2), PROVIDER=vmware, or PROVIDER=docker.
   Use PROVIDER=aws on EC2 when boto3 and aws configure are set up (launches EC2 env instances; no local Docker VM).
+
+
+Run on GPU cluster:
+
+sg docker -c "export PROVIDER=docker && .venv/bin/python scripts/remote_env_server.py"
+
 """
 REMOTE_ENV_STAMP = "b36ed69-lifespan"  # grep this on Mac to confirm you have latest
 import sys
 from pathlib import Path
 
-repo_root = Path(__file__).resolve().parent.parent
+repo_root = Path(__file__).resolve().parent.parent.parent
 osworld_root = repo_root / "OSWorld"
 for p in (repo_root, osworld_root):
     if str(p) not in sys.path:
@@ -41,7 +47,6 @@ import base64
 import logging
 import os
 import re
-import socket
 import threading
 import traceback
 from collections import deque
@@ -77,112 +82,6 @@ from verl.trainer.gui_agent import (
     ENV_FAIL_WORD,
     CALL_USER,
 )
-
-# --- Runtime patching ---
-def _patch_docker_provider_ports() -> None:
-    """
-    macOS can raise psutil.AccessDenied for psutil.net_connections(), which OSWorld's DockerProvider
-    may use to find free ports. Patch the provider at runtime to find ports by socket bind
-    + Docker container port inspection (no psutil).
-    """
-    try:
-        from desktop_env.providers.docker.provider import DockerProvider  # type: ignore
-    except Exception as e:
-        logger.warning("Docker provider patch SKIPPED (import failed): %s. Port allocation may fail on macOS (psutil.AccessDenied).", e)
-        return
-
-    if getattr(DockerProvider, "_ARPO_PORT_PATCHED", False):
-        return
-    logger.info("Patching Docker provider for macOS: using socket bind + Docker ports (no psutil)...")
-
-    def _get_docker_used_ports(self) -> set[int]:
-        docker_ports: set[int] = set()
-        try:
-            for container in self.client.containers.list():
-                ports = (container.attrs.get("NetworkSettings", {}) or {}).get("Ports") or {}
-                for port_mappings in ports.values():
-                    if port_mappings:
-                        docker_ports.update(int(p["HostPort"]) for p in port_mappings)
-        except Exception:
-            pass
-        return docker_ports
-
-    def _is_port_available(self, port: int) -> bool:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(("", port))
-                return True
-        except OSError:
-            return False
-
-    def _get_available_port(self, start_port: int) -> int:
-        docker_ports = _get_docker_used_ports(self)
-        port = start_port
-        while port < 65534:
-            if port in docker_ports:
-                port += 1
-                continue
-            if _is_port_available(self, port):
-                return port
-            port += 1
-        raise RuntimeError(f"No available ports found starting from {start_port}")
-
-    DockerProvider._get_available_port = _get_available_port  # type: ignore[attr-defined]
-
-    # macOS (and some hosts) have no /dev/kvm; container.start() fails if we pass devices=["/dev/kvm"].
-    # Patch start_emulator to only add /dev/kvm when it exists (use software emulation otherwise).
-    _orig_start = DockerProvider.start_emulator
-    _filelock = __import__("filelock", fromlist=["FileLock"]).FileLock
-    _prov_logger = __import__("desktop_env.providers.docker.provider", fromlist=["logger"]).logger
-
-    def _start_emulator_no_kvm_if_missing(self, path_to_vm: str, headless: bool, os_type: str, name=None):
-        lock = _filelock(str(self.lock_file))
-        try:
-            with lock:
-                self.vnc_port = self._get_available_port(8006)
-                self.server_port = self._get_available_port(5000)
-                self.chromium_port = self._get_available_port(9222)
-                self.vlc_port = self._get_available_port(8080)
-                devices = ["/dev/kvm"] if os.path.exists("/dev/kvm") else []
-                if not devices:
-                    _prov_logger.warning("/dev/kvm not found (e.g. on macOS); running VM with software emulation (slower).")
-                self.container = self.client.containers.run(
-                    "happysixd/osworld-docker",
-                    environment=self.environment,
-                    cap_add=["NET_ADMIN"],
-                    devices=devices,
-                    volumes={
-                        os.path.abspath(path_to_vm): {"bind": "/System.qcow2", "mode": "ro"}
-                    },
-                    ports={
-                        8006: self.vnc_port,
-                        5000: self.server_port,
-                        9222: self.chromium_port,
-                        8080: self.vlc_port
-                    },
-                    detach=True,
-                )
-            _prov_logger.info(
-                "Started container with ports - VNC: %s, Server: %s, Chrome: %s, VLC: %s",
-                self.vnc_port, self.server_port, self.chromium_port, self.vlc_port
-            )
-            self._wait_for_vm_ready()
-        except Exception as e:
-            import traceback
-            print("Exception:", e)
-            print("Traceback:", traceback.format_exc())
-            if self.container:
-                try:
-                    self.container.stop()
-                    self.container.remove()
-                except Exception:
-                    pass
-                self.container = None
-            raise e
-
-    DockerProvider.start_emulator = _start_emulator_no_kvm_if_missing  # type: ignore[attr-defined]
-    DockerProvider._ARPO_PORT_PATCHED = True  # type: ignore[attr-defined]
-    logger.info("Docker provider patched successfully (no psutil; /dev/kvm optional for macOS).")
 
 def _default_provider() -> str:
     """Use VMware on macOS (no KVM); Docker on Linux."""
@@ -275,14 +174,11 @@ def _get_slot_endpoint_lock(slot_id: int) -> threading.RLock:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    # Always log so we confirm lifespan runs; then run Docker patch when provider is docker
     provider = (os.environ.get("PROVIDER") or _default_provider()).strip().lower() or "docker"
     if provider not in ("docker", "vmware", "aws"):
         provider = "docker"
-    logger.info("Startup: PROVIDER=%s, will patch Docker=%s", provider, provider == "docker")
-    print(f"[remote_env_server] Startup: PROVIDER={provider}, patching Docker={provider == 'docker'}", file=sys.stderr, flush=True)
-    if provider == "docker":
-        _patch_docker_provider_ports()
+    logger.info("Startup: PROVIDER=%s", provider)
+    print(f"[remote_env_server] Startup: PROVIDER={provider}", file=sys.stderr, flush=True)
     yield
 
 
@@ -874,9 +770,9 @@ def _get_slot(slot_id: int = 0) -> SlotState:
             return slot
         # Default: VMware on macOS (no KVM), Docker on Linux. Override with PROVIDER=aws|vmware|docker.
         provider_name = (os.environ.get("PROVIDER") or _default_provider()).strip().lower()
-        if provider_name not in ("docker", "arpo_docker", "vmware", "aws"):
+        if provider_name not in ("docker", "vmware", "aws"):
             provider_name = "docker"
-        if provider_name in ("docker", "arpo_docker"):
+        if provider_name == "docker":
             if docker is None:
                 raise HTTPException(
                     status_code=503,
@@ -885,15 +781,6 @@ def _get_slot(slot_id: int = 0) -> SlotState:
                         "Install it: pip install docker. Then ensure the Docker daemon is running (e.g. Docker Desktop or system docker)."
                     ),
                 )
-            if provider_name == "docker":
-                _patch_docker_provider_ports()
-        # Check KVM availability for logging
-        kvm_available = os.path.exists("/dev/kvm")
-        if provider_name == "docker":
-            if kvm_available:
-                print(f"[slot {slot_id}] ✓ KVM detected: /dev/kvm exists - VM will use hardware acceleration")
-            else:
-                print(f"[slot {slot_id}] ⚠ KVM not found: /dev/kvm does not exist - VM will use software emulation (slower)")
         if provider_name == "aws":
             print(f"[slot {slot_id}] ✓ Using provider: aws (EC2 instances; ensure boto3 and aws configure are set)")
         print(f"[slot {slot_id}] ✓ Using provider: {provider_name} (observation_type=screenshot, same as run_uitars)")
@@ -901,8 +788,8 @@ def _get_slot(slot_id: int = 0) -> SlotState:
         _provider_name = provider_name
         region = os.environ.get("AWS_REGION", "us-east-1")
         snapshot_name = os.environ.get("OSWORLD_SNAPSHOT_AMI", "init_state")
-        # For arpo_docker, pass path_to_vm=f"slot_{slot_id}" so provider can route to correct container
-        path_to_vm_arg = f"slot_{slot_id}" if provider_name == "arpo_docker" else None
+        # For docker provider, pass path_to_vm=f"slot_{slot_id}" so provider can route to correct container
+        path_to_vm_arg = f"slot_{slot_id}" if provider_name == "docker" else None
         try:
             slot.env = DesktopEnv(
                 provider_name=provider_name,
@@ -916,7 +803,7 @@ def _get_slot(slot_id: int = 0) -> SlotState:
                 os_type="Ubuntu",
                 require_a11y_tree=False,
             )
-            print(f"[slot {slot_id}] DesktopEnv initialized successfully (provider={provider_name}, KVM={kvm_available})")
+            print(f"[slot {slot_id}] DesktopEnv initialized successfully (provider={provider_name})")
         except HTTPException:
             raise
         except OSError as e:

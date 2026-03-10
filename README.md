@@ -83,7 +83,11 @@ ARPO/
 │   └── utils/
 │       └── osworld.py           # Dataset loading & tokenization
 ├── scripts/
-│   └── remote_env_server.py     # FastAPI server for remote environments
+│   ├── servers/                 # Model & env servers
+│   │   └── remote_env_server.py # FastAPI server for remote environments
+│   ├── training/                # Training launch scripts
+│   ├── testing/                 # Test & validation scripts
+│   └── utils/                   # Diagnostic & maintenance utilities
 ├── configs/                     # Training configurations
 │   ├── smoke.yaml               # 1 GPU, quick test
 │   ├── smoke_4gpu.yaml          # 4 GPUs, 4 envs
@@ -134,7 +138,7 @@ python -m verl.trainer.main config=configs/smoke_4gpu.yaml
 
 ```bash
 pip install -r requirements.txt
-python scripts/remote_env_server.py  # Starts on port 15001
+python scripts/servers/remote_env_server.py  # Starts on port 15001
 ```
 
 **On the GPU cluster:**

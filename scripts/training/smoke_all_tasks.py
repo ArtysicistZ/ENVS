@@ -66,7 +66,7 @@ def do_reset(task_config: dict, timeout: int, label: str):
 
 
 def main():
-    tasks_dir = Path(__file__).resolve().parent.parent / "test_data" / "osworld_examples" / "tasks"
+    tasks_dir = Path(__file__).resolve().parent.parent.parent / "test_data" / "osworld_examples" / "tasks"
     if not tasks_dir.exists():
         print(f"ERROR: {tasks_dir} not found", file=sys.stderr)
         sys.exit(1)

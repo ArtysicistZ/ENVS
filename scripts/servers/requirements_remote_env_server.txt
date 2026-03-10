@@ -1,4 +1,4 @@
-# Requirements for running remote_env_server.py with arpo_docker provider
+# Requirements for running remote_env_server.py with docker provider
 # Install: pip install -r scripts/requirements_remote_env_server.txt
 #
 # For PyTorch (CPU-only, avoids 900MB CUDA download on non-GPU hosts):
