@@ -7,7 +7,6 @@ DESKTOP_RUNTIME_DIR="${3:?desktop runtime dir required}"
 
 DISPLAY_NUM="${OSWORLD_DISPLAY_NUMBER:-:0}"
 DISPLAY_INDEX="${DISPLAY_NUM##*:}"
-SCREEN_GEOMETRY="${OSWORLD_SCREEN_GEOMETRY:-1920x1080x24}"
 XDG_CONFIG_HOME="${DESKTOP_HOME}/.config"
 XDG_CACHE_HOME="${DESKTOP_HOME}/.cache"
 XDG_DATA_HOME="${DESKTOP_HOME}/.local/share"
@@ -43,8 +42,6 @@ ensure_writable_session_home() {
     "${XDG_CONFIG_HOME}/vlc"
     "${XDG_CONFIG_HOME}/GIMP"
     "${XDG_CONFIG_HOME}/GIMP/2.10"
-    "${XDG_CONFIG_HOME}/mutter"
-    "${XDG_CONFIG_HOME}/mutter/sessions"
     "${XDG_CACHE_HOME}"
     "${DESKTOP_HOME}/.local"
     "${XDG_DATA_HOME}"
@@ -53,7 +50,6 @@ ensure_writable_session_home() {
     "${XDG_DATA_HOME}/evolution"
     "${XDG_DATA_HOME}/flatpak"
     "${XDG_DATA_HOME}/flatpak/db"
-    "${XDG_DATA_HOME}/gnome-shell"
     "${XDG_DATA_HOME}/keyrings"
     "${XDG_STATE_HOME}"
     "${DESKTOP_HOME}/.thunderbird"
@@ -81,18 +77,15 @@ ensure_writable_session_home() {
   install_autostart_override "gnome-initial-setup-copy-worker.desktop"
   install_autostart_override "update-notifier.desktop"
   install_autostart_override "tracker-miner-fs-3.desktop"
-  install_autostart_override "xfce4-screensaver.desktop"
-  install_autostart_override "xscreensaver.desktop"
-  install_autostart_override "light-locker.desktop"
   install_autostart_override "gnome-keyring-secrets.desktop"
   install_autostart_override "gnome-keyring-pkcs11.desktop"
   install_autostart_override "gnome-keyring-ssh.desktop"
 }
 
 cleanup() {
-  if [ -n "${GNOME_PID:-}" ] && kill -0 "${GNOME_PID}" 2>/dev/null; then
-    kill "${GNOME_PID}" 2>/dev/null || true
-    wait "${GNOME_PID}" 2>/dev/null || true
+  if [ -n "${SESSION_PID:-}" ] && kill -0 "${SESSION_PID}" 2>/dev/null; then
+    kill "${SESSION_PID}" 2>/dev/null || true
+    wait "${SESSION_PID}" 2>/dev/null || true
   fi
   if [ -n "${DBUS_PID:-}" ] && kill -0 "${DBUS_PID}" 2>/dev/null; then
     kill "${DBUS_PID}" 2>/dev/null || true

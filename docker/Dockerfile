@@ -41,8 +41,6 @@ RUN apt-get update && apt-get install -y \
     ubuntu-wallpapers \
     yaru-theme-gtk \
     yaru-theme-icon \
-    xinit \
-    xvfb \
     xauth \
     x11-xserver-utils \
     xserver-xorg-video-dummy \
@@ -119,18 +117,13 @@ default-layout="gnome-flashback"\n\
 RUN rm -f /usr/share/dbus-1/services/org.gnome.keyring.service \
           /usr/share/dbus-1/services/org.freedesktop.secrets.service
 
-# ── Google Chrome ────────────────────────────────────────────────────────────
+# ── Google Chrome + VS Code ─────────────────────────────────────────────────
 RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
         -o /tmp/chrome.deb \
-    && apt-get install -y /tmp/chrome.deb \
-    && rm /tmp/chrome.deb \
-    && rm -rf /var/lib/apt/lists/*
-
-# ── VS Code ──────────────────────────────────────────────────────────────────
-RUN curl -fsSL "https://update.code.visualstudio.com/latest/linux-deb-x64/stable" \
+    && curl -fsSL "https://update.code.visualstudio.com/latest/linux-deb-x64/stable" \
         -o /tmp/vscode.deb \
-    && apt-get install -y /tmp/vscode.deb \
-    && rm /tmp/vscode.deb \
+    && apt-get install -y /tmp/chrome.deb /tmp/vscode.deb \
+    && rm -f /tmp/chrome.deb /tmp/vscode.deb \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Python packages for OSWorld server and reset runtime ────────────────────
