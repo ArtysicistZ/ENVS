@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
 """
-Remote OSWorld env server (run on Mac or AWS CPU).
-One env; exposes POST /env/reset, /env/step, /env/evaluate, /env/history_messages.
+Remote OSWorld env server.
+Exposes POST /env/reset, /env/step, /env/evaluate, /env/history_messages.
 Cluster EnvWorkers call this over HTTP.
 
-Aligns with ARPO_OSWorld_Evaluation / run_uitars.py:
 - Same DesktopEnv: observation_type=screenshot, action_space=pyautogui.
 - Reset returns obs_messages built from env screenshot (same as evaluation agent gets).
-- Provider: On macOS (Darwin), defaults to VMware (no /dev/kvm; use VMware Fusion).
-  On Linux, defaults to Docker. Override with env PROVIDER=aws (EC2), PROVIDER=vmware, or PROVIDER=docker.
-  Use PROVIDER=aws on EC2 when boto3 and aws configure are set up (launches EC2 env instances; no local Docker VM).
-
+- Provider: defaults to Docker. Override with PROVIDER=aws for EC2.
 
 Run on GPU cluster:
 
-sg docker -c "export PROVIDER=docker && .venv/bin/python scripts/remote_env_server.py"
+sg docker -c "export PROVIDER=docker && .venv/bin/python scripts/servers/remote_env_server.py"
 
 """
 REMOTE_ENV_STAMP = "b36ed69-lifespan"  # grep this on Mac to confirm you have latest
@@ -84,7 +80,7 @@ from verl.trainer.gui_agent import (
 )
 
 def _default_provider() -> str:
-    """Use VMware on macOS (no KVM); Docker on Linux."""
+    """VMware on macOS (for local dev); Docker on Linux."""
     if hasattr(os, "uname") and os.uname().sysname == "Darwin":
         return "vmware"
     return "docker"
@@ -768,7 +764,7 @@ def _get_slot(slot_id: int = 0) -> SlotState:
         # Re-check after acquiring init lock (double-checked locking pattern)
         if slot.env is not None:
             return slot
-        # Default: VMware on macOS (no KVM), Docker on Linux. Override with PROVIDER=aws|vmware|docker.
+        # Default: VMware on macOS, Docker on Linux. Override with PROVIDER=aws|docker|vmware.
         provider_name = (os.environ.get("PROVIDER") or _default_provider()).strip().lower()
         if provider_name not in ("docker", "vmware", "aws"):
             provider_name = "docker"

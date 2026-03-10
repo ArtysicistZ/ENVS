@@ -98,7 +98,7 @@ class DesktopEnv(gym.Env):
     """
     def __init__(
             self,
-            provider_name: str = "vmware",
+            provider_name: str = "docker",
             region: str = None,
             path_to_vm: str = None,
             snapshot_name: str = "init_state",
@@ -114,7 +114,7 @@ class DesktopEnv(gym.Env):
     ):
         """
         Args:
-            provider_name (str): virtualization provider name, default to "vmware"
+            provider_name (str): provider name, default to "docker"
             region (str): the region for allocate machines, work for cloud services, default to  "us-east-1"
             path_to_vm (str): path to .vmx file
             snapshot_name (str): snapshot name to revert to, default to "init_state"
@@ -156,11 +156,10 @@ class DesktopEnv(gym.Env):
         self.os_type = os_type
 
         # Track whether environment has been used (step/setup) to optimize snapshot revert
-        # docker, aws, gcp, azure are always unused as the emulator starts from a clean state
-        # vmware, virtualbox are always used as the emulator starts from a dirty state
-        if self.provider_name in {"docker", "aws", "gcp", "azure", "aliyun", "volcengine"}:
+        # docker, aws start from a clean state; vmware starts from a dirty state
+        if self.provider_name in {"docker", "aws"}:
             self.is_environment_used = False
-        elif self.provider_name in {"vmware", "virtualbox"}:
+        elif self.provider_name == "vmware":
             self.is_environment_used = True
         else:
             raise ValueError(f"Invalid provider name: {self.provider_name}")
@@ -168,7 +167,7 @@ class DesktopEnv(gym.Env):
         # Initialize environment variables
         if path_to_vm:
             self.path_to_vm = os.path.abspath(os.path.expandvars(os.path.expanduser(path_to_vm))) \
-                if provider_name in {"vmware", "virtualbox"} else path_to_vm
+                if provider_name == "vmware" else path_to_vm
         else:
             self.path_to_vm = self.manager.get_vm_path(os_type=self.os_type, region=region, screen_size=(self.screen_width, self.screen_height))
         
