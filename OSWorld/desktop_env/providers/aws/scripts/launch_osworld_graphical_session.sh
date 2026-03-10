@@ -57,11 +57,6 @@ ensure_writable_session_home() {
     "${XDG_DATA_HOME}/keyrings"
     "${XDG_STATE_HOME}"
     "${DESKTOP_HOME}/.thunderbird"
-    "${XDG_CONFIG_HOME}/xfce4"
-    "${XDG_CONFIG_HOME}/xfce4/xfconf"
-    "${XDG_CONFIG_HOME}/xfce4/xfconf/xfce-perchannel-xml"
-    "${XDG_CONFIG_HOME}/xfce4/panel"
-    "${XDG_CONFIG_HOME}/xfce4/desktop"
   )
   local path
   for path in "${paths[@]}"; do
@@ -179,8 +174,17 @@ SESSION_COMMON_ENV=(
   XDG_STATE_HOME="${XDG_STATE_HOME}"
 )
 
-if command -v gnome-session >/dev/null 2>&1; then
-  # Full GNOME desktop (AWS / VM environments)
+# Select desktop session: full GNOME Shell (AWS) or GNOME Flashback (Docker).
+# The ubuntu.session file only exists when ubuntu-session is installed (AWS AMI).
+GNOME_SESSION_DIR="/usr/share/gnome-session/sessions"
+
+# GNOME Shell (ubuntu.session) requires logind sessions which only GDM can
+# provide; it cannot run in headless/container environments without a display
+# manager.  AWS VMs have GDM so they get full GNOME Shell.  Docker containers
+# use GNOME Flashback (Metacity) which provides the same GNOME ecosystem
+# (nautilus, gnome-settings-daemon, gnome-panel) without needing logind.
+if [ -f "${GNOME_SESSION_DIR}/ubuntu.session" ] && command -v gdm3 >/dev/null 2>&1; then
+  # Full GNOME Shell desktop (AWS VMs with GDM)
   runuser -u "${DESKTOP_USER}" -- env \
     "${SESSION_COMMON_ENV[@]}" \
     XDG_CURRENT_DESKTOP=ubuntu:GNOME \
@@ -190,28 +194,18 @@ if command -v gnome-session >/dev/null 2>&1; then
     GSK_RENDERER=cairo \
     /usr/bin/gnome-session --session=ubuntu &
   SESSION_PID=$!
-elif command -v xfce4-session >/dev/null 2>&1; then
-  # Xfce4 desktop (Docker containers with software rendering)
-  # Disable screensaver / screen lock before starting the session
+elif [ -f "${GNOME_SESSION_DIR}/gnome-flashback-metacity.session" ]; then
+  # GNOME Flashback with Metacity (Docker containers / headless)
   runuser -u "${DESKTOP_USER}" -- env \
     "${SESSION_COMMON_ENV[@]}" \
-    xfconf-query -c xfce4-screensaver -p /saver/enabled -s false --create -t bool 2>/dev/null || true
-  runuser -u "${DESKTOP_USER}" -- env \
-    "${SESSION_COMMON_ENV[@]}" \
-    xfconf-query -c xfce4-screensaver -p /lock/enabled -s false --create -t bool 2>/dev/null || true
-  runuser -u "${DESKTOP_USER}" -- env \
-    "${SESSION_COMMON_ENV[@]}" \
-    xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled -s false --create -t bool 2>/dev/null || true
-
-  runuser -u "${DESKTOP_USER}" -- env \
-    "${SESSION_COMMON_ENV[@]}" \
-    XDG_CURRENT_DESKTOP=XFCE \
-    XDG_SESSION_DESKTOP=xfce \
-    DESKTOP_SESSION=xfce \
-    xfce4-session &
+    XDG_CURRENT_DESKTOP=GNOME-Flashback:GNOME \
+    XDG_SESSION_DESKTOP=gnome-flashback-metacity \
+    DESKTOP_SESSION=gnome-flashback-metacity \
+    gnome-session --session=gnome-flashback-metacity &
   SESSION_PID=$!
 else
-  echo "FATAL: No supported desktop environment found (need gnome-session or xfce4-session)" >&2
+  echo "FATAL: No supported desktop session found in ${GNOME_SESSION_DIR}/" >&2
+  ls "${GNOME_SESSION_DIR}/" >&2 2>/dev/null || true
   exit 1
 fi
 

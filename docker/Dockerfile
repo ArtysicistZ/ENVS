@@ -30,12 +30,17 @@ RUN find /etc/systemd/system \
     -exec rm -f {} + 2>/dev/null || true
 
 # ── Desktop stack + OSWorld runtime dependencies ────────────────────────────
-# Xfce4 provides a complete desktop environment (panels, window decorations,
-# desktop wallpaper, file manager) that works with software rendering.
-# On AWS VMs with GNOME installed, the launch script prefers GNOME session.
+# GNOME Flashback provides the real GNOME desktop (panels, nautilus, settings)
+# without requiring logind sessions (which GNOME Shell needs but containers
+# cannot provide).  This is the standard approach for headless GNOME in VNC/
+# container environments.  AWS VMs use full GNOME Shell via GDM login.
 RUN apt-get update && apt-get install -y \
-    xfce4 \
-    xfce4-whiskermenu-plugin \
+    gnome-session-flashback \
+    gnome-settings-daemon \
+    nautilus \
+    ubuntu-wallpapers \
+    yaru-theme-gtk \
+    yaru-theme-icon \
     xinit \
     xvfb \
     xauth \
@@ -79,6 +84,40 @@ RUN apt-get update && apt-get install -y \
     vlc \
     libreoffice \
     && rm -rf /var/lib/apt/lists/*
+
+# ── Bypass GNOME GL acceleration check ──────────────────────────────────────
+# gnome-session-check-accelerated returns code 512 with software rendering,
+# which causes gnome-session to abort.  Replace it with a no-op so GNOME
+# Flashback (which uses Metacity, not Mutter) can start.
+RUN ACCEL_BIN="$(command -v gnome-session-check-accelerated 2>/dev/null \
+        || echo /usr/libexec/gnome-session-check-accelerated)" \
+    && if [ -f "$ACCEL_BIN" ]; then \
+        printf '#!/bin/sh\nexit 0\n' > "$ACCEL_BIN" \
+        && chmod +x "$ACCEL_BIN"; \
+    fi
+
+# ── Desktop defaults (wallpaper, theme, panel layout) ───────────────────────
+RUN printf '\
+[org.gnome.desktop.background]\n\
+picture-uri="file:///usr/share/backgrounds/warty-final-ubuntu.png"\n\
+picture-options="zoom"\n\
+\n\
+[org.gnome.desktop.interface:GNOME-Flashback]\n\
+gtk-theme="Yaru"\n\
+icon-theme="Yaru"\n\
+cursor-theme="Yaru"\n\
+\n\
+[org.gnome.gnome-panel.general:GNOME-Flashback]\n\
+default-layout="gnome-flashback"\n\
+' > /usr/share/glib-2.0/schemas/90_osworld.gschema.override \
+    && glib-compile-schemas /usr/share/glib-2.0/schemas/
+
+# ── Disable gnome-keyring D-Bus activation ──────────────────────────────────
+# Without this, Chrome triggers gnome-keyring-daemon via D-Bus on first launch,
+# which pops up a "Choose password for new keyring" dialog.  Removing the
+# D-Bus service files makes Chrome fall back to basic password storage.
+RUN rm -f /usr/share/dbus-1/services/org.gnome.keyring.service \
+          /usr/share/dbus-1/services/org.freedesktop.secrets.service
 
 # ── Google Chrome ────────────────────────────────────────────────────────────
 RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
