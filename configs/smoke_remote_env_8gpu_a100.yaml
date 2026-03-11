@@ -69,16 +69,19 @@ worker:
   rollout:
     temperature: 1.0
     n: 2
-    # 0.6 = upstream value. With TP=1 and 7B model (~14 GB), each GPU has ~66 GB free;
-    # 60% → ~39 GB KV cache per engine — enough for several 72K-token sequences in parallel.
-    gpu_memory_utilization: 0.6
+    # Upstream uses 0.6 with max_num_seqs=1024 (many parallel sequences).
+    # With max_num_seqs=1, only ~4 GB KV cache is needed (1 × 65K tokens × 56 KB/token).
+    # 0.6 wastes ~33 GB on unused KV cache, leaving only 7.5 GB headroom during
+    # state_dict + vLLM wake (14+14+37.5 GB peak). After optimizer states appear (+3.5 GB),
+    # episode 3+ OOMs. 0.4 → ~25 GB KV cache, ~20 GB headroom.
+    gpu_memory_utilization: 0.4
     enforce_eager: false
     enable_chunked_prefill: false
     # TP=1: each GPU runs its own full vLLM engine (8 independent engines).
     # Same per-GPU memory profile as upstream's 16-engine 2-node setup.
     tensor_parallel_size: 1
     limit_images: 15
-    max_num_batched_tokens: 128000
+    max_num_batched_tokens: 65536
     max_num_seqs: 1
     # "recompute" = upstream behavior: logprobs computed by actor forward pass, not vLLM.
     # "auto" enables prompt_logprobs=1 in vLLM, which computes logits for ALL prompt tokens

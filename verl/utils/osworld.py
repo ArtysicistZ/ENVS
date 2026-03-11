@@ -122,7 +122,10 @@ def collate_fn_dataproto(
         tensors[key] = torch.stack(value, dim=0)
 
     for key, value in non_tensors.items():
-        non_tensors[key] = np.array(value, dtype=object)
+        arr = np.empty(len(value), dtype=object)
+        for i, v in enumerate(value):
+            arr[i] = v
+        non_tensors[key] = arr
 
     return {**tensors, **non_tensors}
 
@@ -145,7 +148,10 @@ def collate_fn_fake(features_list):
         tensors[key] = torch.stack(value, dim=0)
 
     for key, value in non_tensors.items():
-        non_tensors[key] = np.array(value, dtype=object)
+        arr = np.empty(len(value), dtype=object)
+        for i, v in enumerate(value):
+            arr[i] = v
+        non_tensors[key] = arr
 
     return {**tensors, **non_tensors}
 

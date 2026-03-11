@@ -1305,7 +1305,8 @@ class RemoteEnvWorker:
         last_err = None
         for attempt in range(self.REMOTE_EVALUATE_RETRIES + 1):
             try:
-                score = self._post("/env/evaluate", {"slot_id": self.worker_idx}, timeout=self.REMOTE_EVALUATE_TIMEOUT)
+                result = self._post("/env/evaluate", {"slot_id": self.worker_idx}, timeout=self.REMOTE_EVALUATE_TIMEOUT)
+                score = result["score"] if isinstance(result, dict) else result
                 score_float = float(score)
                 print(f"RemoteEnvWorker[{self.worker_idx}] evaluate: score={score_float}, instruction={self.instruction}")
                 return score_float

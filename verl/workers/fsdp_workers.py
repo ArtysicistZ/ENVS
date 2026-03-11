@@ -507,7 +507,19 @@ class FSDPWorker(Worker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_actor(self, data: DataProto):
         assert self._is_actor
+        # Reclaim all cached CUDA blocks before actor update so we start with maximum headroom.
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        if self.rank == 0:
+            _alloc = torch.cuda.memory_allocated() / 1024**3
+            _resv = torch.cuda.memory_reserved() / 1024**3
+            _free = torch.cuda.mem_get_info()[0] / 1024**3
+            print(f"[MEM] update_actor entry (after gc+empty_cache, before data.to(cuda)): allocated={_alloc:.2f} GiB, reserved={_resv:.2f} GiB, cuda_free={_free:.2f} GiB")
         data = data.to(torch.cuda.current_device())
+        if self.rank == 0:
+            _alloc = torch.cuda.memory_allocated() / 1024**3
+            print(f"[MEM] after data.to(cuda): allocated={_alloc:.2f} GiB, data_len={len(data)}")
 
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
@@ -534,6 +546,25 @@ class FSDPWorker(Worker):
             ) / (1024**3)
             metrics["perf/cpu_memory_used_gb"] = psutil.virtual_memory().used / (1024**3)
 
+            # Each rank reports its own peak — after DP_COMPUTE_PROTO concat,
+            # the trainer gets an array of all per-GPU peaks.
+            metrics["perf/gpu_peak_vram_gb"] = torch.cuda.max_memory_allocated() / (1024**3)
+
+            # Print per-GPU summary from rank 0 via all_gather
+            local_peak = torch.tensor(
+                [torch.cuda.max_memory_allocated() / (1024**3)],
+                device=torch.cuda.current_device(),
+            )
+            gathered = [torch.zeros_like(local_peak) for _ in range(self.world_size)]
+            torch.distributed.all_gather(gathered, local_peak)
+            if self.rank == 0:
+                per_gpu_peaks = [t.item() for t in gathered]
+                print(
+                    f"[VRAM] per-GPU peak (GiB): "
+                    + " | ".join(f"GPU{i}={v:.2f}" for i, v in enumerate(per_gpu_peaks))
+                    + f"  max={max(per_gpu_peaks):.2f}"
+                )
+
             self.lr_scheduler.step()
             lr = self.lr_scheduler.get_last_lr()[0]
             metrics["actor/lr"] = lr
@@ -552,6 +583,16 @@ class FSDPWorker(Worker):
             offload_fsdp_optimizer(optimizer=self.optimizer)
 
         output = output.to("cpu")
+        # Free training data and reclaim cached CUDA blocks after actor update
+        # so the next rollout (vLLM wake_up) starts with maximum free memory.
+        del data
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        if self.rank == 0:
+            _alloc = torch.cuda.memory_allocated() / 1024**3
+            _free = torch.cuda.mem_get_info()[0] / 1024**3
+            print(f"[MEM] update_actor exit (after gc+empty_cache): allocated={_alloc:.2f} GiB, cuda_free={_free:.2f} GiB")
         return output
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
@@ -617,6 +658,9 @@ class FSDPWorker(Worker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_log_probs(self, data: DataProto):
         assert self._is_actor
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
         data = data.to(torch.cuda.current_device())
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
@@ -641,6 +685,12 @@ class FSDPWorker(Worker):
             offload_fsdp_model(self.fsdp_module)
 
         output = output.to("cpu")
+        # Free batch data and force PyTorch to release cached CUDA blocks so that
+        # subsequent update_actor has maximum available memory.
+        del data
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)

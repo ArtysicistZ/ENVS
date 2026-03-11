@@ -1,16 +1,23 @@
-# ARPO Throughput Candidate - 8x A100 80G + Remote AWS Env
-# Aligned with upstream JIA-Lab ARPO (osworld_full_arpo.sh) adapted for 1-node 8-GPU.
-# Use this after the smoke profile is confirmed stable.
+# ARPO Test - 8x A100 80G + 16 Remote Envs + n=8
+# Based on smoke_remote_env_8gpu_a100.yaml with:
+#   - num_envs=16 (16 VMs)
+#   - rollout.n=8 (8 rollouts per task, matching upstream paper)
+#   - rollout_batch_size=2 (16 envs / 8 rollouts = 2 tasks per chunk)
+#   - global_batch_size=8 (matching upstream paper)
+#
+# Prerequisites:
+#   1) 16 remote env VMs running
+#   2) Run: python -m verl.trainer.main config=configs/smoke_remote_env_8gpu_a100_n8_env16.yaml
 
 data:
-  train_files: OSWorld/evaluation_examples/test_smoke_4.json
-  val_files: OSWorld/evaluation_examples/test_smoke_4.json
+  train_files: OSWorld/evaluation_examples/test_smoke_8.json
+  val_files: OSWorld/evaluation_examples/test_smoke_8.json
   prompt_key: instruction
   answer_key: ""
   image_key: images
-  max_prompt_length: 64000
+  max_prompt_length: 36000
   max_response_length: 1024
-  rollout_batch_size: 1
+  rollout_batch_size: 2
   val_batch_size: -1
   shuffle: true
   seed: 1
@@ -26,7 +33,7 @@ algorithm:
 
 worker:
   actor:
-    global_batch_size: 4
+    global_batch_size: 8
     micro_batch_size_per_device_for_update: 1
     micro_batch_size_per_device_for_experience: 1
     max_grad_norm: 1.0
@@ -56,14 +63,14 @@ worker:
 
   rollout:
     temperature: 1.0
-    n: 2
+    n: 8
     gpu_memory_utilization: 0.4
     enforce_eager: false
     enable_chunked_prefill: false
     tensor_parallel_size: 1
-    limit_images: 15
-    max_num_batched_tokens: 128000
-    max_num_seqs: 1
+    limit_images: 10
+    max_num_batched_tokens: 38000
+    max_num_seqs: 4
     old_logprob_source: "recompute"
     val_override_config:
       temperature: 0.5
@@ -82,7 +89,7 @@ worker:
     skip_special_tokens: true
 
 env:
-  num_envs: 1
+  num_envs: 16
   max_steps: 15
   remote_server_url: "http://10.100.4.7:15001"
 
@@ -90,7 +97,7 @@ trainer:
   total_episodes: 10
   logger: ["console", "wandb"]
   project_name: arpo-smoke-test
-  experiment_name: uitars_7b_8xa100_remote_paper_candidate
+  experiment_name: uitars_7b_8xa100_n8_env16
   n_gpus_per_node: 8
   nnodes: 1
   val_before_train: false

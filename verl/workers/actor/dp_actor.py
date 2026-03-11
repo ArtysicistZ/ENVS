@@ -20,6 +20,7 @@ from collections import defaultdict
 from typing import Any, Dict, Optional
 
 import torch
+import torch.utils.checkpoint
 from ray.experimental.tqdm_ray import tqdm
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -61,6 +62,7 @@ class DataParallelPPOActor(BasePPOActor):
         # in dynamic remote-env / GRPO batches (e.g. different symbolic batch dims for logits vs labels).
         # For stability in PPO training (including smoke tests), always use the eager implementation.
         self.log_probs_from_logits = VF.log_probs_from_logits
+        self._logged_flash_ce = False
 
     def _maybe_empty_cache(self) -> None:
         if self.config.empty_cache_policy == "aggressive":
@@ -229,6 +231,62 @@ class DataParallelPPOActor(BasePPOActor):
 
             input_ids_rmpad_rolled = input_ids_rmpad_rolled.squeeze(0)  # ((total_nnz / sp) + pad)
 
+            # --- Chunked lm_head + cross-entropy ---
+            # Instead of materializing the FULL (total_nnz, vocab_size) logits tensor (~12 GiB)
+            # and its gradient (~12 GiB) during backward (= 24 GiB peak), we intercept the
+            # hidden states right before lm_head and compute log_probs in small chunks.
+            # Each chunk only materializes (chunk_size, vocab_size) logits (~1.2 GiB).
+            # Per-chunk gradient checkpointing ensures only ONE chunk's logits+gradient exists
+            # at any time during backward.  Peak savings: 24 GiB → ~2.5 GiB.
+            _ce_labels = input_ids_rmpad_rolled
+            _ce_temperature = temperature
+            _ce_log_probs_fn = self.log_probs_from_logits
+            _ce_chunk_size = 4096
+            _captured = {}
+
+            def _chunked_lm_head_pre_hook(module, args):
+                """Pre-forward hook on lm_head: compute log_probs in chunks."""
+                hidden = args[0].squeeze(0)  # (total_nnz, hidden_dim)
+                weight = module.weight  # full unshareded weight (root FSDP keeps it live)
+
+                all_log_probs = []
+                for i in range(0, hidden.shape[0], _ce_chunk_size):
+                    chunk_h = hidden[i:i + _ce_chunk_size]
+                    chunk_lbl = _ce_labels[i:i + _ce_chunk_size]
+
+                    def _compute_chunk_lp(_h, _w, _lbl, _temp=_ce_temperature):
+                        _logits = torch.nn.functional.linear(_h, _w) / _temp
+                        return _ce_log_probs_fn(logits=_logits, labels=_lbl)
+
+                    # checkpoint: don't save chunk logits for backward; recompute them.
+                    chunk_lp = torch.utils.checkpoint.checkpoint(
+                        _compute_chunk_lp, chunk_h, weight, chunk_lbl,
+                        use_reentrant=False,
+                    )
+                    all_log_probs.append(chunk_lp)
+
+                _captured['log_probs'] = torch.cat(all_log_probs)
+                if not self._logged_flash_ce and self.rank == 0:
+                    print(f"[MEM] chunked lm_head: {hidden.shape[0]} tokens in "
+                          f"{(hidden.shape[0] + _ce_chunk_size - 1) // _ce_chunk_size} chunks, "
+                          f"flash_attn CE: {VF.FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE}")
+                    self._logged_flash_ce = True
+
+                # Return tiny dummy so actual lm_head is nearly free
+                dummy = hidden[:1].unsqueeze(0)
+                return (dummy,)
+
+            # Find lm_head module through the (possibly FSDP-wrapped) model
+            _lm_head_module = None
+            for name, mod in self.actor_module.named_modules():
+                if name.endswith('lm_head') and isinstance(mod, nn.Linear):
+                    _lm_head_module = mod
+                    break
+
+            _lm_head_hook = None
+            if _lm_head_module is not None:
+                _lm_head_hook = _lm_head_module.register_forward_pre_hook(_chunked_lm_head_pre_hook)
+
             # only pass input_ids and position_ids to enable flash_attn_varlen
             try:
                 output = self.actor_module(
@@ -241,10 +299,29 @@ class DataParallelPPOActor(BasePPOActor):
             finally:
                 if _sp_hook is not None:
                     _sp_hook.remove()
-            logits_rmpad = output.logits.squeeze(0)  # (total_nnz, vocab_size)
-            logits_rmpad.div_(temperature)
-            # ((total_nnz / sp) + pad)
-            log_probs = self.log_probs_from_logits(logits=logits_rmpad, labels=input_ids_rmpad_rolled)
+                if _lm_head_hook is not None:
+                    _lm_head_hook.remove()
+
+            if 'log_probs' in _captured:
+                # Chunked path succeeded.
+                # FSDP fix: add a zero-valued pass-through from the model's dummy logits
+                # so backward still flows through lm_head, keeping FSDP in FORWARD_BACKWARD
+                # state. Without this, FSDP transitions to IDLE before our chunked backward
+                # reaches lm_head.weight, causing "expected FORWARD_BACKWARD but got IDLE".
+                dummy_logits = output.logits  # tiny (1, 1, vocab) from lm_head(hidden[:1])
+                del output
+                log_probs = _captured['log_probs'] + 0.0 * dummy_logits.sum()
+                del dummy_logits
+                if self.rank == 0:
+                    _alloc = torch.cuda.memory_allocated() / 1024**3
+                    print(f"[MEM] after chunked lm_head+CE: allocated={_alloc:.2f} GiB")
+            else:
+                del output
+                # Fallback: lm_head hook didn't fire (shouldn't happen)
+                raise RuntimeError(
+                    "Chunked lm_head hook did not fire. Check model structure — "
+                    "expected a nn.Linear named 'lm_head' in the model."
+                )
 
             # gather log_prob if sp > 1
             if self.config.ulysses_sequence_parallel_size > 1:
@@ -309,7 +386,7 @@ class DataParallelPPOActor(BasePPOActor):
         else:
             self.actor_optimizer.step()
 
-        self.actor_optimizer.zero_grad()
+        self.actor_optimizer.zero_grad(set_to_none=True)
         return grad_norm
 
     @torch.no_grad()
@@ -416,6 +493,10 @@ class DataParallelPPOActor(BasePPOActor):
 
                     # all return: (bsz, response_length)
                     self._maybe_empty_cache()
+                    if self.rank == 0:
+                        _alloc = torch.cuda.memory_allocated() / 1024**3
+                        _resv = torch.cuda.memory_reserved() / 1024**3
+                        print(f"[MEM] before forward: allocated={_alloc:.2f} GiB, reserved={_resv:.2f} GiB")
                     log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
                     # Align shapes when log_probs and response_mask differ (e.g. variable-length VL batches / padding)
                     seq_len = min(log_probs.size(1), response_mask.size(1))
@@ -452,8 +533,15 @@ class DataParallelPPOActor(BasePPOActor):
                         metrics["actor/kl_coef"] = self.config.kl_coef
 
                     loss = pg_loss / gradient_accumulation
-                    print(f'pg_loss: {pg_loss}')
-                    self._maybe_empty_cache()
+                    # Free any intermediates before backward to maximize headroom for
+                    # the gradient allocation (~11 GiB for logits gradient with 40K+ tokens).
+                    del log_probs  # breaks ref; autograd still holds what it needs via SavedVariables
+                    if self.rank == 0:
+                        _alloc = torch.cuda.memory_allocated() / 1024**3
+                        _resv = torch.cuda.memory_reserved() / 1024**3
+                        _free = torch.cuda.mem_get_info()[0] / 1024**3
+                        print(f"[MEM] before backward: allocated={_alloc:.2f} GiB, reserved={_resv:.2f} GiB, cuda_free={_free:.2f} GiB, pg_loss={pg_loss.item():.4f}")
+                    torch.cuda.empty_cache()
                     loss.backward()
 
                     batch_metrics = {

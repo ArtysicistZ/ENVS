@@ -151,7 +151,15 @@ def collate_fn(data_items: list["DataProtoItem"]):
 
     batch = torch.stack(batch).contiguous()
     non_tensor_batch = batch_collate(non_tensor_batch)
-    non_tensor_batch = {key: np.array(value, dtype=object) for key, value in non_tensor_batch.items()}
+    # Force 1D object arrays to avoid numpy auto-promoting to 2D when inner
+    # values happen to share the same shape (e.g. single-element collation in
+    # replay buffer).  DataProto.concat expects all non_tensor_batch arrays to
+    # be 1D object arrays with the batch dimension only.
+    for key, value in non_tensor_batch.items():
+        arr = np.empty(len(value), dtype=object)
+        for i, v in enumerate(value):
+            arr[i] = v
+        non_tensor_batch[key] = arr
     return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
 
 

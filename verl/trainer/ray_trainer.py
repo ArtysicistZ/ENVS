@@ -57,6 +57,7 @@ from .metrics import compute_data_metrics, compute_throughout_metrics, compute_t
 
 from .gui_agent import EnvWorker, RemoteEnvWorker, parse_action_to_structure_output
 from .replay_buffer import ReplayBuffer
+import datetime
 
 from collections import defaultdict
 from qwen_vl_utils import process_vision_info
@@ -388,19 +389,16 @@ class RayPPOTrainer:
         )
 
         if remote_urls:
-            num_remote = len(remote_urls)
-            if num_envs != num_remote:
-                print(
-                    f"Remote env: using {num_remote} workers from remote_server_url(s); "
-                    f"config had num_envs={num_envs}"
-                )
+            # Create num_envs workers, distributing across available URLs
+            # (round-robin). A single URL with multiple slots is the common case.
             self.env_workers = []
-            for i, remote_url in enumerate(remote_urls):
+            for i in range(num_envs):
+                remote_url = remote_urls[i % len(remote_urls)]
                 w = RemoteEnvWorker.options(name=f"remote_env_worker_{i}").remote(
                     i, max_steps, self.config, remote_url
                 )
                 self.env_workers.append(w)
-            print(f"RemoteEnvWorker created (urls={remote_urls}), total: {len(self.env_workers)}")
+            print(f"RemoteEnvWorker created (urls={remote_urls}), num_envs={num_envs}, total: {len(self.env_workers)}")
         else:
             # Local Docker env workers pinned to nodes with docker resource
             all_res = ray.cluster_resources().keys()
@@ -460,7 +458,7 @@ class RayPPOTrainer:
             getattr(self.config.env, "remote_server_url", None),
             getattr(self.config.env, "remote_server_urls", None),
         )
-        num_envs = len(remote_urls) if remote_urls else self.config.env.num_envs
+        num_envs = self.config.env.num_envs
         val_batch_size = min(num_envs, len(self.val_dataset))
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
@@ -1185,6 +1183,12 @@ class RayPPOTrainer:
         self.global_step = 0
         val_metrics: Optional[Dict[str, Any]] = None
 
+        # Initialize JSONL training log
+        log_dir = self.config.trainer.save_checkpoint_path
+        os.makedirs(log_dir, exist_ok=True)
+        self._training_log_path = os.path.join(log_dir, "training_log.jsonl")
+        print(f"Training log: {self._training_log_path}")
+
         # load checkpoint before doing anything
         self._load_checkpoint()
 
@@ -1501,6 +1505,10 @@ class RayPPOTrainer:
                             else:
                                 actor_output = self.actor_rollout_wg.update_actor(batch)
 
+                        # Extract per-GPU peak VRAM before reduce_metrics averages it
+                        per_gpu_peaks_raw = actor_output.non_tensor_batch.get("perf/gpu_peak_vram_gb")
+                        if per_gpu_peaks_raw is not None:
+                            metrics["perf/per_gpu_peak_vram_gb"] = per_gpu_peaks_raw.tolist() if hasattr(per_gpu_peaks_raw, 'tolist') else list(per_gpu_peaks_raw)
                         actor_metrics = reduce_metrics(actor_output.non_tensor_batch)
                         metrics.update(actor_metrics)
 
@@ -1527,6 +1535,91 @@ class RayPPOTrainer:
                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
 
                 self.logger.log(data=metrics, step=self.global_step)
+
+                # --- Detailed step summary (terminal + JSONL log) ---
+                try:
+                    rollout_n = self.config.worker.rollout.n
+                    task_ids = list(batch.non_tensor_batch.get("task_id", []))
+                    unique_tasks = list(dict.fromkeys(task_ids))  # preserve order, deduplicate
+                    eval_results_t = batch.batch.get("eval_results")
+                    format_rewards_t = batch.batch.get("format_rewards")
+                    rewards_t = batch.batch.get("rewards")
+                    prompt_lens = batch.batch["attention_mask"].sum(dim=-1).tolist()
+
+                    # Build per-task summary
+                    per_task = []
+                    for tid in unique_tasks:
+                        mask = np.array(task_ids) == tid
+                        idxs = np.where(mask)[0]
+                        t_eval = [float(eval_results_t[i]) for i in idxs] if eval_results_t is not None else []
+                        t_fmt = [float(format_rewards_t[i]) for i in idxs] if format_rewards_t is not None else []
+                        t_rew = [float(rewards_t[i]) for i in idxs] if rewards_t is not None else []
+                        t_plen = [int(prompt_lens[i]) for i in idxs]
+                        instr = ""
+                        for tc in batch_dict:
+                            if tc.get("id") == tid:
+                                instr = tc.get("instruction", "")[:80]
+                                break
+                        per_task.append({
+                            "task_id": str(tid),
+                            "instruction": instr,
+                            "n_rollouts": len(idxs),
+                            "eval_scores": t_eval,
+                            "format_rewards": t_fmt,
+                            "final_rewards": t_rew,
+                            "prompt_lengths": t_plen,
+                        })
+
+                    # Print per-task summary
+                    print(f"\n{'='*80}")
+                    print(f"  Step {self.global_step}  |  {datetime.datetime.now().strftime('%H:%M:%S')}  |  "
+                          f"{len(unique_tasks)} tasks × {rollout_n} rollouts = {len(batch)} trajectories")
+                    print(f"{'='*80}")
+                    for t in per_task:
+                        avg_eval = sum(t["eval_scores"]) / max(len(t["eval_scores"]), 1)
+                        avg_fmt = sum(t["format_rewards"]) / max(len(t["format_rewards"]), 1)
+                        avg_plen = sum(t["prompt_lengths"]) / max(len(t["prompt_lengths"]), 1)
+                        print(f"  {t['task_id'][:12]:12s}  eval={avg_eval:.3f}  fmt_r={avg_fmt:.3f}  "
+                              f"plen={avg_plen:.0f}  | {t['instruction']}")
+                    print(f"  Timing: " + "  ".join(f"{k}={v:.1f}s" for k, v in timing_raw.items()))
+                    per_gpu_peaks = metrics.get("perf/per_gpu_peak_vram_gb")
+                    if per_gpu_peaks is not None:
+                        if isinstance(per_gpu_peaks, (list, np.ndarray)):
+                            print(f"  VRAM peak: " + " | ".join(f"GPU{i}={v:.1f}G" for i, v in enumerate(per_gpu_peaks))
+                                  + f"  MAX={max(per_gpu_peaks):.1f}G")
+                    print(f"  pg_loss={metrics.get('actor/pg_loss', 'n/a')}  "
+                          f"grad_norm={metrics.get('actor/grad_norm', 'n/a')}  "
+                          f"entropy={metrics.get('actor/entropy_loss', 'n/a')}")
+                    print(f"{'='*80}\n")
+
+                    # Write JSONL log entry
+                    def _json_safe(v):
+                        if isinstance(v, (np.ndarray, np.generic)):
+                            return v.tolist()
+                        if isinstance(v, torch.Tensor):
+                            return v.tolist()
+                        return v
+
+                    log_entry = {
+                        "timestamp": datetime.datetime.now().isoformat(),
+                        "global_step": self.global_step,
+                        "num_trajectories": len(batch),
+                        "per_task": per_task,
+                        "timing_s": {k: round(v, 3) for k, v in timing_raw.items()},
+                        "per_gpu_peak_vram_gb": _json_safe(per_gpu_peaks) if per_gpu_peaks is not None else None,
+                        "max_gpu_vram_gb": round(max(per_gpu_peaks), 2) if per_gpu_peaks is not None and isinstance(per_gpu_peaks, (list, np.ndarray)) else None,
+                        "pg_loss": _json_safe(metrics.get("actor/pg_loss")),
+                        "grad_norm": _json_safe(metrics.get("actor/grad_norm")),
+                        "entropy_loss": _json_safe(metrics.get("actor/entropy_loss")),
+                        "prompt_length_mean": _json_safe(metrics.get("prompt_length/mean")),
+                        "prompt_length_max": _json_safe(metrics.get("prompt_length/max")),
+                        "response_length_mean": _json_safe(metrics.get("response_length/mean")),
+                        "throughput": _json_safe(metrics.get("perf/throughput")),
+                    }
+                    with open(self._training_log_path, "a") as f:
+                        f.write(json.dumps(log_entry) + "\n")
+                except Exception as e:
+                    print(f"[WARN] step logging failed: {e}")
 
         # perform validation after training (only when val_freq is enabled)
         if self.config.trainer.val_freq > 0 and (
