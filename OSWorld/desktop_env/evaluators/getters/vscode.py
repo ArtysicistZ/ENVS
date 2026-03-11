@@ -9,11 +9,11 @@ logger = logging.getLogger("desktopenv.getters.vscode")
 
 def get_vscode_config(env, config: Dict[str, Any]) -> str:
     os_type = env.vm_platform
+    if os_type not in ("Windows", "Darwin", "Linux"):
+        os_type = "Linux"
     vscode_extension_command = config["vscode_extension_command"]
 
-    # fixme: depends on how we config and install the vscode in virtual machine, need to be aligned and double-checked
-
-    if os_type == "MacOS":
+    if os_type == "Darwin":
         trajectory = [
             {"type": "hotkey", "param": ["command", "shift", "p"]},
             {"type": "typewrite", "param": vscode_extension_command},

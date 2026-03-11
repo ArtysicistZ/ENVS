@@ -8,6 +8,14 @@ from urllib.parse import unquote
 from typing import Dict, Any, List
 from urllib.parse import urlparse, parse_qs
 
+
+def _get_platform(env) -> str:
+    """Normalize vm_platform to a known value. Defaults to Linux for Docker."""
+    os_type = env.vm_platform
+    if os_type in ("Windows", "Darwin", "Linux"):
+        return os_type
+    return "Linux"
+
 import lxml.etree
 import requests
 from lxml.cssselect import CSSSelector
@@ -198,7 +206,7 @@ def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
 
 # The following ones just need to load info from the files of software, no need to connect to the software
 def get_default_search_engine(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                             'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
@@ -236,7 +244,7 @@ def get_cookie_data(env, config: Dict[str, str]):
     Get the cookies from the Chrome browser.
     Assume the cookies are stored in the default location, not encrypted and not large in size.
     """
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         chrome_cookie_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                             'Google\\Chrome\\User Data\\Default\\Cookies'))""")['output'].strip()
@@ -276,7 +284,7 @@ def get_cookie_data(env, config: Dict[str, str]):
 
 
 def get_history(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         chrome_history_path = env.controller.execute_python_command(
             """import os; print(os.path.join(os.getenv('USERPROFILE'), "AppData", "Local", "Google", "Chrome", "User Data", "Default", "History"))""")[
@@ -317,7 +325,7 @@ def get_history(env, config: Dict[str, str]):
 
 
 def get_enabled_experiments(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                                 'Google\\Chrome\\User Data\\Local State'))""")[
@@ -355,7 +363,7 @@ def get_profile_name(env, config: Dict[str, str]):
     Get the username from the Chrome browser.
     Assume the cookies are stored in the default location, not encrypted and not large in size.
     """
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                             'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
@@ -388,7 +396,7 @@ def get_profile_name(env, config: Dict[str, str]):
 
 
 def get_chrome_language(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                                     'Google\\Chrome\\User Data\\Local State'))""")[
@@ -422,7 +430,7 @@ def get_chrome_language(env, config: Dict[str, str]):
 
 
 def get_chrome_font_size(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                                 'Google\\Chrome\\User Data\\Default\\Preferences'))""")[
@@ -463,7 +471,7 @@ def get_chrome_font_size(env, config: Dict[str, str]):
 
 
 def get_bookmarks(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                             'Google\\Chrome\\User Data\\Default\\Bookmarks'))""")['output'].strip()
@@ -494,7 +502,7 @@ def get_bookmarks(env, config: Dict[str, str]):
 # todo: move this to the main.py
 def get_extensions_installed_from_shop(env, config: Dict[str, str]):
     """Find the Chrome extensions directory based on the operating system."""
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         chrome_extension_dir = env.controller.execute_python_command(
             """os.path.expanduser('~') + '\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Extensions\\'""")[
@@ -1267,7 +1275,7 @@ def get_googledrive_file(env, config: Dict[str, Any]) -> Any:
 
 
 def get_enable_do_not_track(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                             'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
@@ -1300,7 +1308,7 @@ def get_enable_do_not_track(env, config: Dict[str, str]):
 
 
 def get_enable_enhanced_safety_browsing(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                             'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
@@ -1333,7 +1341,7 @@ def get_enable_enhanced_safety_browsing(env, config: Dict[str, str]):
 
 
 def get_enable_safe_browsing(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                             'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
@@ -1367,7 +1375,7 @@ def get_enable_safe_browsing(env, config: Dict[str, str]):
         return "false"
 
 def get_new_startup_page(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                             'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
@@ -1405,7 +1413,7 @@ def get_new_startup_page(env, config: Dict[str, str]):
 
 
 def get_find_unpacked_extension_path(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                             'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
@@ -1442,7 +1450,7 @@ def get_find_unpacked_extension_path(env, config: Dict[str, str]):
 
 
 def get_find_installed_extension_name(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                             'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
@@ -1482,7 +1490,7 @@ def get_data_delete_automacally(env, config: Dict[str, str]):
     """
     This function is used to open th "auto-delete" mode of chromium
     """
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                             'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()

@@ -430,7 +430,10 @@ class DockerProvider(Provider):
     def _resolve_container_ip(self, slot_id: int) -> str:
         """Query Docker for the container's current IP (no cache)."""
         name = self._container_name(slot_id)
-        container = self.client.containers.get(name)
+        try:
+            container = self.client.containers.get(name)
+        except self._docker.errors.NotFound:
+            raise RuntimeError(f"Container {name} not found during IP resolution")
         ip = None
         for attempt in range(5):
             container.reload()
@@ -522,7 +525,11 @@ class DockerProvider(Provider):
             timeout=timeout,
         )
         r.raise_for_status()
-        return r.json()
+        try:
+            return r.json()
+        except ValueError:
+            logger.warning("resetd %s returned non-JSON: %s", endpoint, r.text[:200])
+            return {"status": "ok"}
 
     # ── Provider interface ────────────────────────────────────────────────────
 

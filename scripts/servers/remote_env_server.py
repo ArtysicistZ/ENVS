@@ -92,8 +92,8 @@ def _default_provider() -> str:
 _provider_name: str = (os.environ.get("PROVIDER") or _default_provider()).strip().lower()
 max_steps = int(os.environ.get("REMOTE_MAX_STEPS", "32"))
 OBSERVATION_TYPE = "screenshot"
-IMAGE_MIN_PIXELS = int(os.environ.get("REMOTE_IMAGE_MIN_PIXELS", "3136"))
-IMAGE_MAX_PIXELS = int(os.environ.get("REMOTE_IMAGE_MAX_PIXELS", "518400"))
+IMAGE_MIN_PIXELS = int(os.environ.get("REMOTE_IMAGE_MIN_PIXELS", "256"))
+IMAGE_MAX_PIXELS = int(os.environ.get("REMOTE_IMAGE_MAX_PIXELS", "2116800"))
 ACTION_PAUSE_SEC = float(os.environ.get("REMOTE_ACTION_PAUSE_SEC", "1.0"))
 REPEAT_ACTION_THRESHOLD = int(os.environ.get("REMOTE_REPEAT_ACTION_THRESHOLD", "3"))
 REPEAT_ACTION_PENALTY = float(os.environ.get("REMOTE_REPEAT_ACTION_PENALTY", "0.5"))
@@ -874,8 +874,12 @@ class ContainerHealthMonitor:
             if slot is None or slot.env is None:
                 continue  # Slot not initialized yet
 
-            provider = slot.env.provider
-            health = provider.health_check_slot(slot_id)
+            try:
+                provider = slot.env.provider
+                health = provider.health_check_slot(slot_id)
+            except Exception as e:
+                logger.error("[health_monitor] health_check_slot(%d) crashed: %s", slot_id, e)
+                health = {"slot_id": slot_id, "status": "error", "error": str(e)}
 
             with self._health_lock:
                 self._slot_health[slot_id] = health
@@ -955,11 +959,16 @@ def _pre_warm_pool(n_slots: int) -> dict:
 
     results = {"ok": 0, "failed": 0, "errors": []}
 
-    def warm_slot(sid):
+    def warm_slot(sid, attempt=1, max_attempts=2):
         try:
             _get_slot(sid)
             return sid, True, None
         except Exception as e:
+            if attempt < max_attempts:
+                logger.warning("[pre_warm] Slot %d failed (attempt %d/%d): %s — retrying ...",
+                               sid, attempt, max_attempts, e)
+                time.sleep(5 * attempt)
+                return warm_slot(sid, attempt + 1, max_attempts)
             return sid, False, str(e)
 
     with ThreadPoolExecutor(max_workers=PRE_WARM_WORKERS, thread_name_prefix="pre-warm") as executor:
@@ -1091,7 +1100,15 @@ def env_reset(body: ResetRequest):
     slot_id = body.slot_id
     endpoint_lock = _get_slot_endpoint_lock(slot_id)
     with endpoint_lock:
-        return _env_reset_locked(slot_id, body)
+        try:
+            return _env_reset_locked(slot_id, body)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("[slot %d] env_reset crashed: %s", slot_id, e)
+            print(f"[slot {slot_id}] env_reset crash: {e}")
+            print(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Reset failed: {e}")
 
 
 def _env_reset_locked(slot_id: int, body: ResetRequest):
@@ -1183,7 +1200,20 @@ def env_step(body: StepRequest):
     slot_id = body.slot_id
     endpoint_lock = _get_slot_endpoint_lock(slot_id)
     with endpoint_lock:
-        return _env_step_locked(slot_id, body)
+        try:
+            return _env_step_locked(slot_id, body)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("[slot %d] env_step crashed: %s", slot_id, e)
+            print(f"[slot {slot_id}] env_step crash: {e}")
+            print(traceback.format_exc())
+            return {
+                "env_idx": slot_id,
+                "obs_messages": None,
+                "is_done": True,
+                "format_reward": -1.0,
+            }
 
 
 def _env_step_locked(slot_id: int, body: StepRequest):
@@ -1193,8 +1223,8 @@ def _env_step_locked(slot_id: int, body: StepRequest):
     prediction = body.prediction
     action_parse_res_factor = 1000
     model_type = "qwen25vl"
-    max_pixels = 16384 * 28 * 28
-    min_pixels = 100 * 28 * 28
+    max_pixels = IMAGE_MAX_PIXELS
+    min_pixels = IMAGE_MIN_PIXELS
     obs_image_height, obs_image_width = 1080, 1920
 
     parsed_responses = []

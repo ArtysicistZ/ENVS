@@ -717,14 +717,16 @@ class RayPPOTrainer:
             screen_w, screen_h = 1920, 1080
             if getattr(self.config, "env", None) is not None and getattr(self.config.env, "screen_size", None):
                 screen_w, screen_h = self.config.env.screen_size
+            max_px = getattr(getattr(self.config, "data", None), "max_pixels", 2116800)
+            min_px = getattr(getattr(self.config, "data", None), "min_pixels", 3136)
             parse_action_to_structure_output(
                 text,
                 1000,  # matches gui_agent worker parse factor
                 screen_h,
                 screen_w,
                 "qwen25vl",
-                16384 * 28 * 28,
-                100 * 28 * 28,
+                max_px,
+                min_px,
             )
             return True
         except Exception:

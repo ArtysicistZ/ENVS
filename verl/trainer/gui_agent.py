@@ -558,8 +558,8 @@ class EnvWorker():
 
         self.action_parse_res_factor = 1000
         self.model_type = "qwen25vl"
-        self.max_pixels = 16384*28*28
-        self.min_pixels = 100*28*28
+        self.max_pixels = 2116800
+        self.min_pixels = 256
 
         self.instruction = None
         self.task_config = None
@@ -1053,8 +1053,8 @@ class RemoteEnvWorker:
         )
         self.action_parse_res_factor = 1000
         self.model_type = "qwen25vl"
-        self.max_pixels = 16384 * 28 * 28
-        self.min_pixels = 100 * 28 * 28
+        self.max_pixels = 2116800
+        self.min_pixels = 256
         self.reset_train_tensors()
 
     def reset_train_tensors(self):

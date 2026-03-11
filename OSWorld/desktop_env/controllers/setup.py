@@ -893,6 +893,8 @@ class SetupController:
 
             # get the path of the history file according to the platform
             os_type = controller.get_vm_platform()
+            if os_type not in ('Windows', 'Darwin', 'Linux'):
+                os_type = 'Linux'
 
             if os_type == 'Windows':
                 chrome_history_path = controller.execute_python_command(

@@ -341,6 +341,12 @@ def launch_app():
         if not shell and isinstance(command, list) and command and (
             "google-chrome" in command[0] or command[0].endswith("/google-chrome")
         ):
+            # Always disable GPU to prevent software-rendering framebuffer stalls.
+            # With LIBGL_ALWAYS_SOFTWARE=1, Chrome's GPU process does CPU-based
+            # compositing via llvmpipe which can freeze the X server under load.
+            if not any("--disable-gpu" in arg for arg in command):
+                command = list(command) + ["--disable-gpu", "--disable-software-rasterizer"]
+
             has_rdp = any(arg.startswith("--remote-debugging-port") for arg in command)
             has_udd = any(arg.startswith("--user-data-dir") for arg in command)
             if has_rdp and not has_udd:
