@@ -353,18 +353,36 @@ def launch_app():
                 # Chrome 115+ blocks remote debugging when using the DEFAULT profile
                 # path (~/.config/google-chrome). We must use a non-default directory.
                 # Use /tmp/chrome-dbg so it is always writable and never equals the
-                # default path. Clear any stale Singleton* files first so a fresh
-                # Chrome instance can always acquire the lock and bind the debug port.
+                # default path.
                 import shutil as _shutil
                 _dbg_dir = "/tmp/chrome-dbg"
-                # Wipe the entire debug profile dir so Chrome always starts fresh:
-                # stale Singleton files, old profile data, and lock files all cause
-                # Chrome to refuse to bind --remote-debugging-port.
-                try:
-                    _shutil.rmtree(_dbg_dir)
-                except OSError:
-                    pass
-                os.makedirs(_dbg_dir, exist_ok=True)
+                _default_dir = os.path.expanduser("~/.config/google-chrome")
+
+                if not os.path.exists(_dbg_dir):
+                    # First launch: seed from default profile if it exists
+                    if os.path.isdir(_default_dir) and not os.path.islink(_default_dir):
+                        _shutil.copytree(_default_dir, _dbg_dir)
+                    else:
+                        os.makedirs(_dbg_dir, exist_ok=True)
+
+                # Only remove Singleton lock files — NOT the whole profile.
+                # Wiping the profile destroys settings the agent just changed,
+                # which causes evaluators to read stale/empty data.
+                for _lock_name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+                    try:
+                        os.remove(os.path.join(_dbg_dir, _lock_name))
+                    except OSError:
+                        pass
+
+                # Symlink the default profile path to the debug dir so evaluators
+                # (which read ~/.config/google-chrome/Default/Preferences) find
+                # the actual profile data written by Chrome.
+                if os.path.isdir(_default_dir) and not os.path.islink(_default_dir):
+                    _shutil.rmtree(_default_dir)
+                if not os.path.exists(_default_dir):
+                    os.makedirs(os.path.dirname(_default_dir), exist_ok=True)
+                    os.symlink(_dbg_dir, _default_dir)
+
                 command = list(command) + [
                     f"--user-data-dir={_dbg_dir}",
                     "--no-first-run",
