@@ -178,16 +178,24 @@ class DataParallelPPOActor(BasePPOActor):
 
         multi_modal_inputs = {}
         if "multi_modal_inputs" in micro_batch:
-            for key in micro_batch["multi_modal_inputs"][0].keys():
-                multi_modal_inputs[key] = torch.cat(
-                    [inputs[key] for inputs in micro_batch["multi_modal_inputs"]], dim=0
-                )
+            # Filter out empty dicts from failed env workers (reset returned obs_messages=None)
+            non_empty = [x for x in micro_batch["multi_modal_inputs"] if x]
+            if non_empty:
+                for key in non_empty[0].keys():
+                    multi_modal_inputs[key] = torch.cat(
+                        [inputs[key] for inputs in non_empty], dim=0
+                    )
 
         if self.config.padding_free:
             input_ids_rmpad, indices, *_ = unpad_input(
                 input_ids.unsqueeze(-1), attention_mask
             )  # input_ids_rmpad (total_nnz, ...)
             input_ids_rmpad = input_ids_rmpad.transpose(0, 1)  # (1, total_nnz)
+
+            # Guard: if all tokens were padding (failed env reset → empty trajectory),
+            # return zero log_probs. response_mask is all-zero so these don't affect training.
+            if input_ids_rmpad.numel() == 0:
+                return torch.zeros(batch_size, response_length, device=input_ids.device)
 
             # unpad the position_ids to align the rotary
             if position_ids.dim() == 3:
