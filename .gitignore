@@ -23,6 +23,7 @@ venv/
 *arpo_env/
 env/
 vmware_vm_data
+.ssh/
 
 # Large data files
 OSWorld/vmware_vm_data/
