@@ -13,7 +13,10 @@ def get_vm_command_line(env, config: Dict[str, str]):
 
     response = requests.post(f"http://{vm_ip}:{port}/execute", json={"command": command, "shell": shell})
 
-    print(response.json())
+    try:
+        logger.debug("Response: %s", response.json())
+    except Exception:
+        pass
 
     if response.status_code == 200:
         return response.json()["output"]
@@ -29,7 +32,10 @@ def get_vm_command_error(env, config: Dict[str, str]):
 
     response = requests.post(f"http://{vm_ip}:{port}/execute", json={"command": command, "shell": shell})
 
-    print(response.json())
+    try:
+        logger.debug("Response: %s", response.json())
+    except Exception:
+        pass
 
     if response.status_code == 200:
         return response.json()["error"]

@@ -26,7 +26,11 @@ def is_vlc_playing(actual_status_path: str, rule: Dict[str, str]) -> float:
         actual_status = file.read().decode('utf-8')
 
     tree = ElementTree.fromstring(actual_status)
-    status = tree.find('state').text
+    state_elem = tree.find('state')
+    if state_elem is None:
+        logger.error("No 'state' element found in VLC status XML")
+        return 0.
+    status = state_elem.text
     logger.info(f"VLC Status: {status}")
     if status == 'playing':
         if rule['type'] == 'file_name':
@@ -298,38 +302,42 @@ def compare_videos(video_path1, video_path2, max_frames_to_check=100, threshold=
     cap1 = cv2.VideoCapture(video_path1)
     cap2 = cv2.VideoCapture(video_path2)
 
-    frames_checked = 0
-    mismatch_count = 0
+    try:
+        frames_checked = 0
+        mismatch_count = 0
 
-    while frames_checked < max_frames_to_check:
-        # Read frames from both videos
-        ret1, frame1 = cap1.read()
-        ret2, frame2 = cap2.read()
+        while frames_checked < max_frames_to_check:
+            # Read frames from both videos
+            ret1, frame1 = cap1.read()
+            ret2, frame2 = cap2.read()
 
-        # If a video ends, then check if both ended to confirm they are of the same length
-        if not ret1 or not ret2:
-            return 1. if ret1 == ret2 else 0. # return float only 
+            # If a video ends, then check if both ended to confirm they are of the same length
+            if not ret1 or not ret2:
+                return 1. if ret1 == ret2 else 0. # return float only
 
-        # Convert frames to PIL Images
-        frame1 = Image.fromarray(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
-        frame2 = Image.fromarray(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
+            # Convert frames to PIL Images
+            frame1 = Image.fromarray(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
+            frame2 = Image.fromarray(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
 
-        # Compute the perceptual hash for each frame
-        hash1 = imagehash.phash(frame1)
-        hash2 = imagehash.phash(frame2)
+            # Compute the perceptual hash for each frame
+            hash1 = imagehash.phash(frame1)
+            hash2 = imagehash.phash(frame2)
 
-        # Increment the frames checked
-        frames_checked += 1
+            # Increment the frames checked
+            frames_checked += 1
 
-        # Compute the difference in the hashes
-        if hash1 - hash2 > threshold:
-            mismatch_count += 1
-            # If there's a significant difference, the frames are not the same
-            if mismatch_count > threshold:
-                return 0.
+            # Compute the difference in the hashes
+            if hash1 - hash2 > threshold:
+                mismatch_count += 1
+                # If there's a significant difference, the frames are not the same
+                if mismatch_count > threshold:
+                    return 0.
 
-    # If we reach here, the content appears to be the same
-    return 1.
+        # If we reach here, the content appears to be the same
+        return 1.
+    finally:
+        cap1.release()
+        cap2.release()
 
 
 def check_qt_bgcone(actual_config_path, rule):

@@ -21,7 +21,7 @@ def get_gimp_config_file(env, config: Dict[str, str]):
                                                   f".path.expanduser("
                                                   f"'~/.config/GIMP/2.10/"
                                                   f"{config['file_name']}'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
     else:
         raise Exception("Unsupported operating system", os_type)
 

@@ -45,9 +45,10 @@ def get_gimp_export_path():
                 # Search for the default export path setting
                 if "default-export-path" in line:
                     # Extract the current path from the line (assuming it's enclosed in quotes)
-                    current_path = line.split('"')[1]
-                    # Compare the current path with the expected path
-                    return current_path
+                    parts = line.split('"')
+                    if len(parts) > 1:
+                        current_path = parts[1]
+                        return current_path
     except FileNotFoundError:
         # Handle the case where the configuration file is not found
         logging.debug("GIMP configuration file not found")
@@ -124,6 +125,8 @@ def find_yellow_triangle(image):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     # choose the largest contour
+    if not contours:
+        return (0, 0)
     max_contour = max(contours, key=cv2.contourArea)
 
     # calculate the center of the contour
@@ -161,6 +164,8 @@ def calculate_brightness(image):
 def normalize_brightness(image, target_brightness):
     """Normalize the brightness of an image to a target brightness in [0, 1]"""
     current_brightness = calculate_brightness(image)
+    if current_brightness == 0:
+        return image
     factor = target_brightness / current_brightness
 
     # Apply a point transform to each pixel
@@ -387,8 +392,12 @@ def check_triangle_position(tgt_path):
 
     # We assume the triangle is a different color from the background
     # Find the unique colors
+    if len(img_array.shape) < 3:
+        return 0.
     unique_colors, counts = np.unique(img_array.reshape(-1, img_array.shape[2]), axis=0,
                                       return_counts=True)
+    if len(unique_colors) < 2:
+        return 0.
     unique_colors_sorted = unique_colors[np.argsort(counts)]
 
     # Assuming the background is the most common color and the triangle is a different color
@@ -528,6 +537,8 @@ def check_config_status(actual_config_path, rule):
         if line.startswith('#') or line == '\n':
             continue
         items = line.strip().lstrip('(').rstrip(')\n').split()
+        if not items:
+            continue
         if isinstance(rule["key"], str):
             if items[0] == rule["key"] and items[-1] == rule["value"]:
                 return 1.
@@ -553,7 +564,7 @@ def check_image_size(src_path, rule):
     # Check if we should ignore transparent parts
     ignore_transparent = rule.get("ignore_transparent", False)
     
-    if ignore_transparent and img.mode in ('RGBA', 'LA') or 'transparency' in img.info:
+    if ignore_transparent and (img.mode in ('RGBA', 'LA') or 'transparency' in img.info):
         # Calculate bounding box of non-transparent pixels
         if img.mode != 'RGBA':
             img = img.convert('RGBA')
@@ -780,10 +791,10 @@ def check_green_background(src_path, tgt_path):
     for x in range(target_image.width):
         for y in range(target_image.height):
             # Identify background pixel in target image (not black)
-            if tuple(target_pixels[x, y][:3]) != (0, 0, 0):
+            if tuple(target_pixels[y, x][:3]) != (0, 0, 0):
                 # Check if corresponding pixel in source image is green
                 # Here, "green" means more green than red or blue
-                r, g, b = source_pixels[x, y][:3]
+                r, g, b = source_pixels[y, x][:3]
                 if not (g > r and g > b):
                     return 0.
 

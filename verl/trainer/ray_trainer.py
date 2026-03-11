@@ -1528,16 +1528,16 @@ class RayPPOTrainer:
 
                 self.logger.log(data=metrics, step=self.global_step)
 
-        # perform validation after training
-        if (
+        # perform validation after training (only when val_freq is enabled)
+        if self.config.trainer.val_freq > 0 and (
             val_metrics is None
-            or self.config.trainer.val_freq <= 0
             or self.global_step % self.config.trainer.val_freq != 0
         ):
             val_metrics = self._validate()
             self.logger.log(data=val_metrics, step=self.global_step)
 
-        print(f"Final validation metrics: {convert_dict_to_str(val_metrics)}")
+        if val_metrics is not None:
+            print(f"Final validation metrics: {convert_dict_to_str(val_metrics)}")
 
         if self.config.trainer.save_freq <= 0 or self.global_step % self.config.trainer.save_freq != 0:
             self._save_checkpoint()

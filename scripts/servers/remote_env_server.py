@@ -11,6 +11,7 @@ Cluster EnvWorkers call this over HTTP.
 Run on GPU cluster:
 
 sg docker -c "export PROVIDER=docker && .venv/bin/python scripts/servers/remote_env_server.py"
+OSWORLD_POOL_SIZE=1 python scripts/servers/remote_env_server.py
 
 """
 REMOTE_ENV_STAMP = "b36ed69-lifespan"  # grep this on Mac to confirm you have latest

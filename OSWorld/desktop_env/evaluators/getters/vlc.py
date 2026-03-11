@@ -45,18 +45,21 @@ def get_vlc_config(env, config: Dict[str, str]):
     if os_type == "Linux":
         config_path = \
             env.controller.execute_python_command("import os; print(os.path.expanduser('~/.config/vlc/vlcrc'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
     elif os_type == "Darwin":
         config_path = env.controller.execute_python_command(
-            "import os; print(os.path.expanduser('~/Library/Preferences/org.videolan.vlc/vlcrc'))")['output'].strip()
+            "import os; print(os.path.expanduser('~/Library/Preferences/org.videolan.vlc/vlcrc'))")['output'].strip().split('\n')[-1]
     elif os_type == "Windows":
         config_path = env.controller.execute_python_command(
-            "import os; print(os.path.expanduser('~\\AppData\\Roaming\\vlc\\vlcrc'))")['output'].strip()
+            "import os; print(os.path.expanduser('~\\AppData\\Roaming\\vlc\\vlcrc'))")['output'].strip().split('\n')[-1]
     else:
         raise Exception("Unsupported operating system", os_type)
 
     _path = os.path.join(env.cache_dir, config["dest"])
     content = env.controller.get_file(config_path)
+    if content is None:
+        logger.error("Failed to get VLC config file from VM: %s", config_path)
+        return None
     with open(_path, "wb") as f:
         f.write(content)
 

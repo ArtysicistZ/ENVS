@@ -460,12 +460,45 @@ class DesktopEnv(gym.Env):
                     logger.error("File not found!")
                     if self.metric_conj == 'and':
                         return 0
+                    else:
+                        results.append(0)
+                        continue
+                except Exception as e:
+                    logger.error("Result getter crashed for idx=%d: %s", idx, e)
+                    if self.metric_conj == 'and':
+                        return 0
+                    else:
+                        results.append(0)
+                        continue
 
-                if "expected" in self.evaluator and self.expected_getter and self.evaluator["expected"]:
-                    expected_state = self.expected_getter[idx](self, self.evaluator["expected"][idx])
-                    metric: int = metric(result_state, expected_state, **self.metric_options[idx])
-                else:
-                    metric: int = metric(result_state, **self.metric_options[idx])
+                if result_state is None:
+                    logger.warning("Result getter returned None for idx=%d — task not completed, score=0", idx)
+                    if self.metric_conj == 'and':
+                        return 0
+                    else:
+                        results.append(0)
+                        continue
+
+                try:
+                    if "expected" in self.evaluator and self.expected_getter and self.evaluator["expected"]:
+                        expected_state = self.expected_getter[idx](self, self.evaluator["expected"][idx])
+                        if expected_state is None:
+                            logger.warning("Expected getter returned None for idx=%d — score=0", idx)
+                            if self.metric_conj == 'and':
+                                return 0
+                            else:
+                                results.append(0)
+                                continue
+                        metric: int = metric(result_state, expected_state, **self.metric_options[idx])
+                    else:
+                        metric: int = metric(result_state, **self.metric_options[idx])
+                except Exception as e:
+                    logger.error("Metric/expected getter crashed for idx=%d: %s", idx, e)
+                    if self.metric_conj == 'and':
+                        return 0
+                    else:
+                        results.append(0)
+                        continue
 
                 if self.metric_conj == 'and' and float(metric) == 0.0:
                     return 0
@@ -474,7 +507,7 @@ class DesktopEnv(gym.Env):
                 else:
                     results.append(metric)
 
-            return sum(results) / len(results) if self.metric_conj == 'and' else max(results)
+            return sum(results) / len(results) if self.metric_conj == 'and' else (max(results) if results else 0)
         else:
             # Single metric to evaluate whether the task is successfully completed
             try:
@@ -482,12 +515,26 @@ class DesktopEnv(gym.Env):
             except FileNotFoundError:
                 logger.error("File not found!")
                 return 0
+            except Exception as e:
+                logger.error("Result getter crashed: %s", e)
+                return 0
 
-            if "expected" in self.evaluator and self.expected_getter and self.evaluator["expected"]:
-                expected_state = self.expected_getter(self, self.evaluator["expected"])
-                metric: float = self.metric(result_state, expected_state, **self.metric_options)
-            else:
-                metric: float = self.metric(result_state, **self.metric_options)
+            if result_state is None:
+                logger.warning("Result getter returned None — task not completed, score=0")
+                return 0
+
+            try:
+                if "expected" in self.evaluator and self.expected_getter and self.evaluator["expected"]:
+                    expected_state = self.expected_getter(self, self.evaluator["expected"])
+                    if expected_state is None:
+                        logger.warning("Expected getter returned None — score=0")
+                        return 0
+                    metric: float = self.metric(result_state, expected_state, **self.metric_options)
+                else:
+                    metric: float = self.metric(result_state, **self.metric_options)
+            except Exception as e:
+                logger.error("Metric/expected getter crashed: %s", e)
+                return 0
 
         return metric
 

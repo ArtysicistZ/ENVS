@@ -1200,7 +1200,7 @@ def get_window_size():
                 )
         except Xlib.error.XError:  # Ignore windows that give an error
             continue
-    return None
+    return jsonify({"width": 0, "height": 0})
 
 
 @app.route('/desktop_path', methods=['POST'])
@@ -1936,18 +1936,13 @@ def run_bash_script():
                 shell=False
             )
         
-        # Log the command execution for trajectory recording
-        _append_event("BashScript", 
-                      {"script": script, "output": result.stdout, "error": "", "returncode": result.returncode}, 
-                      ts=time.time())
-        
         return jsonify({
             'status': 'success' if result.returncode == 0 else 'error',
             'output': result.stdout,  # Contains both stdout and stderr merged
             'error': "",  # Always empty as requested
             'returncode': result.returncode
         })
-        
+
     except subprocess.TimeoutExpired:
         return jsonify({
             'status': 'error',
@@ -1967,10 +1962,6 @@ def run_bash_script():
                 cwd=working_dir,
                 shell=False
             )
-            
-            _append_event("BashScript", 
-                          {"script": script, "output": result.stdout, "error": "", "returncode": result.returncode}, 
-                          ts=time.time())
             
             return jsonify({
                 'status': 'success' if result.returncode == 0 else 'error',

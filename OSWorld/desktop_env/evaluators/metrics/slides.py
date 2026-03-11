@@ -129,6 +129,8 @@ def check_slide_numbers_color(pptx_file_path):
                     font_color = get_master_placeholder_color(presentation)
                     return 1 if font_color is not None and is_red_color(font_color) else 0
 
+    return 0
+
 
 # import numpy as np
 # from PIL import Image
@@ -283,11 +285,11 @@ def compare_pptx_files(file1_path, file2_path, **options):
             else:
                 return None
 
-        if get_slide_notes(slide1).strip() != get_slide_notes(slide2).strip() and examine_note:
+        if (get_slide_notes(slide1) or "").strip() != (get_slide_notes(slide2) or "").strip() and examine_note:
             if enable_debug:
                 debug_logger.debug(f"    MISMATCH: Slide {slide_idx} - Notes differ:")
-                debug_logger.debug(f"      Notes1: '{get_slide_notes(slide1).strip()}'")
-                debug_logger.debug(f"      Notes2: '{get_slide_notes(slide2).strip()}'")
+                debug_logger.debug(f"      Notes1: '{(get_slide_notes(slide1) or '').strip()}'")
+                debug_logger.debug(f"      Notes2: '{(get_slide_notes(slide2) or '').strip()}'")
             return 0
 
         # Get all text shapes including those inside GROUPs
@@ -836,6 +838,8 @@ def evaluate_presentation_fill_to_rgb_distance(pptx_file, rules):
         return 1
 
     prs = Presentation(pptx_file)
+    if len(prs.slides) == 0:
+        return 0.
     similarity = 1 - sum(slide_fill_distance_to_rgb(slide, rgb, original_rgb) for slide in prs.slides) / len(prs.slides)
     return similarity
 
@@ -1072,5 +1076,7 @@ def check_auto_saving_time(pptx_file, rules):
 
     except ET.ParseError as e:
         logger.error(f"Error parsing XML: {e}")
+        return 0
     except FileNotFoundError:
         logger.error(f"File not found: {pptx_file}")
+        return 0

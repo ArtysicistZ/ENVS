@@ -12,6 +12,8 @@ def get_background_image_in_slide(env, config: Dict[str, str]):
     image_id, image_file_path = None, None
 
     ppt_file_localhost_path = get_vm_file(env, {"path": ppt_file_path, "dest": os.path.split(ppt_file_path)[-1]})
+    if ppt_file_localhost_path is None:
+        return None
 
     with zipfile.ZipFile(ppt_file_localhost_path, 'r') as myzip:
         slide1_xml_file = 'ppt/slides/slide{}.xml'.format(slide_index + 1)
@@ -75,6 +77,8 @@ def get_audio_in_slide(env, config: Dict[str, str]):
     audio_file_path = None
 
     ppt_file_localhost_path = get_vm_file(env, {"path": ppt_file_path, "dest": os.path.split(ppt_file_path)[-1]})
+    if ppt_file_localhost_path is None:
+        return None
 
     with zipfile.ZipFile(ppt_file_localhost_path, 'r') as myzip:
         # Find the relationships XML file for the first slide

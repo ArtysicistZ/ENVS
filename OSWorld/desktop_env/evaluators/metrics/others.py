@@ -70,7 +70,7 @@ def process_epub(filename: str) -> List[str]:
 
 
 def compare_epub(result: str, expected: str) -> float:
-    if result is None:
+    if result is None or expected is None:
         return 0.
     result_files: List[str] = process_epub(result)
     expected_files: List[str] = process_epub(expected)

@@ -7,6 +7,7 @@ import time
 from itertools import product
 from typing import Any, Dict, List, Union
 
+import fitz
 import rapidfuzz.fuzz as fuzz
 from bs4 import BeautifulSoup, Tag
 
@@ -128,7 +129,7 @@ def is_expected_tabs(open_tabs: List[Dict[str, str]], rule: Dict[str, Any]) -> f
 
     if match_type == "url":
         expected_urls = rule['urls']
-        actual_urls = [tab['url'] for tab in open_tabs]
+        actual_urls = [tab.get('url', '') for tab in open_tabs]
         if not are_lists_equal(expected_urls, actual_urls, compare_urls):
             logger.error("list not match") 
             logger.error(expected_urls)
@@ -189,7 +190,10 @@ def is_expected_search_query(active_tab_info: Dict[str, str], rules: Dict[str, A
 
     expected = rules['expect']
     pattern = expected['pattern']
-    matched = re.search(pattern, active_tab_info['url'])
+    url = active_tab_info.get('url')
+    if not url:
+        return 0.
+    matched = re.search(pattern, url)
     if matched:
         return 1.
     return 0.
@@ -199,6 +203,8 @@ def compare_pdfs(pdf1_path: Union[str, List[str]], pdf2_path: Union[str, List[st
     """
     Compare two PDF files.
     """
+    if not pdf1_path or not pdf2_path:
+        return 0.
     if type(pdf2_path) != list:
         pdf1_path, pdf2_path = [pdf1_path], [pdf2_path]
 
@@ -221,7 +227,7 @@ def compare_pdfs(pdf1_path: Union[str, List[str]], pdf2_path: Union[str, List[st
     return score / len(pdf2_path)
 
 
-import fitz
+
 from PIL import Image
 from borb.pdf import Document
 from borb.pdf import PDF
@@ -546,6 +552,8 @@ def check_font_size(font_size, rule):
     """
     Check if the font size is as expected.
     """
+    if not font_size:
+        return 0.
 
     default_font_size = font_size['default_font_size']
     if rule['type'] == 'value':
@@ -560,10 +568,12 @@ def is_added_to_steam_cart(active_tab_info, rule):
     """
     Check if the item is added to the Steam cart.
     """
-    items = rule['items']
-
-    content = active_tab_info['content']
-
+    if not active_tab_info or not rule:
+        return 0.
+    items = rule.get('items', [])
+    content = active_tab_info.get('content', '')
+    if not content:
+        return 0.
     for item in items:
         if item not in content:
             return 0.

@@ -440,6 +440,7 @@ def _process_xlsx_cf_operator(operator: str, value: Any, ref: List[Any]) -> bool
         else:
             #raise NotImplementedError("Not Implemented CondFormat Operator: {:}".format(operator))
             logger.exception("Not Implemented CondFormat Operator: {:}".format(operator))
+            result = False
         return result
     except TypeError:
         logger.exception("Unmatched type of %s and %s. Auto to False", repr(value), repr(ref))

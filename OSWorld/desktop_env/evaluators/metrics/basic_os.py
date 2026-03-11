@@ -26,7 +26,11 @@ System clock synchronized: yes
           RTC in local TZ: no
     """
 
-    utc_line = timedatectl_output.split("\n")[3]
+    lines = timedatectl_output.split("\n")
+    if len(lines) < 4:
+        return 0
+
+    utc_line = lines[3]
 
     if utc_line.endswith("+0000)"):
         return 1

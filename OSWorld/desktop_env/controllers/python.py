@@ -14,7 +14,7 @@ logger = logging.getLogger("desktopenv.pycontroller")
 class PythonController:
     def __init__(self, vm_ip: str,
                  server_port: int,
-                 pkgs_prefix: str = "import pyautogui; import time; pyautogui.FAILSAFE = False; {command}"):
+                 pkgs_prefix: str = "import sys as _sys, io as _io; _real_stdout = _sys.stdout; _sys.stdout = _io.StringIO(); import pyautogui, time; _sys.stdout = _real_stdout; pyautogui.FAILSAFE = False; {command}"):
         self.vm_ip = vm_ip
         self.http_server = f"http://{vm_ip}:{server_port}"
         self.pkgs_prefix = pkgs_prefix  # fixme: this is a hacky way to execute python commands. fix it and combine it with installation of packages
@@ -122,6 +122,9 @@ class PythonController:
                 if response.status_code == 200:
                     logger.info("File downloaded successfully")
                     return response.content
+                elif response.status_code == 404:
+                    logger.warning("File not found on VM (404): %s", file_path)
+                    return None
                 else:
                     logger.error("Failed to get file. Status code: %d", response.status_code)
                     logger.info("Retrying to get file.")
@@ -175,7 +178,11 @@ class PythonController:
                 if response.status_code == 200:
                     return response.json()
                 else:
-                    return {"status": "error", "message": "Failed to execute command.", "output": None, "error": response.json()["error"]}
+                    try:
+                        error_detail = response.json().get("error", response.text[:200])
+                    except Exception:
+                        error_detail = response.text[:200]
+                    return {"status": "error", "message": "Failed to execute command.", "output": None, "error": error_detail}
             except requests.exceptions.ReadTimeout:
                 break
             except Exception:
@@ -248,6 +255,10 @@ class PythonController:
         
         # Handle dictionary actions
         if type(action) == dict and action.get('action_type') in ['WAIT', 'FAIL', 'DONE']:
+            return
+
+        if not isinstance(action, dict):
+            logger.error("execute_action: expected dict, got %s: %s", type(action).__name__, action)
             return
 
         action_type = action["action_type"]

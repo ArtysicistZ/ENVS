@@ -756,7 +756,7 @@ class SetupController:
                         if chunk:
                             tmpf.write(chunk)
                     tmpf.close()
-                    paths = [params['path']] if params['path'] != list else params['path']
+                    paths = params['path'] if isinstance(params['path'], list) else [params['path']]
                     parent_id = mkdir_in_googledrive(paths[:-1])
                     parents = {} if parent_id == 'root' else {'parents': [{'id': parent_id}]}
                     file = drive.CreateFile({'title': paths[-1], **parents})
@@ -899,11 +899,11 @@ class SetupController:
             if os_type == 'Windows':
                 chrome_history_path = controller.execute_python_command(
                     """import os; print(os.path.join(os.getenv('USERPROFILE'), "AppData", "Local", "Google", "Chrome", "User Data", "Default", "History"))""")[
-                    'output'].strip()
+                    'output'].strip().split('\n')[-1]
             elif os_type == 'Darwin':
                 chrome_history_path = controller.execute_python_command(
                     """import os; print(os.path.join(os.getenv('HOME'), "Library", "Application Support", "Google", "Chrome", "Default", "History"))""")[
-                    'output'].strip()
+                    'output'].strip().split('\n')[-1]
             elif os_type == 'Linux':
                 chrome_history_path = controller.execute_python_command(
                     """import os, shutil
@@ -915,7 +915,7 @@ elif shutil.which('chromium-browser') or shutil.which('chromium'):
 else:
     print(os.path.join(home, '.config', 'google-chrome', 'Default', 'History'))
 """
-                )['output'].strip()
+                )['output'].strip().split('\n')[-1]
             else:
                 raise Exception('Unsupported operating system')
 
@@ -937,4 +937,4 @@ else:
             except requests.exceptions.RequestException as e:
                 logger.error("An error occurred while trying to send the request: %s", e)
 
-            self._execute_setup(["sudo chown -R user:user /home/user/.config/google-chrome/Default/History"], shell=True)
+            self._execute_setup([f"sudo chown user:user '{chrome_history_path}'"], shell=True)

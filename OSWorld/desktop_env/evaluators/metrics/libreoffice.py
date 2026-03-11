@@ -18,9 +18,12 @@ def check_libre_locale(config_file: str, rules: Dict[str, List[str]]) -> float:
     setup_locale_setting: List[Element] = _setup_locale_selector(config)
     locale_setting: List[Element] = _locale_selector(config)
 
-    setup_locale_setting: str = setup_locale_setting[0].text \
-        if len(setup_locale_setting) > 0 \
-        else locale_setting[0].text
+    if len(setup_locale_setting) > 0:
+        setup_locale_setting: str = setup_locale_setting[0].text
+    elif len(locale_setting) > 0:
+        setup_locale_setting: str = locale_setting[0].text
+    else:
+        return 0.
 
     return float(any(fnmatch.fnmatchcase(setup_locale_setting, ptn) \
                      for ptn in rules["locale_set"]
