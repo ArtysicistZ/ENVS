@@ -67,3 +67,4 @@ models--*/
 
 # Keep structure but not large files
 !.gitkeep
+upstream_arpo/

@@ -90,7 +90,7 @@ worker:
 env:
   num_envs: 1
   max_steps: 15
-  remote_server_url: "http://98.89.25.166:15001"
+  remote_server_url: "http://10.100.4.7:15001"
 
 trainer:
   total_episodes: 10
