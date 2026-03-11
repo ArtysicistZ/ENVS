@@ -367,11 +367,13 @@ def _append_screenshot_message(messages: list, screenshot) -> bool:
     try:
         if screenshot is None:
             return False
-        if not isinstance(screenshot, bytes):
-            from PIL import Image
-            buf = BytesIO()
-            Image.open(BytesIO(screenshot) if isinstance(screenshot, bytes) else screenshot).save(buf, format="JPEG")
-            screenshot = buf.getvalue()
+        from PIL import Image
+        # Always re-encode through PIL to validate the image is not truncated.
+        img = Image.open(BytesIO(screenshot) if isinstance(screenshot, bytes) else screenshot)
+        img.load()  # force full decode — catches truncated PNG/JPEG
+        buf = BytesIO()
+        img.save(buf, format="JPEG")
+        screenshot = buf.getvalue()
         b64 = base64.b64encode(screenshot).decode("utf-8")
         messages.append({
             "role": "user",
@@ -1178,11 +1180,41 @@ def _env_reset_locked(slot_id: int, body: ResetRequest):
         print(f"[slot {slot_id}] Reset: screenshot is None. Returning obs_messages=None.")
         slot.is_done = True
         return {"env_idx": slot_id, "obs_messages": None, "is_done": True, "format_reward": 0.0}
-    if not isinstance(screenshot, bytes):
-        from PIL import Image
-        buf = BytesIO()
-        Image.open(BytesIO(screenshot) if isinstance(screenshot, bytes) else screenshot).save(buf, format="JPEG")
-        screenshot = buf.getvalue()
+
+    # Validate & convert screenshot to JPEG.  DesktopEnv may return raw PNG bytes
+    # that are truncated when the VM hasn't finished rendering.  Re-encoding through
+    # PIL with img.load() catches corrupt data here instead of letting the client crash.
+    # NOTE: Do NOT set ImageFile.LOAD_TRUNCATED_IMAGES = True anywhere — it would
+    # suppress the exceptions that this validation relies on.
+    from PIL import Image as _PILImage
+    _SCREENSHOT_RETRY = 3
+    _screenshot_valid = False
+    for _ss_attempt in range(_SCREENSHOT_RETRY):
+        if screenshot is None or not isinstance(screenshot, bytes) or len(screenshot) == 0:
+            print(f"[slot {slot_id}] Reset: screenshot is None/empty (attempt {_ss_attempt+1}/{_SCREENSHOT_RETRY})")
+        else:
+            try:
+                img = _PILImage.open(BytesIO(screenshot))
+                img.load()  # force full decode — raises on truncated PNG/JPEG
+                buf = BytesIO()
+                img.save(buf, format="JPEG")
+                screenshot = buf.getvalue()
+                _screenshot_valid = True
+                break
+            except Exception as ss_err:
+                print(f"[slot {slot_id}] Reset: screenshot corrupt (attempt {_ss_attempt+1}/{_SCREENSHOT_RETRY}): {ss_err}")
+        # Re-capture: give the VM a moment to finish rendering
+        if _ss_attempt < _SCREENSHOT_RETRY - 1:
+            time.sleep(2 * (_ss_attempt + 1))
+            try:
+                controller = getattr(env, 'controller', None)
+                screenshot = controller.get_screenshot() if controller else None
+            except Exception:
+                screenshot = None
+    if not _screenshot_valid:
+        print(f"[slot {slot_id}] Reset: screenshot unrecoverable after {_SCREENSHOT_RETRY} attempts.")
+        slot.is_done = True
+        return {"env_idx": slot_id, "obs_messages": None, "is_done": True, "format_reward": 0.0}
 
     slot.history_messages = _build_init_messages(screenshot, slot.instruction)
     slot._last_screenshot_fingerprint = _screenshot_fingerprint(screenshot)
