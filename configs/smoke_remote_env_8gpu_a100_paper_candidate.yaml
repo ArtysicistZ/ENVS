@@ -1,7 +1,6 @@
 # ARPO Throughput Candidate - 8x A100 80G + Remote AWS Env
-# This profile is intentionally closer to the upstream ARPO rollout design:
-# lower rollout TP, higher rollout batching capacity, and no hard KV reservation.
-# Use it for throughput experiments after the safe smoke profile is stable.
+# Aligned with upstream JIA-Lab ARPO (osworld_full_arpo.sh) adapted for 1-node 8-GPU.
+# Use this after the smoke profile is confirmed stable.
 
 data:
   train_files: OSWorld/evaluation_examples/test_smoke_4.json
@@ -32,7 +31,7 @@ worker:
     micro_batch_size_per_device_for_experience: 1
     max_grad_norm: 1.0
     padding_free: true
-    ulysses_sequence_parallel_size: 4
+    ulysses_sequence_parallel_size: 1
     ppo_epochs: 1
     clip_ratio_low: 0.2
     clip_ratio_high: 0.3
@@ -58,14 +57,14 @@ worker:
   rollout:
     temperature: 1.0
     n: 2
-    gpu_memory_utilization: 0.4
+    gpu_memory_utilization: 0.6
     enforce_eager: false
-    enable_chunked_prefill: true
-    # Paper-like direction: use smaller TP to create more independent rollout engines.
-    tensor_parallel_size: 2
+    enable_chunked_prefill: false
+    tensor_parallel_size: 1
     limit_images: 15
-    max_num_batched_tokens: 65536
-    max_num_seqs: 2
+    max_num_batched_tokens: 128000
+    max_num_seqs: 1
+    old_logprob_source: "recompute"
     val_override_config:
       temperature: 0.5
       n: 1

@@ -929,3 +929,140 @@ tested, and must not be reverted toward the upstream:
 - All OSWorld env integration files (section 4 above)
 - `scripts/servers/remote_env_server.py`
 - `OSWorld/` submodule and evaluation examples
+
+---
+
+## 10. Third-Round Audit (4-Agent Parallel)
+
+Files covered: `main.py`, `gui_agent.py`, `rollout_logprobs.py`, `core_algos.py`,
+`vllm_rollout_spmd.py`, `fsdp_vllm.py`, `fsdp_workers.py` (sleep/wake focus).
+
+---
+
+### 10.1 `verl/trainer/main.py` — 9 additions (all KEEP)
+
+| Difference | What it does | Verdict |
+|------------|-------------|---------|
+| `_load_dotenv()` function | Loads `.env` file at repo root for API keys | Keep |
+| OSWorld path setup | Adds `OSWorld/` submodule to `sys.path` | Keep |
+| `import os` | Required for path and env var operations | Keep |
+| `from ray.exceptions import RayActorError, RayTaskError` | Better error handling | Keep |
+| `os._exit(0)` in `Runner.run()` | Avoids vLLM/CUDA segfault on normal exit | Keep |
+| Absolute path resolution for `train_files`/`val_files` | Prevents file-not-found in Ray workers with different cwd | Keep |
+| `address="local"` + RAY_* env cleanup | Avoids connecting to stale/dead Ray clusters | Keep |
+| Try/except with diagnostic messages | Distinguishes OOM/node-crash from normal exit | Keep |
+| `finally: ray.shutdown()` | Clean shutdown with exception suppression | Keep |
+
+**No action needed — all intentional improvements.**
+
+---
+
+### 10.2 `verl/trainer/gui_agent.py` — 13 differences (all KEEP, 1 INVESTIGATE)
+
+`gui_agent.py` exists in **both** forks (not a new file).
+
+| Difference | What it does | Verdict |
+|------------|-------------|---------|
+| Optional `DesktopEnv` import (try/except) | Graceful fallback when desktop_env not installed | Keep |
+| `_escape_backslashes_in_string_literals()` | Retry parse_action with escaped backslashes (Windows paths) | Keep |
+| Box token stripping (`<\|box_start\|>`) | Removes box tokens before coordinate parsing | Keep |
+| Press key bug fix: `hotkey` → `key_to_press` | **Upstream bug**: arrow key conversion checks wrong variable | Keep (bug fix) |
+| `repr()` in `pyperclip.copy()` / `pyautogui.write()` | Proper string escaping (quotes, backslashes) | Keep (bug fix) |
+| Click `start_box` None guard | Prevents `str(None)` → `eval("None")` crash | Keep |
+| `DesktopEnv is None` check in `EnvWorker.__init__` | Clear error message when desktop_env missing | Keep |
+| Image truncation in `get_train_dict()` | Removes orphaned image tokens/pixels after text truncation | Keep |
+| `_instruction_with_cluster_priors()` | Injects task-family hints (GIMP, browser, file mgmt) | Keep |
+| `RemoteEnvWorker` class (~350 lines) | HTTP client to remote env server | Keep |
+| **Pixel constants: `16384*28*28` → `2116800`, `100*28*28` → `256`** | Max/min pixel limits for image preprocessing | **INVESTIGATE** |
+
+**Pixel constant investigation needed:** Upstream uses `max_pixels=12845056, min_pixels=78400`.
+Our fork uses `max_pixels=2116800, min_pixels=256`. These control Qwen2.5-VL image resizing.
+The YAML config also sets `max_pixels: 2116800` — so our fork's hardcoded value matches the
+config default. Upstream's values are ~6× larger and would allow much higher-resolution images
+(more vision tokens, more VRAM). Our lower values are intentional for memory safety but may
+affect visual task accuracy. **Verify against training results.**
+
+---
+
+### 10.3 `verl/utils/rollout_logprobs.py` — NEW FILE (not in upstream)
+
+Provides 7 functions for extracting log probabilities from vLLM rollout output,
+avoiding a full actor forward pass to recompute old log probs:
+
+| Function | Purpose |
+|----------|---------|
+| `RolloutLogProbAlignmentError` | Custom exception for logprob alignment failures |
+| `_extract_selected_logprobs()` | Extracts per-token logprobs from position-wise dicts |
+| `build_rollout_step_metadata()` | Assembles prompt+response logprob metadata per step |
+| `assemble_old_log_probs_from_sample()` | Builds 1D logprob tensor aligned with labels |
+| `build_old_log_probs_from_batch()` | Processes entire batch of rollout metadata |
+| `get_old_log_probs_with_fallback()` | Main API: tries rollout logprobs first, falls back to recompute |
+| `to_object_array()` | Utility to create numpy object array |
+
+**Keep — significant compute saving** (avoids full actor forward pass for old log probs).
+Used by `ray_trainer.py` via `get_old_log_probs_with_fallback()`.
+
+---
+
+### 10.4 `verl/workers/rollout/vllm_rollout_spmd.py` — 8 additions (all KEEP)
+
+Our fork adds several features to the vLLM rollout engine that upstream lacks:
+
+| Difference | Our Fork | Upstream | Verdict |
+|------------|----------|----------|---------|
+| `trust_remote_code` in `LLM()` | Passed via config | Missing | Keep — needed for UI-TARS |
+| `max_model_len` in `LLM()` | `prompt_length + response_length` | Not passed (auto-detect) | Keep — explicit is safer |
+| `max_num_batched_tokens` in `LLM()` | From config (128000) | Not passed | Keep — prevents undersized prefill |
+| `max_num_seqs` in `LLM()` | From config | Not passed (default 1024) | Keep — controls concurrency |
+| `mm_processor_kwargs` for Qwen2VL | `size: {shortest_edge, longest_edge}` | Not present | Keep — fixes image preprocessing |
+| `kv_cache_memory_bytes` option | Alternative to `gpu_memory_utilization` | Not present | Keep — finer memory control |
+| `disable_mm_preprocessor_cache` | Removed (API gone in vLLM 0.15.0) | Present but commented out | Keep — vLLM 0.15.0 compat |
+| Logprob metadata collection | `build_rollout_step_metadata()` pipeline | Not present | Keep — enables rollout logprob reuse |
+
+**All additions are our intentional improvements. No action needed.**
+
+---
+
+### 10.5 `verl/workers/fsdp_workers.py` — 2 NEW bug fixes found
+
+In addition to the 8 items documented in Section 8.6.1–8.6.4, two new differences:
+
+**10.5.1 Critic config scoping fix**
+
+```python
+# Ours (correct):
+self.critic = DataParallelPPOCritic(config=self.config.critic, ...)
+
+# Upstream (wrong scope):
+self.critic = DataParallelPPOCritic(config=self.config, ...)
+```
+
+Upstream passes the entire worker config to the critic instead of the critic-specific
+sub-config. This can cause the critic to read actor/rollout settings as its own. **Keep.**
+
+**10.5.2 Error message `self.role` fix**
+
+```python
+# Ours (correct):
+raise ValueError(f"Unknown role {self.role}.")
+
+# Upstream (bug — `role` may be uninitialized at the else clause):
+raise ValueError(f"Unknown role {role}.")
+```
+
+`role` is only assigned inside the if/elif branches; reaching the else means none matched,
+so `role` is uninitialized → NameError. Our fork uses `self.role` which is always set. **Keep.**
+
+---
+
+### 10.6 Third-Round Consolidated Action Summary
+
+No new BLOCKER or actionable items found. All differences are:
+- Our intentional improvements (keep)
+- Upstream bugs we already fixed (keep)
+- One item to investigate (pixel constants)
+
+| Item | File | Action | Priority |
+|------|------|--------|----------|
+| Pixel constants `2116800/256` vs `12845056/78400` | gui_agent.py | Verify against training results | Low — monitor |
+| All other diffs (30+ items) | Various | Keep ours | Done |

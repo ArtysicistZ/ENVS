@@ -255,7 +255,7 @@ class FSDPWorker(Worker):
                 model_config.model_path,
                 config=self.model_config,
                 torch_dtype=torch_dtype,
-                attn_implementation="sdpa",  # Use PyTorch SDPA (memory-efficient, no flash_attn needed)
+                attn_implementation="flash_attention_2",  # flash-attn: O(n) memory vs O(n²) for SDPA at long context
                 device_map="cpu",  # Always load to CPU; FSDP will move to CUDA and shard
                 low_cpu_mem_usage=True,
                 trust_remote_code=model_config.trust_remote_code,
@@ -265,7 +265,7 @@ class FSDPWorker(Worker):
                 model = auto_class.from_config(
                     self.model_config,
                     torch_dtype=torch_dtype,
-                    attn_implementation="sdpa",  # Use PyTorch SDPA (memory-efficient, no flash_attn needed)
+                    attn_implementation="flash_attention_2",  # flash-attn: O(n) memory vs O(n²) for SDPA at long context
                     trust_remote_code=model_config.trust_remote_code,
                 )
 
