@@ -607,7 +607,7 @@ class SetupController:
                 if attempt > 0:
                     time.sleep(5)
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     break
                 except Exception as e:
                     if attempt < 14:
@@ -652,7 +652,7 @@ class SetupController:
             browser = None
             for attempt in range(15):
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     break
                 except Exception as e:
                     if attempt < 14:
@@ -783,7 +783,7 @@ class SetupController:
             browser = None
             for attempt in range(15):
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     break
                 except Exception as e:
                     if attempt < 14:
