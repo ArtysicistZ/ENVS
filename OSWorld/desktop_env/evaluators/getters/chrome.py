@@ -8,6 +8,14 @@ from urllib.parse import unquote
 from typing import Dict, Any, List
 from urllib.parse import urlparse, parse_qs
 
+
+def _get_platform(env) -> str:
+    """Normalize vm_platform to a known value. Defaults to Linux for Docker."""
+    os_type = env.vm_platform
+    if os_type in ("Windows", "Darwin", "Linux"):
+        return os_type
+    return "Linux"
+
 import lxml.etree
 import requests
 from lxml.cssselect import CSSSelector
@@ -70,7 +78,7 @@ def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
         with sync_playwright() as p:
             # connect to remote Chrome instance
             try:
-                browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                 logger.info(f"[INFO_FROM_WEBSITE] Successfully connected to existing Chrome instance")
             except Exception as e:
                 logger.warning(f"[INFO_FROM_WEBSITE] Failed to connect to existing Chrome instance: {e}")
@@ -92,7 +100,7 @@ def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
                 #requests.post("http://" + host + ":" + server_port + "/setup" + "/launch", headers=headers, data=payload)
                 requests.post(backend_url + "/setup" + "/launch", headers=headers, data=payload)
                 time.sleep(5)
-                browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                 logger.info(f"[INFO_FROM_WEBSITE] Successfully connected to new Chrome instance")
 
             page = browser.contexts[0].new_page()
@@ -198,23 +206,23 @@ def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
 
 # The following ones just need to load info from the files of software, no need to connect to the software
 def get_default_search_engine(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
+                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
     else:
         raise Exception('Unsupported operating system')
 
@@ -236,23 +244,23 @@ def get_cookie_data(env, config: Dict[str, str]):
     Get the cookies from the Chrome browser.
     Assume the cookies are stored in the default location, not encrypted and not large in size.
     """
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         chrome_cookie_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Cookies'))""")['output'].strip()
+                                            'Google\\Chrome\\User Data\\Default\\Cookies'))""")['output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         chrome_cookie_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Cookies'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             chrome_cookie_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Cookies'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             chrome_cookie_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Cookies'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
     else:
         raise Exception('Unsupported operating system')
 
@@ -276,24 +284,24 @@ def get_cookie_data(env, config: Dict[str, str]):
 
 
 def get_history(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         chrome_history_path = env.controller.execute_python_command(
             """import os; print(os.path.join(os.getenv('USERPROFILE'), "AppData", "Local", "Google", "Chrome", "User Data", "Default", "History"))""")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         chrome_history_path = env.controller.execute_python_command(
             """import os; print(os.path.join(os.getenv('HOME'), "Library", "Application Support", "Google", "Chrome", "Default", "History"))""")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             chrome_history_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/History'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             chrome_history_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config', 'google-chrome', 'Default', 'History'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
     else:
         raise Exception('Unsupported operating system')
 
@@ -317,24 +325,24 @@ def get_history(env, config: Dict[str, str]):
 
 
 def get_enabled_experiments(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                                 'Google\\Chrome\\User Data\\Local State'))""")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Local State'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Local State'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Local State'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
     else:
         raise Exception('Unsupported operating system')
 
@@ -355,23 +363,23 @@ def get_profile_name(env, config: Dict[str, str]):
     Get the username from the Chrome browser.
     Assume the cookies are stored in the default location, not encrypted and not large in size.
     """
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
+                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
     else:
         raise Exception('Unsupported operating system')
 
@@ -388,24 +396,24 @@ def get_profile_name(env, config: Dict[str, str]):
 
 
 def get_chrome_language(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                                     'Google\\Chrome\\User Data\\Local State'))""")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Local State'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Local State'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Local State'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
     else:
         raise Exception('Unsupported operating system')
 
@@ -422,24 +430,24 @@ def get_chrome_language(env, config: Dict[str, str]):
 
 
 def get_chrome_font_size(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
                                                 'Google\\Chrome\\User Data\\Default\\Preferences'))""")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
     else:
         raise Exception('Unsupported operating system')
 
@@ -463,23 +471,23 @@ def get_chrome_font_size(env, config: Dict[str, str]):
 
 
 def get_bookmarks(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Bookmarks'))""")['output'].strip()
+                                            'Google\\Chrome\\User Data\\Default\\Bookmarks'))""")['output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Bookmarks'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Bookmarks'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Bookmarks'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
     else:
         raise Exception('Unsupported operating system')
 
@@ -494,23 +502,23 @@ def get_bookmarks(env, config: Dict[str, str]):
 # todo: move this to the main.py
 def get_extensions_installed_from_shop(env, config: Dict[str, str]):
     """Find the Chrome extensions directory based on the operating system."""
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         chrome_extension_dir = env.controller.execute_python_command(
             """os.path.expanduser('~') + '\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Extensions\\'""")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':  # macOS
         chrome_extension_dir = env.controller.execute_python_command(
             """os.path.expanduser('~') + '/Library/Application Support/Google/Chrome/Default/Extensions/'""")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
+            chrome_extension_dir = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Extensions/'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             chrome_extension_dir = env.controller.execute_python_command(
-                """os.path.expanduser('~') + '/.config/google-chrome/Default/Extensions/'""")['output'].strip()
+                """os.path.expanduser('~') + '/.config/google-chrome/Default/Extensions/'""")['output'].strip().split('\n')[-1]
     else:
         raise Exception('Unsupported operating system')
 
@@ -553,7 +561,7 @@ def get_page_info(env, config: Dict[str, str]):
             with sync_playwright() as p:
                 # connect to remote Chrome instance
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info("[PAGE_INFO] Successfully connected to existing Chrome instance")
                 except Exception as e:
                     logger.warning(f"[PAGE_INFO] Failed to connect to existing Chrome instance: {e}")
@@ -580,7 +588,7 @@ def get_page_info(env, config: Dict[str, str]):
                     )
                     time.sleep(5)
 
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info("[PAGE_INFO] Successfully connected to new Chrome instance")
 
                 # Create page using existing CDP context (per feedback)
@@ -666,7 +674,7 @@ def get_open_tabs_info(env, config: Dict[str, str]):
             with sync_playwright() as p:
                 # connect to remote Chrome instance
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[OPEN_TABS_INFO] Successfully connected to existing Chrome instance")
                 except Exception as e:
                     logger.warning(f"[OPEN_TABS_INFO] Failed to connect to existing Chrome instance: {e}")
@@ -688,7 +696,7 @@ def get_open_tabs_info(env, config: Dict[str, str]):
                     requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload)
                     time.sleep(5)
                     try:
-                        browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                        browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                         logger.info(f"[OPEN_TABS_INFO] Successfully connected to new Chrome instance")
                     except Exception as e:
                         logger.error(f"[OPEN_TABS_INFO] Failed to connect to new Chrome instance: {e}")
@@ -794,8 +802,8 @@ def get_active_url_from_accessTree(env, config):
     if not elements:
         print("No elements found.")
         return None
-    elif not elements[-1].text:
-        print("No text found in the latest element.")
+    elif not elements[-1].text or not elements[0].text:
+        print("No text found in the element.")
         return None
 
     # Use a default prefix if 'goto_prefix' is not specified in the config
@@ -840,7 +848,7 @@ def get_active_tab_info(env, config: Dict[str, str]):
             with sync_playwright() as p:
                 # connect to remote Chrome instance, since it is supposed to be the active one, we won't start a new one if failed
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[ACTIVE_TAB_INFO] Successfully connected to Chrome instance")
                 except Exception as e:
                     logger.error(f"[ACTIVE_TAB_INFO] Failed to connect to Chrome instance: {e}")
@@ -923,7 +931,7 @@ def get_pdf_from_url(env, config: Dict[str, str]) -> str:
             
             with sync_playwright() as p:
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[PDF_FROM_URL] Successfully connected to existing Chrome instance")
                 except Exception as e:
                     logger.warning(f"[PDF_FROM_URL] Failed to connect to existing Chrome instance: {e}")
@@ -944,9 +952,9 @@ def get_pdf_from_url(env, config: Dict[str, str]) -> str:
                         ], "shell": False})
 
                     headers = {"Content-Type": "application/json"}
-                    requests.post("http://" + host + ":" + server_port + "/setup" + "/launch", headers=headers, data=payload)
+                    requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload)
                     time.sleep(5)
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[PDF_FROM_URL] Successfully connected to new Chrome instance")
 
                 page = browser.new_page()
@@ -1028,7 +1036,7 @@ def get_chrome_saved_address(env, config: Dict[str, str]):
             with sync_playwright() as p:
                 # connect to remote Chrome instance
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[CHROME_SAVED_ADDRESS] Successfully connected to existing Chrome instance")
                 except Exception as e:
                     logger.warning(f"[CHROME_SAVED_ADDRESS] Failed to connect to existing Chrome instance: {e}")
@@ -1047,9 +1055,9 @@ def get_chrome_saved_address(env, config: Dict[str, str]):
                         ], "shell": False})
 
                     headers = {"Content-Type": "application/json"}
-                    requests.post("http://" + host + ":" + server_port + "/setup" + "/launch", headers=headers, data=payload)
+                    requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload)
                     time.sleep(5)
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[CHROME_SAVED_ADDRESS] Successfully connected to new Chrome instance")
 
                 page = browser.new_page()
@@ -1109,15 +1117,18 @@ def get_shortcuts_on_desktop(env, config: Dict[str, str]):
     desktop_path = env.controller.get_vm_desktop_path()
     desktop_directory_tree = env.controller.get_vm_directory_tree(desktop_path)
 
-    shortcuts_paths = [file['name'] for file in desktop_directory_tree['children'] if
-                       file['name'].endswith(shortcut_extension)]
+    if not desktop_directory_tree:
+        return {}
+    shortcuts_paths = [file['name'] for file in desktop_directory_tree.get('children', [])
+                       if file.get('name', '').endswith(shortcut_extension)]
 
     short_cuts = {}
 
     for shortcut_path in shortcuts_paths:
-        short_cuts[shortcut_path] = env.controller.get_file(env.controller.execute_python_command(
+        _content = env.controller.get_file(env.controller.execute_python_command(
             f"import os; print(os.path.join(os.path.expanduser('~'), 'Desktop', '{shortcut_path}'))")[
-                                                                'output'].strip()).decode('utf-8')
+                                                                'output'].strip().split('\n')[-1])
+        short_cuts[shortcut_path] = _content.decode('utf-8') if _content is not None else ""
 
     return short_cuts
 
@@ -1141,7 +1152,7 @@ def get_number_of_search_results(env, config: Dict[str, str]):
             
             with sync_playwright() as p:
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[SEARCH_RESULTS] Successfully connected to existing Chrome instance")
                 except Exception as e:
                     logger.warning(f"[SEARCH_RESULTS] Failed to connect to existing Chrome instance: {e}")
@@ -1160,9 +1171,9 @@ def get_number_of_search_results(env, config: Dict[str, str]):
                         ], "shell": False})
 
                     headers = {"Content-Type": "application/json"}
-                    requests.post("http://" + host + ":" + server_port + "/setup" + "/launch", headers=headers, data=payload)
+                    requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload)
                     time.sleep(5)
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[SEARCH_RESULTS] Successfully connected to new Chrome instance")
                     
                 page = browser.new_page()
@@ -1267,23 +1278,23 @@ def get_googledrive_file(env, config: Dict[str, Any]) -> Any:
 
 
 def get_enable_do_not_track(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
+                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
 
     else:
         raise Exception('Unsupported operating system')
@@ -1300,23 +1311,23 @@ def get_enable_do_not_track(env, config: Dict[str, str]):
 
 
 def get_enable_enhanced_safety_browsing(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
+                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
 
     else:
         raise Exception('Unsupported operating system')
@@ -1333,23 +1344,23 @@ def get_enable_enhanced_safety_browsing(env, config: Dict[str, str]):
 
 
 def get_enable_safe_browsing(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
+                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
 
     else:
         raise Exception('Unsupported operating system')
@@ -1367,23 +1378,23 @@ def get_enable_safe_browsing(env, config: Dict[str, str]):
         return "false"
 
 def get_new_startup_page(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
+                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
 
     else:
         raise Exception('Unsupported operating system')
@@ -1405,23 +1416,23 @@ def get_new_startup_page(env, config: Dict[str, str]):
 
 
 def get_find_unpacked_extension_path(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
+                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
 
     else:
         raise Exception('Unsupported operating system')
@@ -1438,27 +1449,27 @@ def get_find_unpacked_extension_path(env, config: Dict[str, str]):
         return all_extensions_path
     except Exception as e:
         logger.error(f"Error: {e}")
-        return "Google"
+        return []
 
 
 def get_find_installed_extension_name(env, config: Dict[str, str]):
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
+                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
 
     else:
         raise Exception('Unsupported operating system')
@@ -1475,30 +1486,30 @@ def get_find_installed_extension_name(env, config: Dict[str, str]):
         return all_extensions_name
     except Exception as e:
         logger.error(f"Error: {e}")
-        return "Google"
+        return []
 
 
 def get_data_delete_automacally(env, config: Dict[str, str]):
     """
     This function is used to open th "auto-delete" mode of chromium
     """
-    os_type = env.vm_platform
+    os_type = _get_platform(env)
     if os_type == 'Windows':
         preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip()
+                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")['output'].strip().split('\n')[-1]
     elif os_type == 'Darwin':
         preference_file_path = env.controller.execute_python_command(
             "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))")[
-            'output'].strip()
+            'output'].strip().split('\n')[-1]
     elif os_type == 'Linux':
         if "arm" in platform.machine():
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
         else:
             preference_file_path = env.controller.execute_python_command(
                 "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))")[
-                'output'].strip()
+                'output'].strip().split('\n')[-1]
     else:
         raise Exception('Unsupported operating system')
 
@@ -1560,7 +1571,7 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
     with sync_playwright() as p:
         # connect to remote Chrome instance
         try:
-            browser = p.chromium.connect_over_cdp(remote_debugging_url)
+            browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
         except Exception as e:
             # If the connection fails, start a new browser instance
             platform.machine()
@@ -1577,9 +1588,9 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                 ], "shell": False})
 
             headers = {"Content-Type": "application/json"}
-            requests.post("http://" + host + ":" + str(server_port) + "/setup" + "/launch", headers=headers, data=payload)
+            requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload)
             time.sleep(5)
-            browser = p.chromium.connect_over_cdp(remote_debugging_url)
+            browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
         target_page = None
         for context in browser.contexts:
             for page in context.pages:
@@ -2013,7 +2024,7 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
             with sync_playwright() as p:
                 # Connect to remote Chrome instance
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[RECREATION_PAGE] Successfully connected to existing Chrome instance")
                 except Exception as e:
                     logger.warning(f"[RECREATION_PAGE] Failed to connect to existing Chrome instance: {e}")
@@ -2040,7 +2051,7 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                     headers = {"Content-Type": "application/json"}
                     requests.post(backend_url + "/setup/launch", headers=headers, data=payload)
                     time.sleep(8)  # Give more time for browser to start
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[RECREATION_PAGE] Successfully connected to new Chrome instance")
 
                 page = browser.new_page()
@@ -2309,7 +2320,7 @@ def get_active_tab_url_parse(env, config: Dict[str, Any]):
     if "replace" in config:
         for key in config["replace"].keys():
             # change original key to new key, keep value unchange
-            value = extracted_params.pop(key)
+            value = extracted_params.pop(key, None)
             extracted_params[config["replace"][key]] = value
     if config.get("split_list", False):
         extracted_params = {key: extracted_params[key].split(',') for key in extracted_params.keys()}

@@ -74,6 +74,8 @@ def literal_match(result: Any, expected: Any, **options) -> float:
 
 
 def is_in_list(result, rules) -> float:
+    if result is None:
+        return 0.
     expect = rules["expected"]
     if expect in result:
         return 1.
@@ -82,7 +84,7 @@ def is_in_list(result, rules) -> float:
 
 
 def diff_text_file(result: str, expect: str) -> float:
-    if result is None:
+    if result is None or expect is None:
         return 0.
 
     with open(result) as f:
@@ -235,6 +237,9 @@ def check_accessibility_tree(result: str, rules: List[Dict[str, Any]], osname: s
         float
     """
 
+    if result is None:
+        return 0.
+
     a11y_ns_map = _accessibility_ns_map[osname]
 
     at: _Element = lxml.etree.fromstring(result)
@@ -259,7 +264,8 @@ def check_accessibility_tree(result: str, rules: List[Dict[str, Any]], osname: s
                                                                     )
             match_score: Number = 0
             for elm in elements:
-                match_score = max(match_score, match_func(elm.text or None))
+                if elm.text is not None:
+                    match_score = max(match_score, match_func(elm.text))
         else:
             match_score = 1.
         total_match_score *= match_score
@@ -271,9 +277,12 @@ def check_accessibility_tree(result: str, rules: List[Dict[str, Any]], osname: s
 # return 1. - (result is None)
 
 def run_sqlite3(result: str, rules: Dict[str, Any]) -> float:
+    if result is None:
+        return 0.
     connection: sqlite3.Connection = sqlite3.connect(result)
     cursor: sqlite3.Cursor = connection.execute(rules["sql"])
-    return float(cursor.fetchone()[0] or 0)
+    row = cursor.fetchone()
+    return float(row[0] or 0) if row else 0.
 
 
 def check_json(result: str, rules: Dict[str, List[Dict[str, Union[List[str], str]]]], is_yaml: bool = False) -> float:
@@ -393,7 +402,11 @@ def check_direct_json_object(result, rules) -> float:
         # replace all ' with "
         result = result.replace("'", '"')
         # load json object
-        result = json.loads(result)
+        try:
+            result = json.loads(result)
+        except (json.JSONDecodeError, ValueError):
+            logger.error("check_direct_json_object: invalid JSON string: %s", result[:200])
+            return 0.
         
     logger.info(f"[DEBUG] Processed result: {result}")
     

@@ -11,7 +11,8 @@ def get_gimp_config_file(env, config: Dict[str, str]):
     """
 
     os_type = env.vm_platform
-    print(os_type)
+    if os_type not in ("Windows", "Darwin", "Linux"):
+        os_type = "Linux"
 
     if os_type == "Linux":
         config_path = \
@@ -20,8 +21,7 @@ def get_gimp_config_file(env, config: Dict[str, str]):
                                                   f".path.expanduser("
                                                   f"'~/.config/GIMP/2.10/"
                                                   f"{config['file_name']}'))")[
-                'output'].strip()
-    # TODO: Add support for macOS and Windows
+                'output'].strip().split('\n')[-1]
     else:
         raise Exception("Unsupported operating system", os_type)
 

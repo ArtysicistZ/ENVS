@@ -98,7 +98,7 @@ class DesktopEnv(gym.Env):
     """
     def __init__(
             self,
-            provider_name: str = "vmware",
+            provider_name: str = "docker",
             region: str = None,
             path_to_vm: str = None,
             snapshot_name: str = "init_state",
@@ -114,7 +114,7 @@ class DesktopEnv(gym.Env):
     ):
         """
         Args:
-            provider_name (str): virtualization provider name, default to "vmware"
+            provider_name (str): provider name, default to "docker"
             region (str): the region for allocate machines, work for cloud services, default to  "us-east-1"
             path_to_vm (str): path to .vmx file
             snapshot_name (str): snapshot name to revert to, default to "init_state"
@@ -156,11 +156,10 @@ class DesktopEnv(gym.Env):
         self.os_type = os_type
 
         # Track whether environment has been used (step/setup) to optimize snapshot revert
-        # docker, aws, gcp, azure are always unused as the emulator starts from a clean state
-        # vmware, virtualbox are always used as the emulator starts from a dirty state
-        if self.provider_name in {"docker", "aws", "gcp", "azure", "aliyun", "volcengine"}:
+        # docker, aws start from a clean state; vmware starts from a dirty state
+        if self.provider_name in {"docker", "aws"}:
             self.is_environment_used = False
-        elif self.provider_name in {"vmware", "virtualbox"}:
+        elif self.provider_name == "vmware":
             self.is_environment_used = True
         else:
             raise ValueError(f"Invalid provider name: {self.provider_name}")
@@ -168,7 +167,7 @@ class DesktopEnv(gym.Env):
         # Initialize environment variables
         if path_to_vm:
             self.path_to_vm = os.path.abspath(os.path.expandvars(os.path.expanduser(path_to_vm))) \
-                if provider_name in {"vmware", "virtualbox"} else path_to_vm
+                if provider_name == "vmware" else path_to_vm
         else:
             self.path_to_vm = self.manager.get_vm_path(os_type=self.os_type, region=region, screen_size=(self.screen_width, self.screen_height))
         
@@ -430,7 +429,11 @@ class DesktopEnv(gym.Env):
         """
 
         postconfig = self.evaluator.get("postconfig", [])
-        self.setup_controller.setup(postconfig, self.enable_proxy)
+        try:
+            self.setup_controller.setup(postconfig, self.enable_proxy)
+        except Exception as e:
+            logger.error("Postconfig setup failed (env may be corrupted by agent): %s", e)
+            return 0
         # Mark environment as used if there were postconfig setup operations
         if postconfig:
             self.is_environment_used = True
@@ -461,12 +464,45 @@ class DesktopEnv(gym.Env):
                     logger.error("File not found!")
                     if self.metric_conj == 'and':
                         return 0
+                    else:
+                        results.append(0)
+                        continue
+                except Exception as e:
+                    logger.error("Result getter crashed for idx=%d: %s", idx, e)
+                    if self.metric_conj == 'and':
+                        return 0
+                    else:
+                        results.append(0)
+                        continue
 
-                if "expected" in self.evaluator and self.expected_getter and self.evaluator["expected"]:
-                    expected_state = self.expected_getter[idx](self, self.evaluator["expected"][idx])
-                    metric: int = metric(result_state, expected_state, **self.metric_options[idx])
-                else:
-                    metric: int = metric(result_state, **self.metric_options[idx])
+                if result_state is None:
+                    logger.warning("Result getter returned None for idx=%d — task not completed, score=0", idx)
+                    if self.metric_conj == 'and':
+                        return 0
+                    else:
+                        results.append(0)
+                        continue
+
+                try:
+                    if "expected" in self.evaluator and self.expected_getter and self.evaluator["expected"]:
+                        expected_state = self.expected_getter[idx](self, self.evaluator["expected"][idx])
+                        if expected_state is None:
+                            logger.warning("Expected getter returned None for idx=%d — score=0", idx)
+                            if self.metric_conj == 'and':
+                                return 0
+                            else:
+                                results.append(0)
+                                continue
+                        metric: int = metric(result_state, expected_state, **self.metric_options[idx])
+                    else:
+                        metric: int = metric(result_state, **self.metric_options[idx])
+                except Exception as e:
+                    logger.error("Metric/expected getter crashed for idx=%d: %s", idx, e)
+                    if self.metric_conj == 'and':
+                        return 0
+                    else:
+                        results.append(0)
+                        continue
 
                 if self.metric_conj == 'and' and float(metric) == 0.0:
                     return 0
@@ -475,7 +511,7 @@ class DesktopEnv(gym.Env):
                 else:
                     results.append(metric)
 
-            return sum(results) / len(results) if self.metric_conj == 'and' else max(results)
+            return sum(results) / len(results) if self.metric_conj == 'and' else (max(results) if results else 0)
         else:
             # Single metric to evaluate whether the task is successfully completed
             try:
@@ -483,12 +519,26 @@ class DesktopEnv(gym.Env):
             except FileNotFoundError:
                 logger.error("File not found!")
                 return 0
+            except Exception as e:
+                logger.error("Result getter crashed: %s", e)
+                return 0
 
-            if "expected" in self.evaluator and self.expected_getter and self.evaluator["expected"]:
-                expected_state = self.expected_getter(self, self.evaluator["expected"])
-                metric: float = self.metric(result_state, expected_state, **self.metric_options)
-            else:
-                metric: float = self.metric(result_state, **self.metric_options)
+            if result_state is None:
+                logger.warning("Result getter returned None — task not completed, score=0")
+                return 0
+
+            try:
+                if "expected" in self.evaluator and self.expected_getter and self.evaluator["expected"]:
+                    expected_state = self.expected_getter(self, self.evaluator["expected"])
+                    if expected_state is None:
+                        logger.warning("Expected getter returned None — score=0")
+                        return 0
+                    metric: float = self.metric(result_state, expected_state, **self.metric_options)
+                else:
+                    metric: float = self.metric(result_state, **self.metric_options)
+            except Exception as e:
+                logger.error("Metric/expected getter crashed: %s", e)
+                return 0
 
         return metric
 

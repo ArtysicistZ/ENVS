@@ -16,6 +16,12 @@ Note that we don't combine the main with ray_trainer as ray_trainer is used by o
 
 python -m verl.trainer.main config=configs/smoke_remote_env_8gpu_a100.yaml
 
+python -m verl.trainer.main config=configs/smoke_remote_env_16gpu_a100.yaml
+
+python -m verl.trainer.main config=configs/smoke_remote_env_8gpu_a100_n8_env16.yaml
+
+python -m verl.trainer.main config=configs/smoke_remote_env_8gpu_a100_n8_env32.yaml
+
 bash scripts/training/run_smoke_remote_env_8gpu_a100.sh
 
 bash scripts/training/run_smoke_remote_env_8gpu_a100_paper_candidate.sh
@@ -138,14 +144,19 @@ def main():
         ppo_config.data.val_files = os.path.abspath(ppo_config.data.val_files)
 
     if not ray.is_initialized():
-        # Start a fresh local Ray cluster (avoid connecting to an existing one with a different Ray/Python version).
-        # Explicitly clear RAY_ADDRESS so we don't connect to a stale cluster (e.g. 10.100.4.6:2468) whose
-        # session dir may have been removed by clear_ray_logs.sh, which causes "Can't find node_ip_address.json".
-        for key in list(os.environ):
-            if key.startswith("RAY_"):
-                os.environ.pop(key, None)
+        # For multi-node: connect to existing Ray cluster via address="auto".
+        # For single-node: address="local" starts a fresh local cluster.
+        if ppo_config.trainer.nnodes > 1:
+            ray_address = "auto"
+        else:
+            # Single-node: start fresh local cluster. Clear RAY_ADDRESS to avoid
+            # connecting to a stale cluster whose session dir may have been removed.
+            ray_address = "local"
+            for key in list(os.environ):
+                if key.startswith("RAY_"):
+                    os.environ.pop(key, None)
         ray.init(
-            address="local",
+            address=ray_address,
             runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}},
         )
     

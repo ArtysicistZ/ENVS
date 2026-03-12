@@ -259,6 +259,60 @@ def _get_machine_architecture() -> str:
         return 'unknown'
 
 
+_LAUNCH_WINDOW_WAIT = 15  # max seconds to wait for a launched app window
+
+
+def _wait_for_launched_window(command, shell: bool):
+    """Poll wmctrl until a new window appears or timeout.
+
+    This prevents blank screenshots when DesktopEnv.reset() takes a screenshot
+    right after launching an app via Popen.  Only runs on Linux.
+    """
+    if platform.system() != "Linux":
+        return
+
+    # Derive keywords to look for in wmctrl -l output
+    keywords = []
+    cmd_str = command if shell else (command[0] if command else "")
+    if "google-chrome" in str(cmd_str):
+        keywords = ["Google Chrome", "google-chrome", "Chromium", "New Tab"]
+    elif "libreoffice" in str(cmd_str):
+        keywords = ["LibreOffice"]
+    elif "gimp" in str(cmd_str):
+        keywords = ["GIMP", "GNU Image"]
+    elif "code" in str(cmd_str):
+        keywords = ["Visual Studio Code", "VS Code"]
+    elif "vlc" in str(cmd_str):
+        keywords = ["VLC"]
+    elif "thunderbird" in str(cmd_str):
+        keywords = ["Thunderbird"]
+
+    if not keywords:
+        # Unknown app — just wait a short fixed time for window to render
+        time.sleep(3)
+        return
+
+    deadline = time.time() + _LAUNCH_WINDOW_WAIT
+    while time.time() < deadline:
+        try:
+            result = subprocess.run(
+                ["wmctrl", "-l"], capture_output=True, text=True, timeout=3,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.strip().split("\n"):
+                    if any(kw.lower() in line.lower() for kw in keywords):
+                        # Window found — give it a moment to finish painting
+                        time.sleep(1)
+                        return
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+        time.sleep(1)
+
+    logger.warning("launch: window for %s not detected within %ds; continuing anyway",
+                    cmd_str if isinstance(cmd_str, str) else " ".join(cmd_str),
+                    _LAUNCH_WINDOW_WAIT)
+
+
 @app.route('/setup/launch', methods=["POST"])
 def launch_app():
     data = request.json
@@ -287,30 +341,69 @@ def launch_app():
         if not shell and isinstance(command, list) and command and (
             "google-chrome" in command[0] or command[0].endswith("/google-chrome")
         ):
+            # Always disable GPU to prevent software-rendering framebuffer stalls.
+            # With LIBGL_ALWAYS_SOFTWARE=1, Chrome's GPU process does CPU-based
+            # compositing via llvmpipe which can freeze the X server under load.
+            if not any("--disable-gpu" in arg for arg in command):
+                command = list(command) + ["--disable-gpu", "--disable-software-rasterizer"]
+
             has_rdp = any(arg.startswith("--remote-debugging-port") for arg in command)
             has_udd = any(arg.startswith("--user-data-dir") for arg in command)
             if has_rdp and not has_udd:
                 # Chrome 115+ blocks remote debugging when using the DEFAULT profile
                 # path (~/.config/google-chrome). We must use a non-default directory.
                 # Use /tmp/chrome-dbg so it is always writable and never equals the
-                # default path. Clear any stale Singleton* files first so a fresh
-                # Chrome instance can always acquire the lock and bind the debug port.
+                # default path.
                 import shutil as _shutil
                 _dbg_dir = "/tmp/chrome-dbg"
-                # Wipe the entire debug profile dir so Chrome always starts fresh:
-                # stale Singleton files, old profile data, and lock files all cause
-                # Chrome to refuse to bind --remote-debugging-port.
-                try:
-                    _shutil.rmtree(_dbg_dir)
-                except OSError:
-                    pass
-                os.makedirs(_dbg_dir, exist_ok=True)
+                _default_dir = os.path.expanduser("~/.config/google-chrome")
+
+                if not os.path.exists(_dbg_dir):
+                    # First launch: seed from default profile if it exists
+                    if os.path.isdir(_default_dir) and not os.path.islink(_default_dir):
+                        _shutil.copytree(_default_dir, _dbg_dir)
+                    else:
+                        os.makedirs(_dbg_dir, exist_ok=True)
+
+                # Only remove Singleton lock files — NOT the whole profile.
+                # Wiping the profile destroys settings the agent just changed,
+                # which causes evaluators to read stale/empty data.
+                for _lock_name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+                    try:
+                        os.remove(os.path.join(_dbg_dir, _lock_name))
+                    except OSError:
+                        pass
+
+                # Symlink the default profile path to the debug dir so evaluators
+                # (which read ~/.config/google-chrome/Default/Preferences) find
+                # the actual profile data written by Chrome.
+                if os.path.isdir(_default_dir) and not os.path.islink(_default_dir):
+                    _shutil.rmtree(_default_dir)
+                if not os.path.exists(_default_dir):
+                    os.makedirs(os.path.dirname(_default_dir), exist_ok=True)
+                    os.symlink(_dbg_dir, _default_dir)
+
                 command = list(command) + [
                     f"--user-data-dir={_dbg_dir}",
                     "--no-first-run",
                 ]
 
+        # Add reuseaddr to socat to prevent bind failures from TIME_WAIT sockets
+        # left by a previous socat after overlay reset.
+        if not shell and isinstance(command, list) and command and command[0] == "socat":
+            command = list(command)
+            for i, arg in enumerate(command):
+                if "tcp-listen:" in arg and "reuseaddr" not in arg:
+                    command[i] = arg.replace(",fork", ",reuseaddr,fork") if ",fork" in arg else arg + ",reuseaddr"
+
         subprocess.Popen(command, shell=shell, cwd=DEFAULT_WORKDIR)
+
+        # Wait for the launched application's window to appear so the next
+        # screenshot captures a rendered desktop (not just the root background).
+        # Without this, DesktopEnv.reset() takes a blank screenshot because
+        # Popen returns before the X11 window is mapped and painted.
+        _wait_for_launched_window(command, shell)
+
         return "{:} launched successfully".format(command if shell else " ".join(command))
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -1107,7 +1200,7 @@ def get_window_size():
                 )
         except Xlib.error.XError:  # Ignore windows that give an error
             continue
-    return None
+    return jsonify({"width": 0, "height": 0})
 
 
 @app.route('/desktop_path', methods=['POST'])
@@ -1843,18 +1936,13 @@ def run_bash_script():
                 shell=False
             )
         
-        # Log the command execution for trajectory recording
-        _append_event("BashScript", 
-                      {"script": script, "output": result.stdout, "error": "", "returncode": result.returncode}, 
-                      ts=time.time())
-        
         return jsonify({
             'status': 'success' if result.returncode == 0 else 'error',
             'output': result.stdout,  # Contains both stdout and stderr merged
             'error': "",  # Always empty as requested
             'returncode': result.returncode
         })
-        
+
     except subprocess.TimeoutExpired:
         return jsonify({
             'status': 'error',
@@ -1874,10 +1962,6 @@ def run_bash_script():
                 cwd=working_dir,
                 shell=False
             )
-            
-            _append_event("BashScript", 
-                          {"script": script, "output": result.stdout, "error": "", "returncode": result.returncode}, 
-                          ts=time.time())
             
             return jsonify({
                 'status': 'success' if result.returncode == 0 else 'error',

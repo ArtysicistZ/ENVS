@@ -14,7 +14,7 @@ logger = logging.getLogger("desktopenv.pycontroller")
 class PythonController:
     def __init__(self, vm_ip: str,
                  server_port: int,
-                 pkgs_prefix: str = "import pyautogui; import time; pyautogui.FAILSAFE = False; {command}"):
+                 pkgs_prefix: str = "import sys as _sys, io as _io; _real_stdout = _sys.stdout; _sys.stdout = _io.StringIO(); import pyautogui, time; _sys.stdout = _real_stdout; pyautogui.FAILSAFE = False; {command}"):
         self.vm_ip = vm_ip
         self.http_server = f"http://{vm_ip}:{server_port}"
         self.pkgs_prefix = pkgs_prefix  # fixme: this is a hacky way to execute python commands. fix it and combine it with installation of packages
@@ -122,6 +122,9 @@ class PythonController:
                 if response.status_code == 200:
                     logger.info("File downloaded successfully")
                     return response.content
+                elif response.status_code == 404:
+                    logger.warning("File not found on VM (404): %s", file_path)
+                    return None
                 else:
                     logger.error("Failed to get file. Status code: %d", response.status_code)
                     logger.info("Retrying to get file.")
@@ -160,8 +163,8 @@ class PythonController:
             time.sleep(self.retry_interval)
 
         logger.error("Failed to execute command.")
-        return None
-    
+        return {"output": "", "status": "error"}
+
     def run_python_script(self, script: str) -> Optional[Dict[str, Any]]:
         """
         Executes a python script on the server.
@@ -175,7 +178,11 @@ class PythonController:
                 if response.status_code == 200:
                     return response.json()
                 else:
-                    return {"status": "error", "message": "Failed to execute command.", "output": None, "error": response.json()["error"]}
+                    try:
+                        error_detail = response.json().get("error", response.text[:200])
+                    except Exception:
+                        error_detail = response.text[:200]
+                    return {"status": "error", "message": "Failed to execute command.", "output": None, "error": error_detail}
             except requests.exceptions.ReadTimeout:
                 break
             except Exception:
@@ -250,6 +257,10 @@ class PythonController:
         if type(action) == dict and action.get('action_type') in ['WAIT', 'FAIL', 'DONE']:
             return
 
+        if not isinstance(action, dict):
+            logger.error("execute_action: expected dict, got %s: %s", type(action).__name__, action)
+            return
+
         action_type = action["action_type"]
         parameters = action["parameters"] if "parameters" in action else {param: action[param] for param in action if param != 'action_type'}
         move_mode = random.choice(
@@ -258,7 +269,7 @@ class PythonController:
         duration = random.uniform(0.5, 1)
 
         if action_type == "MOVE_TO":
-            if parameters == {} or None:
+            if not parameters:
                 self.execute_python_command("pyautogui.moveTo()")
             elif "x" in parameters and "y" in parameters:
                 x = parameters["x"]
@@ -268,7 +279,7 @@ class PythonController:
                 raise Exception(f"Unknown parameters: {parameters}")
 
         elif action_type == "CLICK":
-            if parameters == {} or None:
+            if not parameters:
                 self.execute_python_command("pyautogui.click()")
             elif "button" in parameters and "x" in parameters and "y" in parameters:
                 button = parameters["button"]
@@ -299,7 +310,7 @@ class PythonController:
                 raise Exception(f"Unknown parameters: {parameters}")
 
         elif action_type == "MOUSE_DOWN":
-            if parameters == {} or None:
+            if not parameters:
                 self.execute_python_command("pyautogui.mouseDown()")
             elif "button" in parameters:
                 button = parameters["button"]
@@ -308,7 +319,7 @@ class PythonController:
                 raise Exception(f"Unknown parameters: {parameters}")
 
         elif action_type == "MOUSE_UP":
-            if parameters == {} or None:
+            if not parameters:
                 self.execute_python_command("pyautogui.mouseUp()")
             elif "button" in parameters:
                 button = parameters["button"]
@@ -317,7 +328,7 @@ class PythonController:
                 raise Exception(f"Unknown parameters: {parameters}")
 
         elif action_type == "RIGHT_CLICK":
-            if parameters == {} or None:
+            if not parameters:
                 self.execute_python_command("pyautogui.rightClick()")
             elif "x" in parameters and "y" in parameters:
                 x = parameters["x"]
@@ -327,7 +338,7 @@ class PythonController:
                 raise Exception(f"Unknown parameters: {parameters}")
 
         elif action_type == "DOUBLE_CLICK":
-            if parameters == {} or None:
+            if not parameters:
                 self.execute_python_command("pyautogui.doubleClick()")
             elif "x" in parameters and "y" in parameters:
                 x = parameters["x"]
@@ -461,15 +472,22 @@ class PythonController:
     # Additional info
     def get_vm_platform(self):
         """
-        Gets the size of the vm screen.
+        Gets the platform of the vm (Linux, Windows, Darwin).
         """
-        return self.execute_python_command("import platform; print(platform.system())")['output'].strip()
+        result = self.execute_python_command("import platform; print(platform.system())")
+        if result and isinstance(result, dict) and result.get('output'):
+            return result['output'].strip()
+        # Fallback: Docker containers are always Linux
+        return "Linux"
     
     def get_vm_machine(self):
         """
-        Gets the machine of the vm.
+        Gets the machine architecture of the vm.
         """
-        return self.execute_python_command("import platform; print(platform.machine())")['output'].strip()
+        result = self.execute_python_command("import platform; print(platform.machine())")
+        if result and isinstance(result, dict) and result.get('output'):
+            return result['output'].strip()
+        return "x86_64"
 
 
     def get_vm_screen_size(self):

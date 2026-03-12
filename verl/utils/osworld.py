@@ -47,6 +47,118 @@ VISION_END_TOKEN = "<|vision_end|>"
 SYSTEM_MESSAGE = "You are a helpful assistant."
 
 
+def _trim_multimodal_after_truncation(
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    labels: torch.Tensor,
+    model_inputs: dict,
+    image_token_id: int,
+    pad_token_id: int,
+    truncation: str,
+    merge_size: int = 2,
+):
+    """Trim pixel_values/image_grid_thw to match image tokens surviving truncation.
+
+    After postprocess_data truncates input_ids, some images may lose their
+    tokens.  This removes the corresponding pixel_values rows and
+    image_grid_thw entries, and replaces any *partial* image-token residue
+    with pad_token_id (attention_mask → 0, labels → -100).
+
+    Returns (input_ids, attention_mask, labels) — cloned only when modified.
+    model_inputs is modified in-place.
+    """
+    image_grid_thw = model_inputs.get("image_grid_thw")
+    pixel_values = model_inputs.get("pixel_values")
+
+    if image_grid_thw is None or pixel_values is None:
+        return input_ids, attention_mask, labels
+
+    num_images = image_grid_thw.shape[0]
+    if num_images == 0:
+        return input_ids, attention_mask, labels
+
+    # Expected image-pad tokens and pixel_values rows per image.
+    tokens_per_image = []
+    patches_per_image = []
+    for i in range(num_images):
+        t, h, w = image_grid_thw[i].tolist()
+        tokens_per_image.append(int(t * (h // merge_size) * (w // merge_size)))
+        patches_per_image.append(int(t * h * w))
+
+    total_expected = sum(tokens_per_image)
+    total_actual = (input_ids == image_token_id).sum().item()
+
+    if total_actual == total_expected:
+        return input_ids, attention_mask, labels  # nothing truncated
+
+    # --- something was truncated — clone before mutating ---
+    input_ids = input_ids.clone()
+    attention_mask = attention_mask.clone()
+    labels = labels.clone()
+
+    if total_actual == 0:
+        model_inputs["pixel_values"] = None
+        model_inputs["image_grid_thw"] = None
+        return input_ids, attention_mask, labels
+
+    if truncation == "right":
+        # Right truncation removes from end → first images survive.
+        surviving = 0
+        cum = 0
+        for i in range(num_images):
+            if cum + tokens_per_image[i] <= total_actual:
+                cum += tokens_per_image[i]
+                surviving += 1
+            else:
+                break
+        partial = total_actual - cum
+        keep_patches = sum(patches_per_image[:surviving])
+
+        if surviving > 0:
+            model_inputs["pixel_values"] = pixel_values[:keep_patches]
+            model_inputs["image_grid_thw"] = image_grid_thw[:surviving]
+        else:
+            model_inputs["pixel_values"] = None
+            model_inputs["image_grid_thw"] = None
+
+        if partial > 0:
+            positions = (input_ids == image_token_id).nonzero(as_tuple=True)[0]
+            idx = positions[-partial:]
+            input_ids[idx] = pad_token_id
+            attention_mask[idx] = 0
+            labels[idx] = -100
+
+    elif truncation == "left":
+        # Left truncation removes from start → last images survive.
+        surviving = 0
+        cum = 0
+        for i in range(num_images - 1, -1, -1):
+            if cum + tokens_per_image[i] <= total_actual:
+                cum += tokens_per_image[i]
+                surviving += 1
+            else:
+                break
+        partial = total_actual - cum
+        start_img = num_images - surviving
+        skip_patches = sum(patches_per_image[:start_img])
+
+        if surviving > 0:
+            model_inputs["pixel_values"] = pixel_values[skip_patches:]
+            model_inputs["image_grid_thw"] = image_grid_thw[start_img:]
+        else:
+            model_inputs["pixel_values"] = None
+            model_inputs["image_grid_thw"] = None
+
+        if partial > 0:
+            positions = (input_ids == image_token_id).nonzero(as_tuple=True)[0]
+            idx = positions[:partial]
+            input_ids[idx] = pad_token_id
+            attention_mask[idx] = 0
+            labels[idx] = -100
+
+    return input_ids, attention_mask, labels
+
+
 def _truncate_message_to_last_n_images(message: List[Dict], max_images: int) -> List[Dict]:
     """Keep only the last max_images images in the message so vLLM limit is not exceeded."""
     if max_images <= 0:
@@ -122,7 +234,10 @@ def collate_fn_dataproto(
         tensors[key] = torch.stack(value, dim=0)
 
     for key, value in non_tensors.items():
-        non_tensors[key] = np.array(value, dtype=object)
+        arr = np.empty(len(value), dtype=object)
+        for i, v in enumerate(value):
+            arr[i] = v
+        non_tensors[key] = arr
 
     return {**tensors, **non_tensors}
 
@@ -145,7 +260,10 @@ def collate_fn_fake(features_list):
         tensors[key] = torch.stack(value, dim=0)
 
     for key, value in non_tensors.items():
-        non_tensors[key] = np.array(value, dtype=object)
+        arr = np.empty(len(value), dtype=object)
+        for i, v in enumerate(value):
+            arr[i] = v
+        non_tensors[key] = arr
 
     return {**tensors, **non_tensors}
 
@@ -401,7 +519,7 @@ class GRPODatasetProcessor:
             )
         else:
             input_ids = torch.zeros((0,), dtype=torch.int64)
-            labels = torch.full((0,), IGNORE_INDEX, dtype=torch.int64)
+            labels = torch.full((0,), -100, dtype=torch.int64)
             attention_mask = torch.zeros((0,), dtype=torch.int64)
             position_ids = torch.zeros((3, 0), dtype=torch.int64)
             model_inputs = dict()
@@ -417,14 +535,28 @@ class GRPODatasetProcessor:
                 truncation=self.truncation,
                 labels=labels
             )
+            # After truncation, pixel_values/image_grid_thw may reference
+            # images whose tokens were removed.  Trim to match.
+            if self.truncation in ("left", "right") and model_inputs.get("image_grid_thw") is not None:
+                image_token_id = self.tokenizer.convert_tokens_to_ids(DEFAULT_IMAGE_TOKEN)
+                merge_size = self.processor.image_processor.merge_size
+                input_ids, attention_mask, labels = _trim_multimodal_after_truncation(
+                    input_ids, attention_mask, labels, model_inputs,
+                    image_token_id=image_token_id,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    truncation=self.truncation,
+                    merge_size=merge_size,
+                )
         row_dict = dict()
         row_dict["input_ids"] = input_ids
         row_dict["labels"] = labels
         row_dict["attention_mask"] = attention_mask
         row_dict["position_ids"] = position_ids
-        row_dict["multi_modal_inputs"] = model_inputs
+        # Only include multi_modal_inputs when pixel_values is present;
+        # a dict with None values is truthy and causes torch.cat crash in dp_actor.
+        if model_inputs.get("pixel_values") is not None:
+            row_dict["multi_modal_inputs"] = model_inputs
         return row_dict
-        # return input_ids, labels, attention_mask, position_ids, model_inputs
 
 
 class OSWorldGRPODataset(ImageProcessMixin):
@@ -554,7 +686,7 @@ class OSWorldGRPODataset(ImageProcessMixin):
             )
         else:
             input_ids = torch.zeros((0,), dtype=torch.int64)
-            labels = torch.full((0,), IGNORE_INDEX, dtype=torch.int64)
+            labels = torch.full((0,), -100, dtype=torch.int64)
             attention_mask = torch.zeros((0,), dtype=torch.int64)
             position_ids = torch.zeros((3, 0), dtype=torch.int64)
             model_inputs = dict()
@@ -570,10 +702,25 @@ class OSWorldGRPODataset(ImageProcessMixin):
             truncation=self.truncation,
             labels=labels
         )
+        # After truncation, pixel_values/image_grid_thw may reference
+        # images whose tokens were removed.  Trim to match.
+        if self.truncation in ("left", "right") and model_inputs.get("image_grid_thw") is not None:
+            image_token_id = self.tokenizer.convert_tokens_to_ids(DEFAULT_IMAGE_TOKEN)
+            merge_size = self.processor.image_processor.merge_size
+            input_ids, attention_mask, labels = _trim_multimodal_after_truncation(
+                input_ids, attention_mask, labels, model_inputs,
+                image_token_id=image_token_id,
+                pad_token_id=self.tokenizer.pad_token_id,
+                truncation=self.truncation,
+                merge_size=merge_size,
+            )
         row_dict = dict()
         row_dict["input_ids"] = input_ids
         row_dict["labels"] = labels
         row_dict["attention_mask"] = attention_mask
         row_dict["position_ids"] = position_ids
-        row_dict["multi_modal_inputs"] = model_inputs
+        # Only include multi_modal_inputs when pixel_values is present;
+        # a dict with None values is truthy and causes torch.cat crash in dp_actor.
+        if model_inputs.get("pixel_values") is not None:
+            row_dict["multi_modal_inputs"] = model_inputs
         return row_dict

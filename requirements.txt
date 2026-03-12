@@ -92,7 +92,7 @@ azure-identity
 azure-mgmt-compute
 azure-mgmt-network
 
-# Note: Skip GPU-only packages for Mac CPU compatibility:
-# - flash_attn (GPU only)
-# - liger_kernel (GPU only)
-# - vllm (GPU only)
+# GPU-only packages (install with: pip install flash-attn==2.6.3 --no-build-isolation)
+# flash-attn>=2.7 requires torch>=2.6; pin 2.6.3 for torch==2.5.1
+flash-attn==2.6.3
+liger-kernel

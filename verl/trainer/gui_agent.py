@@ -558,15 +558,15 @@ class EnvWorker():
 
         self.action_parse_res_factor = 1000
         self.model_type = "qwen25vl"
-        self.max_pixels = 16384*28*28
-        self.min_pixels = 100*28*28
+        self.max_pixels = config.data.max_pixels
+        self.min_pixels = config.data.min_pixels
 
         self.instruction = None
         self.task_config = None
         self.step_counter = 0
         self.history_images = []
         self.history_messages = []
-    
+
         self.reset_train_tensors()
 
     def reset_train_tensors(self):
@@ -812,8 +812,8 @@ class EnvWorker():
                     {
                         "type": "image",
                         "image": f"data:image/jpeg;base64,{image_base64}",
-                        "min_pixels": 3136,
-                        "max_pixels": 2116800,
+                        "min_pixels": self.min_pixels,
+                        "max_pixels": self.max_pixels,
                     }
                 ]
             }
@@ -943,8 +943,8 @@ class EnvWorker():
                     {
                         "type": "image",
                         "image": f"data:image/jpeg;base64,{image_base64}",
-                        "min_pixels": 3136,
-                        "max_pixels": 2116800,
+                        "min_pixels": self.min_pixels,
+                        "max_pixels": self.max_pixels,
                     }
                 ]
             })
@@ -1053,8 +1053,8 @@ class RemoteEnvWorker:
         )
         self.action_parse_res_factor = 1000
         self.model_type = "qwen25vl"
-        self.max_pixels = 16384 * 28 * 28
-        self.min_pixels = 100 * 28 * 28
+        self.max_pixels = config.data.max_pixels
+        self.min_pixels = config.data.min_pixels
         self.reset_train_tensors()
 
     def reset_train_tensors(self):
@@ -1253,26 +1253,48 @@ class RemoteEnvWorker:
         self.history_messages = []
         self.history_images = []
 
+        # Phase 1: HTTP POST /env/reset with retries for network/server failures.
         last_err = None
+        resp = None
         for attempt in range(self.REMOTE_RESET_RETRIES + 1):
             try:
                 resp = self._post("/env/reset", {"task_config": task_config, "slot_id": self.worker_idx}, timeout=self.REMOTE_RESET_TIMEOUT)
                 break
             except Exception as e:
                 last_err = e
-                if attempt == 0:
-                    print(f"RemoteEnvWorker reset failed: {e}. Retrying up to {self.REMOTE_RESET_RETRIES} times with backoff...")
+                print(f"RemoteEnvWorker[{self.worker_idx}] reset HTTP attempt {attempt+1} failed: {type(e).__name__}: {e}")
                 if attempt < self.REMOTE_RESET_RETRIES:
                     time.sleep(5 * (attempt + 1))
         else:
-            print(f"RemoteEnvWorker reset HTTP error (all {self.REMOTE_RESET_RETRIES + 1} attempts failed): {last_err}.")
+            print(f"RemoteEnvWorker[{self.worker_idx}] reset HTTP failed (all {self.REMOTE_RESET_RETRIES + 1} attempts): {last_err}.")
             return {"env_idx": self.worker_idx, "obs_messages": None, "is_done": True, "format_reward": 0.0}
 
-        self._is_done = resp.get("is_done", True)
+        # Phase 2: Process the screenshot locally.  Server-side validation should
+        # have caught most truncated images, but network transfer can still corrupt.
+        # Retry process_message WITHOUT re-resetting the env (env state is fine).
         obs_wire = resp.get("obs_messages")
         if obs_wire:
-            self.history_messages = wire_to_messages(obs_wire)
-            self.process_message(self.history_messages)
+            pm_err = None
+            for pm_attempt in range(self.REMOTE_RESET_RETRIES + 1):
+                try:
+                    # Re-clear train tensors before each attempt so a partial
+                    # first attempt doesn't leave stale data that gets doubled.
+                    self.reset_train_tensors()
+                    self.history_messages = wire_to_messages(obs_wire)
+                    self.process_message(self.history_messages)
+                    pm_err = None
+                    break
+                except Exception as e:
+                    pm_err = e
+                    print(f"RemoteEnvWorker[{self.worker_idx}] process_message attempt {pm_attempt+1} failed: {type(e).__name__}: {e}")
+                    if pm_attempt < self.REMOTE_RESET_RETRIES:
+                        time.sleep(2 * (pm_attempt + 1))
+            if pm_err is not None:
+                print(f"RemoteEnvWorker[{self.worker_idx}] process_message failed after all retries; marking done.")
+                self.history_messages = []
+                return {"env_idx": self.worker_idx, "obs_messages": None, "is_done": True, "format_reward": 0.0}
+
+        self._is_done = resp.get("is_done", True)
         return {
             "env_idx": self.worker_idx,
             "obs_messages": self.history_messages if obs_wire else None,
@@ -1292,7 +1314,11 @@ class RemoteEnvWorker:
         obs_wire = resp.get("obs_messages")
         if obs_wire:
             self.history_messages = wire_to_messages(obs_wire)
-            self.process_message(self.history_messages[-2:])
+            try:
+                self.process_message(self.history_messages[-2:])
+            except Exception as e:
+                print(f"RemoteEnvWorker[{self.worker_idx}] step: process_message failed ({type(e).__name__}: {e}); marking done")
+                return {"env_idx": self.worker_idx, "obs_messages": None, "is_done": True, "format_reward": -1.0}
         return {
             "env_idx": self.worker_idx,
             "obs_messages": self.history_messages if obs_wire else None,
@@ -1305,7 +1331,8 @@ class RemoteEnvWorker:
         last_err = None
         for attempt in range(self.REMOTE_EVALUATE_RETRIES + 1):
             try:
-                score = self._post("/env/evaluate", {"slot_id": self.worker_idx}, timeout=self.REMOTE_EVALUATE_TIMEOUT)
+                result = self._post("/env/evaluate", {"slot_id": self.worker_idx}, timeout=self.REMOTE_EVALUATE_TIMEOUT)
+                score = result["score"] if isinstance(result, dict) else result
                 score_float = float(score)
                 print(f"RemoteEnvWorker[{self.worker_idx}] evaluate: score={score_float}, instruction={self.instruction}")
                 return score_float

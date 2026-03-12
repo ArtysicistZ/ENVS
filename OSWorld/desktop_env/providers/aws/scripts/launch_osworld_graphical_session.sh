@@ -7,7 +7,6 @@ DESKTOP_RUNTIME_DIR="${3:?desktop runtime dir required}"
 
 DISPLAY_NUM="${OSWORLD_DISPLAY_NUMBER:-:0}"
 DISPLAY_INDEX="${DISPLAY_NUM##*:}"
-SCREEN_GEOMETRY="${OSWORLD_SCREEN_GEOMETRY:-1920x1080x24}"
 XDG_CONFIG_HOME="${DESKTOP_HOME}/.config"
 XDG_CACHE_HOME="${DESKTOP_HOME}/.cache"
 XDG_DATA_HOME="${DESKTOP_HOME}/.local/share"
@@ -43,8 +42,6 @@ ensure_writable_session_home() {
     "${XDG_CONFIG_HOME}/vlc"
     "${XDG_CONFIG_HOME}/GIMP"
     "${XDG_CONFIG_HOME}/GIMP/2.10"
-    "${XDG_CONFIG_HOME}/mutter"
-    "${XDG_CONFIG_HOME}/mutter/sessions"
     "${XDG_CACHE_HOME}"
     "${DESKTOP_HOME}/.local"
     "${XDG_DATA_HOME}"
@@ -53,7 +50,6 @@ ensure_writable_session_home() {
     "${XDG_DATA_HOME}/evolution"
     "${XDG_DATA_HOME}/flatpak"
     "${XDG_DATA_HOME}/flatpak/db"
-    "${XDG_DATA_HOME}/gnome-shell"
     "${XDG_DATA_HOME}/keyrings"
     "${XDG_STATE_HOME}"
     "${DESKTOP_HOME}/.thunderbird"
@@ -81,12 +77,15 @@ ensure_writable_session_home() {
   install_autostart_override "gnome-initial-setup-copy-worker.desktop"
   install_autostart_override "update-notifier.desktop"
   install_autostart_override "tracker-miner-fs-3.desktop"
+  install_autostart_override "gnome-keyring-secrets.desktop"
+  install_autostart_override "gnome-keyring-pkcs11.desktop"
+  install_autostart_override "gnome-keyring-ssh.desktop"
 }
 
 cleanup() {
-  if [ -n "${GNOME_PID:-}" ] && kill -0 "${GNOME_PID}" 2>/dev/null; then
-    kill "${GNOME_PID}" 2>/dev/null || true
-    wait "${GNOME_PID}" 2>/dev/null || true
+  if [ -n "${SESSION_PID:-}" ] && kill -0 "${SESSION_PID}" 2>/dev/null; then
+    kill "${SESSION_PID}" 2>/dev/null || true
+    wait "${SESSION_PID}" 2>/dev/null || true
   fi
   if [ -n "${DBUS_PID:-}" ] && kill -0 "${DBUS_PID}" 2>/dev/null; then
     kill "${DBUS_PID}" 2>/dev/null || true
@@ -168,7 +167,17 @@ SESSION_COMMON_ENV=(
   XDG_STATE_HOME="${XDG_STATE_HOME}"
 )
 
-if command -v gnome-session >/dev/null 2>&1; then
+# Select desktop session: full GNOME Shell (AWS) or GNOME Flashback (Docker).
+# The ubuntu.session file only exists when ubuntu-session is installed (AWS AMI).
+GNOME_SESSION_DIR="/usr/share/gnome-session/sessions"
+
+# GNOME Shell (ubuntu.session) requires logind sessions which only GDM can
+# provide; it cannot run in headless/container environments without a display
+# manager.  AWS VMs have GDM so they get full GNOME Shell.  Docker containers
+# use GNOME Flashback (Metacity) which provides the same GNOME ecosystem
+# (nautilus, gnome-settings-daemon, gnome-panel) without needing logind.
+if [ -f "${GNOME_SESSION_DIR}/ubuntu.session" ] && command -v gdm3 >/dev/null 2>&1; then
+  # Full GNOME Shell desktop (AWS VMs with GDM)
   runuser -u "${DESKTOP_USER}" -- env \
     "${SESSION_COMMON_ENV[@]}" \
     XDG_CURRENT_DESKTOP=ubuntu:GNOME \
@@ -178,26 +187,37 @@ if command -v gnome-session >/dev/null 2>&1; then
     GSK_RENDERER=cairo \
     /usr/bin/gnome-session --session=ubuntu &
   SESSION_PID=$!
-else
-  # Lightweight fallback: openbox window manager when gnome-session is unavailable
-  # (e.g., minimal Docker containers). Xorg is already running above.
-  WM_BIN="$(command -v openbox || command -v fluxbox || command -v twm || true)"
-  if [ -z "${WM_BIN}" ]; then
-    echo "No window manager found (gnome-session, openbox, fluxbox, twm); Xorg-only mode" >&2
-    # Stay alive as long as Xorg runs
-    wait "${XORG_PID}"
-    exit 0
-  fi
+elif [ -f "${GNOME_SESSION_DIR}/gnome-flashback-metacity.session" ]; then
+  # GNOME Flashback with Metacity (Docker containers / headless)
   runuser -u "${DESKTOP_USER}" -- env \
     "${SESSION_COMMON_ENV[@]}" \
-    "${WM_BIN}" &
+    XDG_CURRENT_DESKTOP=GNOME-Flashback:GNOME \
+    XDG_SESSION_DESKTOP=gnome-flashback-metacity \
+    DESKTOP_SESSION=gnome-flashback-metacity \
+    gnome-session --session=gnome-flashback-metacity &
   SESSION_PID=$!
+else
+  echo "FATAL: No supported desktop session found in ${GNOME_SESSION_DIR}/" >&2
+  ls "${GNOME_SESSION_DIR}/" >&2 2>/dev/null || true
+  exit 1
 fi
 
-# Re-assert a visible root background after session startup so screenshots have a usable desktop surface.
+# Disable screensaver and lock screen at runtime (belt-and-suspenders with gsettings override).
+# gnome-screensaver activates after idle-delay seconds and locks the screen, blocking the agent.
 (
-  sleep 5
-  DISPLAY="${DISPLAY_NUM}" xsetroot -solid "#2E3440" -cursor_name left_ptr >/dev/null 2>&1 || true
+  sleep 5  # wait for D-Bus session to be fully active
+  runuser -u "${DESKTOP_USER}" -- env \
+    DISPLAY="${DISPLAY_NUM}" \
+    HOME="${DESKTOP_HOME}" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_SOCKET}" \
+    XDG_RUNTIME_DIR="${DESKTOP_RUNTIME_DIR}" \
+    bash -c '
+      gsettings set org.gnome.desktop.screensaver lock-enabled false 2>/dev/null || true
+      gsettings set org.gnome.desktop.screensaver idle-activation-enabled false 2>/dev/null || true
+      gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
+      # Kill gnome-screensaver if it managed to start
+      killall gnome-screensaver 2>/dev/null || true
+    '
 ) &
 
 wait "${SESSION_PID}"

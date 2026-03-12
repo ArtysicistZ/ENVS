@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 """
-Remote OSWorld env server (run on Mac or AWS CPU).
-One env; exposes POST /env/reset, /env/step, /env/evaluate, /env/history_messages.
+Remote OSWorld env server.
+Exposes POST /env/reset, /env/step, /env/evaluate, /env/history_messages.
 Cluster EnvWorkers call this over HTTP.
 
-Aligns with ARPO_OSWorld_Evaluation / run_uitars.py:
 - Same DesktopEnv: observation_type=screenshot, action_space=pyautogui.
 - Reset returns obs_messages built from env screenshot (same as evaluation agent gets).
-- Provider: On macOS (Darwin), defaults to VMware (no /dev/kvm; use VMware Fusion).
-  On Linux, defaults to Docker. Override with env PROVIDER=aws (EC2), PROVIDER=vmware, or PROVIDER=docker.
-  Use PROVIDER=aws on EC2 when boto3 and aws configure are set up (launches EC2 env instances; no local Docker VM).
-
+- Provider: defaults to Docker. Override with PROVIDER=aws for EC2.
 
 Run on GPU cluster:
 
-sg docker -c "export PROVIDER=docker && .venv/bin/python scripts/remote_env_server.py"
+sg docker -c "export PROVIDER=docker && .venv/bin/python scripts/servers/remote_env_server.py"
+
+OSWORLD_POOL_SIZE=16 python scripts/servers/remote_env_server.py
 
 """
 REMOTE_ENV_STAMP = "b36ed69-lifespan"  # grep this on Mac to confirm you have latest
@@ -48,8 +46,10 @@ import logging
 import os
 import re
 import threading
+import time
 import traceback
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -84,7 +84,7 @@ from verl.trainer.gui_agent import (
 )
 
 def _default_provider() -> str:
-    """Use VMware on macOS (no KVM); Docker on Linux."""
+    """VMware on macOS (for local dev); Docker on Linux."""
     if hasattr(os, "uname") and os.uname().sysname == "Darwin":
         return "vmware"
     return "docker"
@@ -94,8 +94,8 @@ def _default_provider() -> str:
 _provider_name: str = (os.environ.get("PROVIDER") or _default_provider()).strip().lower()
 max_steps = int(os.environ.get("REMOTE_MAX_STEPS", "32"))
 OBSERVATION_TYPE = "screenshot"
-IMAGE_MIN_PIXELS = int(os.environ.get("REMOTE_IMAGE_MIN_PIXELS", "3136"))
-IMAGE_MAX_PIXELS = int(os.environ.get("REMOTE_IMAGE_MAX_PIXELS", "518400"))
+IMAGE_MIN_PIXELS = int(os.environ.get("REMOTE_IMAGE_MIN_PIXELS", "256"))
+IMAGE_MAX_PIXELS = int(os.environ.get("REMOTE_IMAGE_MAX_PIXELS", "2116800"))
 ACTION_PAUSE_SEC = float(os.environ.get("REMOTE_ACTION_PAUSE_SEC", "1.0"))
 REPEAT_ACTION_THRESHOLD = int(os.environ.get("REMOTE_REPEAT_ACTION_THRESHOLD", "3"))
 REPEAT_ACTION_PENALTY = float(os.environ.get("REMOTE_REPEAT_ACTION_PENALTY", "0.5"))
@@ -124,6 +124,11 @@ PARSE_FAIL_REPEAT_PENALTY = float(os.environ.get("REMOTE_PARSE_FAIL_REPEAT_PENAL
 INVALID_BOX_LITERAL_PENALTY = float(os.environ.get("REMOTE_INVALID_BOX_LITERAL_PENALTY", "0.25"))
 ALLOW_ACTION_ONLY_RESPONSE = os.environ.get("REMOTE_ALLOW_ACTION_ONLY_RESPONSE", "1").strip() not in {"0", "false", "False"}
 PARSE_REPAIR_RETRY = os.environ.get("REMOTE_PARSE_REPAIR_RETRY", "1").strip() not in {"0", "false", "False"}
+
+# --- Fault tolerance & pool management ---
+POOL_SIZE = int(os.environ.get("OSWORLD_POOL_SIZE", "64"))
+HEALTH_CHECK_INTERVAL = int(os.environ.get("OSWORLD_HEALTH_CHECK_INTERVAL", "30"))
+PRE_WARM_WORKERS = int(os.environ.get("OSWORLD_PRE_WARM_WORKERS", "8"))
 
 
 # --- Per-slot state (one instance per parallel env slot) ---
@@ -174,12 +179,56 @@ def _get_slot_endpoint_lock(slot_id: int) -> threading.RLock:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    global _health_monitor
+
     provider = (os.environ.get("PROVIDER") or _default_provider()).strip().lower() or "docker"
     if provider not in ("docker", "vmware", "aws"):
         provider = "docker"
-    logger.info("Startup: PROVIDER=%s", provider)
-    print(f"[remote_env_server] Startup: PROVIDER={provider}", file=sys.stderr, flush=True)
+
+    # Scale the anyio thread pool for concurrent sync endpoints.
+    # Each slot's reset/step/evaluate runs as a blocking sync def in the thread
+    # pool.  Default limit is 40; with 64 slots doing concurrent resets (each
+    # blocking up to 150s), requests queue and timeout.
+    import anyio
+    _max_slots = int(os.environ.get("REMOTE_MAX_SLOTS", "80"))
+    anyio.to_thread.current_default_thread_limiter().total_tokens = _max_slots
+
+    logger.info(
+        "Startup: PROVIDER=%s, thread_pool=%d, pool_size=%d, health_interval=%ds",
+        provider, _max_slots, POOL_SIZE, HEALTH_CHECK_INTERVAL,
+    )
+    print(
+        f"[remote_env_server] Startup: PROVIDER={provider}, thread_pool={_max_slots}, "
+        f"pool_size={POOL_SIZE}, health_interval={HEALTH_CHECK_INTERVAL}s",
+        file=sys.stderr, flush=True,
+    )
+
+    # ── Pre-warm container pool + start health monitor ──
+    if provider == "docker" and POOL_SIZE > 0:
+        monitor = ContainerHealthMonitor(POOL_SIZE, HEALTH_CHECK_INTERVAL)
+        _health_monitor = monitor
+        app.state.health_monitor = monitor
+
+        # Start the health monitor thread (it will wait for pre-warm to finish)
+        monitor.start()
+
+        # Pre-warm all containers in a background thread so the server can start
+        # accepting requests (health checks, etc.) immediately.
+        def _warm_and_signal():
+            _pre_warm_pool(POOL_SIZE)
+            monitor.mark_pre_warm_done()
+
+        warm_thread = threading.Thread(target=_warm_and_signal, name="pre-warm", daemon=True)
+        warm_thread.start()
+    else:
+        _health_monitor = None
+
     yield
+
+    # ── Shutdown ──
+    if _health_monitor is not None:
+        _health_monitor.stop()
+        _health_monitor = None
 
 
 app = FastAPI(title="OSWorld Remote Env", version="0.1.0", lifespan=_lifespan)
@@ -319,11 +368,13 @@ def _append_screenshot_message(messages: list, screenshot) -> bool:
     try:
         if screenshot is None:
             return False
-        if not isinstance(screenshot, bytes):
-            from PIL import Image
-            buf = BytesIO()
-            Image.open(BytesIO(screenshot) if isinstance(screenshot, bytes) else screenshot).save(buf, format="JPEG")
-            screenshot = buf.getvalue()
+        from PIL import Image
+        # Always re-encode through PIL to validate the image is not truncated.
+        img = Image.open(BytesIO(screenshot) if isinstance(screenshot, bytes) else screenshot)
+        img.load()  # force full decode — catches truncated PNG/JPEG
+        buf = BytesIO()
+        img.save(buf, format="JPEG")
+        screenshot = buf.getvalue()
         b64 = base64.b64encode(screenshot).decode("utf-8")
         messages.append({
             "role": "user",
@@ -747,6 +798,214 @@ def _safe_env_unpause(env) -> None:
             print(traceback.format_exc())
 
 
+
+# ── Container Health Monitor ─────────────────────────────────────────────
+
+class ContainerHealthMonitor:
+    """Background thread that proactively monitors container health and auto-recovers failures.
+
+    The monitor periodically checks every active container's Docker status and HTTP health
+    endpoints (resetd at port 5001, osworld-server at port 5000).  Containers that are
+    down/missing/errored are automatically recovered by removing and recreating them.
+
+    Recovery runs in a dedicated per-slot thread so the monitor loop isn't blocked.
+    """
+
+    def __init__(self, n_slots: int, check_interval: int = 30):
+        self.n_slots = n_slots
+        self.check_interval = check_interval
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._slot_health: dict[int, dict] = {}
+        self._health_lock = threading.RLock()
+        self._recovery_in_progress: set[int] = set()
+        self._recovery_lock = threading.Lock()
+        self._stats = {
+            "checks": 0,
+            "recoveries_attempted": 0,
+            "recoveries_succeeded": 0,
+            "recoveries_failed": 0,
+        }
+        self._pre_warm_done = threading.Event()
+
+    def start(self):
+        self._thread = threading.Thread(target=self._monitor_loop, name="health-monitor", daemon=True)
+        self._thread.start()
+        logger.info("[health_monitor] Started (n_slots=%d, interval=%ds)", self.n_slots, self.check_interval)
+
+    def stop(self):
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=15)
+        logger.info("[health_monitor] Stopped")
+
+    def get_health(self) -> dict:
+        with self._health_lock:
+            return dict(self._slot_health)
+
+    def get_stats(self) -> dict:
+        return dict(self._stats)
+
+    def mark_pre_warm_done(self):
+        self._pre_warm_done.set()
+
+    def _monitor_loop(self):
+        # Wait for pre-warming to complete before starting checks
+        self._pre_warm_done.wait(timeout=600)
+        # Brief delay so containers fully settle after pre-warm
+        self._stop_event.wait(10)
+
+        while not self._stop_event.is_set():
+            try:
+                self._check_all_containers()
+            except Exception as e:
+                logger.error("[health_monitor] Check cycle error: %s", e)
+                print(f"[health_monitor] Check cycle error: {e}", flush=True)
+                print(traceback.format_exc(), flush=True)
+            self._stop_event.wait(self.check_interval)
+
+    def _check_all_containers(self):
+        self._stats["checks"] += 1
+        unhealthy = []
+
+        for slot_id in range(self.n_slots):
+            if self._stop_event.is_set():
+                return
+
+            with _slots_lock:
+                slot = _slots.get(slot_id)
+
+            if slot is None or slot.env is None:
+                continue  # Slot not initialized yet
+
+            try:
+                provider = slot.env.provider
+                health = provider.health_check_slot(slot_id)
+            except Exception as e:
+                logger.error("[health_monitor] health_check_slot(%d) crashed: %s", slot_id, e)
+                health = {"slot_id": slot_id, "status": "error", "error": str(e)}
+
+            with self._health_lock:
+                self._slot_health[slot_id] = health
+
+            if health["status"] in ("down", "missing", "error"):
+                unhealthy.append(slot_id)
+
+        with self._health_lock:
+            healthy_count = sum(1 for h in self._slot_health.values() if h.get("status") == "healthy")
+            total_checked = len(self._slot_health)
+
+        if unhealthy:
+            logger.warning(
+                "[health_monitor] %d/%d healthy, %d unhealthy: %s",
+                healthy_count, total_checked, len(unhealthy), unhealthy,
+            )
+            for slot_id in unhealthy:
+                self._trigger_recovery(slot_id)
+        else:
+            logger.info("[health_monitor] %d/%d healthy — all OK", healthy_count, total_checked)
+
+    def _trigger_recovery(self, slot_id: int):
+        with self._recovery_lock:
+            if slot_id in self._recovery_in_progress:
+                logger.info("[health_monitor] Slot %d recovery already in progress, skipping", slot_id)
+                return
+            self._recovery_in_progress.add(slot_id)
+
+        def _do_recovery():
+            try:
+                self._stats["recoveries_attempted"] += 1
+                logger.warning("[health_monitor] Recovering slot %d ...", slot_id)
+
+                with _slots_lock:
+                    slot = _slots.get(slot_id)
+                if slot is None or slot.env is None:
+                    logger.warning("[health_monitor] Slot %d has no env, skipping recovery", slot_id)
+                    return
+
+                provider = slot.env.provider
+                success = provider.recover_slot(slot_id)
+
+                if success:
+                    self._stats["recoveries_succeeded"] += 1
+                    with self._health_lock:
+                        self._slot_health[slot_id] = {
+                            "slot_id": slot_id, "status": "healthy",
+                            "recovered_at": time.time(),
+                        }
+                    logger.info("[health_monitor] Slot %d recovered successfully", slot_id)
+                else:
+                    self._stats["recoveries_failed"] += 1
+                    logger.error("[health_monitor] Slot %d recovery FAILED", slot_id)
+            except Exception as e:
+                self._stats["recoveries_failed"] += 1
+                logger.error("[health_monitor] Slot %d recovery exception: %s", slot_id, e)
+                print(f"[health_monitor] Slot {slot_id} recovery exception: {traceback.format_exc()}", flush=True)
+            finally:
+                with self._recovery_lock:
+                    self._recovery_in_progress.discard(slot_id)
+
+        recovery_thread = threading.Thread(target=_do_recovery, name=f"recovery-{slot_id}", daemon=True)
+        recovery_thread.start()
+
+
+def _pre_warm_pool(n_slots: int) -> dict:
+    """Pre-create all container slots in parallel.
+
+    Calls _get_slot() for each slot_id, which creates a DesktopEnv (with Docker
+    container) if one doesn't exist yet.  Uses a ThreadPoolExecutor to boot
+    multiple containers concurrently (bounded by PRE_WARM_WORKERS and the
+    provider's semaphore).
+    """
+    logger.info("[pre_warm] Starting pre-warm of %d slots ...", n_slots)
+    print(f"[pre_warm] Starting pre-warm of {n_slots} slots ...", file=sys.stderr, flush=True)
+    start = time.time()
+
+    results = {"ok": 0, "failed": 0, "errors": []}
+
+    def warm_slot(sid, attempt=1, max_attempts=2):
+        try:
+            _get_slot(sid)
+            return sid, True, None
+        except Exception as e:
+            if attempt < max_attempts:
+                logger.warning("[pre_warm] Slot %d failed (attempt %d/%d): %s — retrying ...",
+                               sid, attempt, max_attempts, e)
+                time.sleep(5 * attempt)
+                return warm_slot(sid, attempt + 1, max_attempts)
+            return sid, False, str(e)
+
+    with ThreadPoolExecutor(max_workers=PRE_WARM_WORKERS, thread_name_prefix="pre-warm") as executor:
+        futures = {executor.submit(warm_slot, i): i for i in range(n_slots)}
+        for future in as_completed(futures):
+            sid, ok, err = future.result()
+            if ok:
+                results["ok"] += 1
+                if results["ok"] % 8 == 0 or results["ok"] == n_slots:
+                    logger.info("[pre_warm] %d/%d slots ready (%.0fs elapsed)",
+                                results["ok"], n_slots, time.time() - start)
+            else:
+                results["failed"] += 1
+                results["errors"].append({"slot_id": sid, "error": err})
+                logger.error("[pre_warm] Slot %d failed: %s", sid, err)
+
+    elapsed = time.time() - start
+    logger.info(
+        "[pre_warm] Complete: %d/%d slots ready in %.1fs (%d failed)",
+        results["ok"], n_slots, elapsed, results["failed"],
+    )
+    print(
+        f"[pre_warm] Complete: {results['ok']}/{n_slots} slots ready "
+        f"in {elapsed:.1f}s ({results['failed']} failed)",
+        file=sys.stderr, flush=True,
+    )
+    return results
+
+
+# Global health monitor reference (set during lifespan)
+_health_monitor: ContainerHealthMonitor | None = None
+
+
 def _get_slot(slot_id: int = 0) -> SlotState:
     """Return the SlotState for slot_id, creating a new DesktopEnv if this slot has no env yet.
 
@@ -768,7 +1027,7 @@ def _get_slot(slot_id: int = 0) -> SlotState:
         # Re-check after acquiring init lock (double-checked locking pattern)
         if slot.env is not None:
             return slot
-        # Default: VMware on macOS (no KVM), Docker on Linux. Override with PROVIDER=aws|vmware|docker.
+        # Default: VMware on macOS, Docker on Linux. Override with PROVIDER=aws|docker|vmware.
         provider_name = (os.environ.get("PROVIDER") or _default_provider()).strip().lower()
         if provider_name not in ("docker", "vmware", "aws"):
             provider_name = "docker"
@@ -845,11 +1104,24 @@ def env_reset(body: ResetRequest):
     slot_id = body.slot_id
     endpoint_lock = _get_slot_endpoint_lock(slot_id)
     with endpoint_lock:
-        return _env_reset_locked(slot_id, body)
+        try:
+            return _env_reset_locked(slot_id, body)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("[slot %d] env_reset crashed: %s", slot_id, e)
+            print(f"[slot {slot_id}] env_reset crash: {e}")
+            print(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Reset failed: {e}")
 
 
 def _env_reset_locked(slot_id: int, body: ResetRequest):
-    """Inner reset logic, called with the per-slot endpoint lock held."""
+    """Inner reset logic, called with the per-slot endpoint lock held.
+
+    If the first reset attempt fails due to a container-level error (Docker,
+    connection, timeout), we attempt automatic recovery (remove + recreate
+    the container) and retry once.
+    """
     slot = _get_slot(slot_id)
     task_config = body.task_config
     env = slot.env
@@ -857,10 +1129,35 @@ def _env_reset_locked(slot_id: int, body: ResetRequest):
     try:
         obs = env.reset(task_config)
     except Exception as e:
-        print(f"[slot {slot_id}] Env reset exception: {e}")
-        print(traceback.format_exc())
-        slot.is_done = True
-        raise HTTPException(status_code=500, detail=f"env.reset() failed: {e}")
+        err_str = str(e).lower()
+        is_container_error = any(k in err_str for k in (
+            "docker", "connection", "timeout", "refused", "reset failed",
+            "not found", "unreachable", "no such container", "broken pipe",
+        ))
+        if is_container_error and _provider_name == "docker":
+            print(f"[slot {slot_id}] Reset failed with container error: {e}. Attempting recovery ...")
+            try:
+                provider = env.provider
+                success = provider.recover_slot(slot_id)
+                if success:
+                    print(f"[slot {slot_id}] Recovery succeeded, retrying reset ...")
+                    obs = env.reset(task_config)
+                else:
+                    print(f"[slot {slot_id}] Recovery failed")
+                    slot.is_done = True
+                    raise HTTPException(status_code=503, detail=f"Container recovery failed for slot {slot_id}")
+            except HTTPException:
+                raise
+            except Exception as e2:
+                print(f"[slot {slot_id}] Recovery + retry failed: {e2}")
+                print(traceback.format_exc())
+                slot.is_done = True
+                raise HTTPException(status_code=500, detail=f"env.reset() failed after recovery: {e2}")
+        else:
+            print(f"[slot {slot_id}] Env reset exception: {e}")
+            print(traceback.format_exc())
+            slot.is_done = True
+            raise HTTPException(status_code=500, detail=f"env.reset() failed: {e}")
 
     # Reset SlotState ONLY after env.reset() succeeds to prevent stale state on failure
     slot.instruction = _instruction_with_hints(task_config)
@@ -884,11 +1181,41 @@ def _env_reset_locked(slot_id: int, body: ResetRequest):
         print(f"[slot {slot_id}] Reset: screenshot is None. Returning obs_messages=None.")
         slot.is_done = True
         return {"env_idx": slot_id, "obs_messages": None, "is_done": True, "format_reward": 0.0}
-    if not isinstance(screenshot, bytes):
-        from PIL import Image
-        buf = BytesIO()
-        Image.open(BytesIO(screenshot) if isinstance(screenshot, bytes) else screenshot).save(buf, format="JPEG")
-        screenshot = buf.getvalue()
+
+    # Validate & convert screenshot to JPEG.  DesktopEnv may return raw PNG bytes
+    # that are truncated when the VM hasn't finished rendering.  Re-encoding through
+    # PIL with img.load() catches corrupt data here instead of letting the client crash.
+    # NOTE: Do NOT set ImageFile.LOAD_TRUNCATED_IMAGES = True anywhere — it would
+    # suppress the exceptions that this validation relies on.
+    from PIL import Image as _PILImage
+    _SCREENSHOT_RETRY = 3
+    _screenshot_valid = False
+    for _ss_attempt in range(_SCREENSHOT_RETRY):
+        if screenshot is None or not isinstance(screenshot, bytes) or len(screenshot) == 0:
+            print(f"[slot {slot_id}] Reset: screenshot is None/empty (attempt {_ss_attempt+1}/{_SCREENSHOT_RETRY})")
+        else:
+            try:
+                img = _PILImage.open(BytesIO(screenshot))
+                img.load()  # force full decode — raises on truncated PNG/JPEG
+                buf = BytesIO()
+                img.save(buf, format="JPEG")
+                screenshot = buf.getvalue()
+                _screenshot_valid = True
+                break
+            except Exception as ss_err:
+                print(f"[slot {slot_id}] Reset: screenshot corrupt (attempt {_ss_attempt+1}/{_SCREENSHOT_RETRY}): {ss_err}")
+        # Re-capture: give the VM a moment to finish rendering
+        if _ss_attempt < _SCREENSHOT_RETRY - 1:
+            time.sleep(2 * (_ss_attempt + 1))
+            try:
+                controller = getattr(env, 'controller', None)
+                screenshot = controller.get_screenshot() if controller else None
+            except Exception:
+                screenshot = None
+    if not _screenshot_valid:
+        print(f"[slot {slot_id}] Reset: screenshot unrecoverable after {_SCREENSHOT_RETRY} attempts.")
+        slot.is_done = True
+        return {"env_idx": slot_id, "obs_messages": None, "is_done": True, "format_reward": 0.0}
 
     slot.history_messages = _build_init_messages(screenshot, slot.instruction)
     slot._last_screenshot_fingerprint = _screenshot_fingerprint(screenshot)
@@ -907,7 +1234,20 @@ def env_step(body: StepRequest):
     slot_id = body.slot_id
     endpoint_lock = _get_slot_endpoint_lock(slot_id)
     with endpoint_lock:
-        return _env_step_locked(slot_id, body)
+        try:
+            return _env_step_locked(slot_id, body)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("[slot %d] env_step crashed: %s", slot_id, e)
+            print(f"[slot {slot_id}] env_step crash: {e}")
+            print(traceback.format_exc())
+            return {
+                "env_idx": slot_id,
+                "obs_messages": None,
+                "is_done": True,
+                "format_reward": -1.0,
+            }
 
 
 def _env_step_locked(slot_id: int, body: StepRequest):
@@ -917,8 +1257,8 @@ def _env_step_locked(slot_id: int, body: StepRequest):
     prediction = body.prediction
     action_parse_res_factor = 1000
     model_type = "qwen25vl"
-    max_pixels = 16384 * 28 * 28
-    min_pixels = 100 * 28 * 28
+    max_pixels = IMAGE_MAX_PIXELS
+    min_pixels = IMAGE_MIN_PIXELS
     obs_image_height, obs_image_width = 1080, 1920
 
     parsed_responses = []
@@ -1317,22 +1657,85 @@ def env_history_messages_get(slot_id: int = 0):
 
 @app.get("/health")
 def health():
-    """Health check: reports provider, pool size, and env statuses."""
-    kvm_available = os.path.exists("/dev/kvm")
+    """Lightweight health check for load balancers and monitoring."""
     with _slots_lock:
         pool_size = len(_slots)
-        slot_statuses = {str(k): ("initialized" if v.env is not None else "not_initialized") for k, v in _slots.items()}
+    return {"status": "ok", "provider": _provider_name, "pool_size": pool_size}
+
+
+@app.get("/status")
+def status():
+    """Detailed status for monitoring 64-container deployments."""
+    with _slots_lock:
+        pool_size = len(_slots)
+        slot_details = {}
+        for k, v in _slots.items():
+            slot_details[str(k)] = {
+                "initialized": v.env is not None,
+                "is_done": v.is_done,
+                "step_counter": v.step_counter,
+                "instruction": (v.instruction or "")[:80] if v.instruction else None,
+            }
     return {
         "status": "ok",
         "provider": _provider_name,
         "observation_type": OBSERVATION_TYPE,
-        "screenshot_source": "DesktopEnv.controller.get_screenshot() (same as run_uitars)",
-        "kvm_available": kvm_available,
-        "kvm_device": "/dev/kvm" if kvm_available else None,
         "pool_size": pool_size,
-        "slot_statuses": slot_statuses,
-        "message": "KVM hardware acceleration enabled" if kvm_available else "KVM not available, using software emulation"
+        "slots": slot_details,
     }
+
+
+@app.get("/health/containers")
+def health_containers():
+    """Per-container health for monitoring dashboards and alerting.
+
+    Returns the health status of every container in the pool, recovery stats,
+    and a top-level status that is "ok" only when ALL containers are healthy.
+    """
+    monitor = getattr(app.state, "health_monitor", None)
+    if monitor is None:
+        return {
+            "status": "no_monitor",
+            "detail": "Health monitor not running (non-docker provider or POOL_SIZE=0)",
+        }
+
+    health = monitor.get_health()
+    stats = monitor.get_stats()
+
+    healthy_count = sum(1 for h in health.values() if h.get("status") == "healthy")
+    total = len(health)
+    all_ok = healthy_count == POOL_SIZE
+
+    # Summarize unhealthy slots
+    unhealthy = {
+        str(k): v for k, v in health.items()
+        if v.get("status") not in ("healthy",)
+    }
+
+    return {
+        "status": "ok" if all_ok else "degraded",
+        "healthy": healthy_count,
+        "total": total,
+        "target_pool_size": POOL_SIZE,
+        "stats": stats,
+        "unhealthy_slots": unhealthy,
+    }
+
+
+@app.post("/health/recover")
+def health_recover(body: SlotRequest):
+    """Manually trigger recovery for a specific slot."""
+    slot_id = body.slot_id
+    with _slots_lock:
+        slot = _slots.get(slot_id)
+    if slot is None or slot.env is None:
+        raise HTTPException(status_code=404, detail=f"Slot {slot_id} not initialized")
+
+    provider = slot.env.provider
+    success = provider.recover_slot(slot_id)
+    if success:
+        return {"status": "recovered", "slot_id": slot_id}
+    raise HTTPException(status_code=500, detail=f"Recovery failed for slot {slot_id}")
 
 
 if __name__ == "__main__":

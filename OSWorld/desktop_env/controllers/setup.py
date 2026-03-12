@@ -599,47 +599,47 @@ class SetupController:
         remote_debugging_url = f"http://{host}:{port}"
         logger.info("Connect to Chrome @: %s", remote_debugging_url)
         logger.debug("PLAYWRIGHT ENV: %s", repr(os.environ))
-        for attempt in range(15):
-            if attempt > 0:
-                time.sleep(5)
-
+        # Use a single Playwright context for all retries to avoid "Event loop is
+        # closed" errors when multiple threads create/destroy contexts concurrently.
+        with sync_playwright() as p:
             browser = None
-            with sync_playwright() as p:
+            for attempt in range(15):
+                if attempt > 0:
+                    time.sleep(5)
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
-                    # break
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
+                    break
                 except Exception as e:
                     if attempt < 14:
                         logger.error(f"Attempt {attempt + 1}: Failed to connect, retrying. Error: {e}")
-                        # time.sleep(10)
                         continue
                     else:
                         logger.error(f"Failed to connect after multiple attempts: {e}")
                         raise e
 
-                if not browser:
-                    return
+            if not browser:
+                return
 
-                logger.info("Opening %s...", urls_to_open)
-                for i, url in enumerate(urls_to_open):
-                    # Use the first context (which should be the only one if using default profile)
-                    if i == 0:
-                        context = browser.contexts[0]
+            logger.info("Opening %s...", urls_to_open)
+            for i, url in enumerate(urls_to_open):
+                # Use the first context (which should be the only one if using default profile)
+                if i == 0:
+                    context = browser.contexts[0]
 
-                    page = context.new_page()  # Create a new page (tab) within the existing context
-                    try:
-                        page.goto(url, timeout=60000)
-                    except:
-                        logger.warning("Opening %s exceeds time limit", url)  # only for human test
-                    logger.info(f"Opened tab {i + 1}: {url}")
+                page = context.new_page()  # Create a new page (tab) within the existing context
+                try:
+                    page.goto(url, timeout=60000)
+                except:
+                    logger.warning("Opening %s exceeds time limit", url)  # only for human test
+                logger.info(f"Opened tab {i + 1}: {url}")
 
-                    if i == 0:
-                        # clear the default tab
-                        default_page = context.pages[0]
-                        default_page.close()
+                if i == 0:
+                    # clear the default tab
+                    default_page = context.pages[0]
+                    default_page.close()
 
-                # Do not close the context or browser; they will remain open after script ends
-                return browser, context
+            # Do not close the context or browser; they will remain open after script ends
+            return browser, context
 
     def _chrome_close_tabs_setup(self, urls_to_close: List[str]):
         time.sleep(5)  # Wait for Chrome to finish launching
@@ -652,7 +652,7 @@ class SetupController:
             browser = None
             for attempt in range(15):
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     break
                 except Exception as e:
                     if attempt < 14:
@@ -756,7 +756,7 @@ class SetupController:
                         if chunk:
                             tmpf.write(chunk)
                     tmpf.close()
-                    paths = [params['path']] if params['path'] != list else params['path']
+                    paths = params['path'] if isinstance(params['path'], list) else [params['path']]
                     parent_id = mkdir_in_googledrive(paths[:-1])
                     parents = {} if parent_id == 'root' else {'parents': [{'id': parent_id}]}
                     file = drive.CreateFile({'title': paths[-1], **parents})
@@ -783,7 +783,7 @@ class SetupController:
             browser = None
             for attempt in range(15):
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
+                    browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     break
                 except Exception as e:
                     if attempt < 14:
@@ -893,15 +893,17 @@ class SetupController:
 
             # get the path of the history file according to the platform
             os_type = controller.get_vm_platform()
+            if os_type not in ('Windows', 'Darwin', 'Linux'):
+                os_type = 'Linux'
 
             if os_type == 'Windows':
                 chrome_history_path = controller.execute_python_command(
                     """import os; print(os.path.join(os.getenv('USERPROFILE'), "AppData", "Local", "Google", "Chrome", "User Data", "Default", "History"))""")[
-                    'output'].strip()
+                    'output'].strip().split('\n')[-1]
             elif os_type == 'Darwin':
                 chrome_history_path = controller.execute_python_command(
                     """import os; print(os.path.join(os.getenv('HOME'), "Library", "Application Support", "Google", "Chrome", "Default", "History"))""")[
-                    'output'].strip()
+                    'output'].strip().split('\n')[-1]
             elif os_type == 'Linux':
                 chrome_history_path = controller.execute_python_command(
                     """import os, shutil
@@ -913,7 +915,7 @@ elif shutil.which('chromium-browser') or shutil.which('chromium'):
 else:
     print(os.path.join(home, '.config', 'google-chrome', 'Default', 'History'))
 """
-                )['output'].strip()
+                )['output'].strip().split('\n')[-1]
             else:
                 raise Exception('Unsupported operating system')
 
@@ -935,4 +937,4 @@ else:
             except requests.exceptions.RequestException as e:
                 logger.error("An error occurred while trying to send the request: %s", e)
 
-            self._execute_setup(["sudo chown -R user:user /home/user/.config/google-chrome/Default/History"], shell=True)
+            self._execute_setup([f"sudo chown user:user '{chrome_history_path}'"], shell=True)

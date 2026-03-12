@@ -23,6 +23,7 @@ venv/
 *arpo_env/
 env/
 vmware_vm_data
+.ssh/
 
 # Large data files
 OSWorld/vmware_vm_data/
@@ -50,6 +51,7 @@ logs/
 wandb/
 **.csv
 .claude/
+**test_64_screenshots/
 
 # OS files
 .DS_Store
@@ -65,3 +67,4 @@ models--*/
 
 # Keep structure but not large files
 !.gitkeep
+upstream_arpo/

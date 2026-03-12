@@ -406,7 +406,7 @@ def check_python_file_by_test_suite(actual_files, test_file, **options) -> float
 
 
 def check_python_file_by_gold_file(actual_files, gold_file: str, **options) -> float:
-    pass
+    return 0.0
 
 
 def check_html_background_image(src_path: str, rule: Dict = None) -> float:

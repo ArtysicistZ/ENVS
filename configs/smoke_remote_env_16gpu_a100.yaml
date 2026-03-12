@@ -1,6 +1,17 @@
-# ARPO Throughput Candidate - 8x A100 80G + Remote AWS Env
-# Aligned with upstream JIA-Lab ARPO (osworld_full_arpo.sh) adapted for 1-node 8-GPU.
-# Use this after the smoke profile is confirmed stable.
+# ARPO Smoke Test - 2×8 A100 80G (16 GPUs) + Remote AWS Env
+# Matches upstream JIA-Lab ARPO (osworld_full_arpo.sh) 2-node setup.
+#
+# Key differences vs 8-GPU config:
+#   - nnodes=2 → 16 GPUs across 2 VMs
+#   - global_batch_size=8 → upstream value (double of 8-GPU's 4)
+#   - gpu_memory_utilization=0.6 → upstream value (FSDP shards halved = more headroom)
+#   - max_num_batched_tokens=128000 → upstream value
+#
+# Prerequisites:
+#   1) Ray cluster: head node `ray start --head --num-gpus=8`
+#                   worker node `ray start --address=<HEAD_IP>:6379 --num-gpus=8`
+#   2) AWS env server running: curl http://YOUR_AWS_IP:15001/health
+#   3) Run on head node: python -m verl.trainer.main config=configs/smoke_remote_env_16gpu_a100.yaml
 
 data:
   train_files: OSWorld/evaluation_examples/test_smoke_4.json
@@ -26,7 +37,7 @@ algorithm:
 
 worker:
   actor:
-    global_batch_size: 4
+    global_batch_size: 8
     micro_batch_size_per_device_for_update: 1
     micro_batch_size_per_device_for_experience: 1
     max_grad_norm: 1.0
@@ -57,7 +68,10 @@ worker:
   rollout:
     temperature: 1.0
     n: 2
-    gpu_memory_utilization: 0.4
+    # With 16 GPUs, FSDP shards are half the size (~0.875 GiB model + ~1.75 GiB optimizer
+    # per GPU vs ~1.75 + ~3.5 on 8 GPUs). This leaves ~3.5 GiB more headroom per GPU,
+    # so upstream's 0.6 is safe here.
+    gpu_memory_utilization: 0.6
     enforce_eager: false
     enable_chunked_prefill: false
     tensor_parallel_size: 1
@@ -90,7 +104,7 @@ trainer:
   total_episodes: 10
   logger: ["console", "wandb"]
   project_name: arpo-smoke-test
-  experiment_name: uitars_7b_8xa100_remote_paper_candidate
+  experiment_name: uitars_7b_16xa100_remote_smoke
   n_gpus_per_node: 8
-  nnodes: 1
+  nnodes: 2
   val_before_train: false

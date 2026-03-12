@@ -622,6 +622,9 @@ def is_first_line_centered(docx_file):
         logger.error(f"Error: {e}")
         return 0
 
+    if len(doc.paragraphs) == 0:
+        return 0
+
     first_paragraph = doc.paragraphs[0]
 
     # check if the first line is center justified
@@ -649,6 +652,7 @@ def check_tabstops(docx_file1, docx_file2, **kwargs) -> float:
     para1 = [p for p in doc1.paragraphs if p.text.strip()]
     para2 = [p for p in doc2.paragraphs if p.text.strip()]
     if len(para1) != len(para2): return .0
+    if len(para1) == 0: return 1.
 
     if kwargs.get('word_number_split_by_tabstop', None) is not None:
         number = kwargs['word_number_split_by_tabstop']
@@ -728,11 +732,14 @@ def evaluate_colored_words_in_tables(file_path1, file_path2, **kwargs):
                         word = run.text
                         if word:
                             first_letter = word[0].lower()
+                            font_rgb = run.font.color.rgb if run.font.color and run.font.color.rgb else None
+                            if font_rgb is None:
+                                return 0
 
-                            if first_letter in 'aeiou' and _calculate_color_difference(run.font.color.rgb,
+                            if first_letter in 'aeiou' and _calculate_color_difference(font_rgb,
                                                                                        RGBColor(255, 0, 0)) > threshold:
                                 return 0  # Vowel-colored words should be red
-                            elif first_letter not in 'aeiou' and _calculate_color_difference(run.font.color.rgb,
+                            elif first_letter not in 'aeiou' and _calculate_color_difference(font_rgb,
                                                                                              RGBColor(0, 0,
                                                                                                       255)) > threshold:
                                 return 0  # Non-vowel-colored words should be blue
@@ -826,6 +833,8 @@ def evaluate_spacing(file_path):
         return 0
 
     # Check line spacing for introduction, body, and conclusion
+    if len(document.paragraphs) < 3:
+        return 0
     introduction_spacing = document.paragraphs[0].paragraph_format.line_spacing
     body_spacing = document.paragraphs[1].paragraph_format.line_spacing
     conclusion_spacing = document.paragraphs[2].paragraph_format.line_spacing

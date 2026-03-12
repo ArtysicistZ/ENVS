@@ -319,6 +319,8 @@ def compare_table(result: str, expected: str = None, **options) -> float:
             sheet2: pd.DataFrame = _load_sheet(
                 *parse_idx(r["sheet_idx1"], pdworkbookr, pdworkbooke)
             )
+            if sheet2 is None:
+                return 0.0
 
             sheet1 = sheet1.round(error_limit)
             sheet2 = sheet2.round(error_limit)
@@ -348,6 +350,8 @@ def compare_table(result: str, expected: str = None, **options) -> float:
             sheet2: List[str] = _load_sheet(
                 *parse_idx(r["sheet_idx1"], result, expected)
             )
+            if sheet2 is None:
+                return 0.0
             if r.get("ignore_case", False):
                 sheet1 = [l.lower() for l in sheet1]
                 sheet2 = [l.lower() for l in sheet2]
@@ -510,6 +514,8 @@ def compare_table(result: str, expected: str = None, **options) -> float:
             sheet2: Worksheet = _load_sheet(
                 *parse_idx(r["sheet_idx1"], xlworkbookr, xlworkbooke)
             )
+            if sheet2 is None:
+                return 0.0
             metric: bool = sheet1.freeze_panes == sheet2.freeze_panes
             logger.debug(
                 "Assertion: %s.freeze(%s) == %s.freeze(%s) - %s",
