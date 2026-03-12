@@ -522,70 +522,88 @@ class RayPPOTrainer:
                 worker.reset.remote(task_config) for worker, task_config in
                 zip(self.env_workers[:num_tasks], task_configs)
             ]
-            reset_outputs = ray.get(futures)
+            reset_outputs = _ray_get_robust(futures, timeout=600, label="val_reset",
+                                            fallback_fn=lambda idx: {"env_idx": idx, "obs_messages": None, "is_done": True, "format_reward": 0.0})
 
             self.actor_rollout_wg.prepare_generate_sequences()
+            generate_sequences_started = True
+            batch_all_failed = False  # tracks if all envs failed (vllm_batch is None)
 
             env_outputs = reset_outputs
 
-            for step_idx in range(self.config.env.max_steps):
-                print(f"Step {step_idx} of {self.config.env.max_steps}: {ray.get([worker.is_done.remote() for worker in self.env_workers])}")
-                world_size = self.actor_rollout_wg.world_size
+            try:
+                for step_idx in range(self.config.env.max_steps):
+                    is_done_futures = [worker.is_done.remote() for worker in self.env_workers[:num_tasks]]
+                    is_done_results = _ray_get_robust(is_done_futures, timeout=30, label="val_is_done",
+                                                      fallback_fn=lambda idx: True)
+                    print(f"Step {step_idx} of {self.config.env.max_steps}: {is_done_results}")
+                    world_size = self.actor_rollout_wg.world_size
 
-                vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(env_outputs)
+                    vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(env_outputs)
 
-                if vllm_batch is None:
-                    # No envs produced valid observations (e.g. all failed to start). Skip this batch.
-                    eval_results_total.extend([{"success": False, "reward": 0.0}] * num_tasks)
-                    reward_tensor_lst.append(torch.zeros(num_tasks, 1, dtype=torch.float32))
-                    sample_inputs.extend([tc.get("instruction", "") for tc in task_configs])
-                    sample_outputs.extend([""] * num_tasks)
-                    sample_labels.extend(["none"] * num_tasks)
-                    sample_scores.extend([0.0] * num_tasks)
+                    if vllm_batch is None:
+                        # No envs produced valid observations (e.g. all failed to start).
+                        batch_all_failed = True
+                        break
+
+                    vllm_batch_pad, pad_size = pad_dataproto_to_divisor(vllm_batch, world_size)
+
+                    gen_batch = vllm_batch_pad.pop(
+                        batch_keys=["input_ids", "attention_mask", "position_ids"],
+                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
+                    )
+
+                    # override val config
+                    gen_batch.meta_info = self.config.worker.rollout.val_override_config
+                    self._apply_task_family_decoding_if_single(gen_batch, valid_env_idx, task_configs, is_val=True)
+
+                    # predict actions
+                    action_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
+                    action_batch_output = unpad_dataproto(action_batch_output, pad_size=pad_size)
+
+                    response_texts = self.tokenizer.batch_decode(action_batch_output.batch['responses'], skip_special_tokens=True)
+                    response_texts, _, _, _ = self._retry_invalid_actions_once(
+                        gen_batch, action_batch_output, response_texts, pad_size
+                    )
+
+                    cur_valid_envs = [self.env_workers[i] for i in valid_env_idx]
+
+                    futures = [worker.step.remote(action_text) for worker, action_text in zip(cur_valid_envs, response_texts)]
+                    env_outputs = _ray_get_robust(futures, timeout=300, label="val_step",
+                                                  fallback_fn=lambda idx: {"env_idx": valid_env_idx[idx], "obs_messages": None, "is_done": True, "format_reward": 0.0})
+
+                    is_all_done = all([x['is_done'] for x in env_outputs])
+                    if is_all_done:
+                        break
+            finally:
+                if generate_sequences_started:
                     self.actor_rollout_wg.finish_generate_sequences()
-                    continue
+                    generate_sequences_started = False
 
-                vllm_batch_pad, pad_size = pad_dataproto_to_divisor(vllm_batch, world_size)
-                
-                gen_batch = vllm_batch_pad.pop(
-                    batch_keys=["input_ids", "attention_mask", "position_ids"],
-                    non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
-                )
-
-                # override val config
-                gen_batch.meta_info = self.config.worker.rollout.val_override_config
-                self._apply_task_family_decoding_if_single(gen_batch, valid_env_idx, task_configs, is_val=True)
-
-                # predict actions
-                action_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
-                action_batch_output = unpad_dataproto(action_batch_output, pad_size=pad_size)
-                
-                response_texts = self.tokenizer.batch_decode(action_batch_output.batch['responses'], skip_special_tokens=True)
-                response_texts, _, _, _ = self._retry_invalid_actions_once(
-                    gen_batch, action_batch_output, response_texts, pad_size
-                )
-
-                cur_valid_envs = [self.env_workers[i] for i in valid_env_idx]
-
-                futures = [worker.step.remote(action_text) for worker, action_text in zip(cur_valid_envs, response_texts)]
-                env_outputs = ray.get(futures)
-
-                is_all_done = all([x['is_done'] for x in env_outputs])
-                if is_all_done:
-                    break
+            if batch_all_failed:
+                # All envs failed — record zeros and skip evaluate
+                eval_results_total.extend([0.0] * num_tasks)
+                reward_tensor_lst.append(torch.zeros(num_tasks, 1, dtype=torch.float32))
+                sample_inputs.extend([tc.get("instruction", "") for tc in task_configs])
+                sample_outputs.extend([""] * num_tasks)
+                sample_labels.extend(["none"] * num_tasks)
+                sample_scores.extend([0.0] * num_tasks)
+                continue
 
             futures = [worker.evaluate.remote() for worker in self.env_workers[:num_tasks]]
-            eval_results = ray.get(futures)
+            eval_results = _ray_get_robust(futures, timeout=300, label="val_evaluate",
+                                           fallback_fn=lambda idx: 0.0)
             eval_results_total.extend(eval_results)
 
-            history_messages = ray.get([worker.get_history_messages.remote() for worker in self.env_workers[:num_tasks]])
-            self.actor_rollout_wg.finish_generate_sequences()
+            history_futures = [worker.get_history_messages.remote() for worker in self.env_workers[:num_tasks]]
+            history_messages = _ray_get_robust(history_futures, timeout=60, label="val_history",
+                                               fallback_fn=lambda idx: [])
 
             # Store scores
             scores = eval_results
             reward_tensor = torch.tensor(scores, dtype=torch.float32).unsqueeze(-1)
 
-            sample_inputs.extend([task_config['instruction'] for task_config in task_configs])
+            sample_inputs.extend([task_config.get('instruction', '') for task_config in task_configs])
             prompts = []
             for history_message in history_messages:
                 if not history_message or (isinstance(history_message, list) and len(history_message) == 0):
@@ -1080,7 +1098,7 @@ class RayPPOTrainer:
                 for single_output in env_outputs:
                     slot = slot_by_env_idx[single_output["env_idx"]]
                     format_rewards[slot] += float(single_output.get("format_reward", 0.0))
-                    if single_output["is_done"]:
+                    if single_output["is_done"] and eval_results_objects[slot] is None:
                         eval_results_objects[slot] = active_workers[slot].evaluate.remote()
 
                 if env_outputs and all(single_output["is_done"] for single_output in env_outputs):
@@ -1116,10 +1134,10 @@ class RayPPOTrainer:
             [worker.get_train_dict.remote() for worker in active_workers],
             timeout=60.0,
             fallback_fn=lambda _: {
-                "input_ids": torch.zeros((0,), dtype=torch.int64),
-                "labels": torch.full((0,), -100, dtype=torch.int64),
-                "attention_mask": torch.zeros((0,), dtype=torch.int64),
-                "position_ids": torch.zeros((3, 0), dtype=torch.int64),
+                "input_ids": torch.zeros((1, 1), dtype=torch.int64),
+                "labels": torch.full((1, 1), -100, dtype=torch.int64),
+                "attention_mask": torch.zeros((1, 1), dtype=torch.int64),
+                "position_ids": torch.zeros((3, 1), dtype=torch.int64),
             },
             label=f"chunk{chunk_idx+1}/get_train_dict",
         )
@@ -1366,6 +1384,11 @@ class RayPPOTrainer:
                         # Clip and downweight shaped reward so task success remains dominant.
                         format_rewards_clipped = torch.clamp(batch.batch["format_rewards"], -1.0, 1.0)
                         rewards = batch.batch["eval_results"] + 0.1 * format_rewards_clipped
+                        # Guard against NaN/Inf from corrupt evaluator results — replace with 0.0
+                        if not torch.isfinite(rewards).all():
+                            nan_count = (~torch.isfinite(rewards)).sum().item()
+                            print(f"[WARNING] {nan_count} NaN/Inf rewards detected — replacing with 0.0")
+                            rewards = torch.where(torch.isfinite(rewards), rewards, torch.zeros_like(rewards))
                         batch.batch["rewards"] = rewards
 
                         if self.use_reward_model:
@@ -1508,6 +1531,17 @@ class RayPPOTrainer:
                             gamma=self.config.algorithm.gamma,
                             lam=self.config.algorithm.lam,
                         )
+                        # Clamp extreme advantages (e.g., from GRPO with zero-variance groups)
+                        adv_raw = batch.batch["advantages"]
+                        if not torch.isfinite(adv_raw).all() or adv_raw.abs().max().item() > 10.0:
+                            bad_count = (~torch.isfinite(adv_raw)).sum().item()
+                            extreme_count = (adv_raw.abs() > 10.0).sum().item()
+                            if bad_count > 0:
+                                print(f"[WARNING] {bad_count} NaN/Inf advantages — replacing with 0.0")
+                            if extreme_count > 0:
+                                print(f"[WARNING] {extreme_count} extreme advantages (|adv|>10) — clamping to [-10, 10]")
+                            adv_raw = torch.where(torch.isfinite(adv_raw), adv_raw, torch.zeros_like(adv_raw))
+                            batch.batch["advantages"] = adv_raw.clamp(-10.0, 10.0)
                         # Log advantage stats to confirm non-zero and varying (needed for GRPO)
                         adv = batch.batch["advantages"]
                         resp_mask = batch.batch["response_mask"].bool()

@@ -206,7 +206,7 @@ class DockerProvider(Provider):
         try:
             import docker as _docker
             self._docker = _docker
-            self.client = _docker.from_env()
+            self.client = _docker.from_env(timeout=60)
         except ImportError as e:
             raise ImportError(
                 "DockerProvider requires the 'docker' Python package. "
@@ -222,17 +222,17 @@ class DockerProvider(Provider):
     def _ensure_network(self):
         """Create the Docker bridge network if it doesn't exist."""
         try:
-            import docker as _docker
-            client = _docker.from_env()
             try:
-                client.networks.get(DOCKER_NETWORK)
-            except _docker.errors.NotFound:
-                client.networks.create(
+                self.client.networks.get(DOCKER_NETWORK)
+            except self._docker.errors.NotFound:
+                self.client.networks.create(
                     DOCKER_NETWORK,
                     driver="bridge",
                     options={"com.docker.network.bridge.name": "br-osworld"},
                 )
                 logger.info("Created Docker network: %s", DOCKER_NETWORK)
+        except (self._docker.errors.DockerException, ConnectionError) as e:
+            raise  # Docker daemon unavailable — let caller handle
         except Exception as e:
             logger.warning("Could not ensure Docker network %s: %s", DOCKER_NETWORK, e)
 
@@ -276,7 +276,10 @@ class DockerProvider(Provider):
                     container.stop(timeout=5)
                 except Exception:
                     pass
-                container.remove(force=True)
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass  # already removed by another thread or Docker
                 # Fall through to create a new container
             else:
                 # created/paused — try starting
@@ -331,7 +334,10 @@ class DockerProvider(Provider):
                     container.stop(timeout=5)
                 except Exception:
                     pass
-                container.remove(force=True)
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass  # already removed
             except self._docker.errors.NotFound:
                 pass
 
@@ -353,7 +359,10 @@ class DockerProvider(Provider):
                     container.stop(timeout=5)
                 except Exception:
                     pass
-                container.remove(force=True)
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass  # already removed
                 raise RuntimeError(
                     f"[slot {slot_id}] Container failed to start (status={container.status})"
                 )
@@ -387,7 +396,10 @@ class DockerProvider(Provider):
                         container.stop(timeout=5)
                     except Exception:
                         pass
-                    container.remove(force=True)
+                    try:
+                        container.remove(force=True)
+                    except Exception:
+                        pass  # already removed
                     self._invalidate_cached_ip(slot_id)
                     raise RuntimeError(msg)
                 # Check resetd health
@@ -454,22 +466,32 @@ class DockerProvider(Provider):
         return ip
 
     def _get_container_ip(self, slot_id: int) -> str:
-        """Return cached container IP, resolving from Docker on first call."""
+        """Return cached container IP, resolving from Docker on cache miss.
+
+        Lock is only held briefly for cache read/write — the slow Docker API
+        call (_resolve_container_ip) runs OUTSIDE the lock to avoid serializing
+        all 64 slots behind one slow DNS lookup.
+        """
         with self._slot_ips_lock:
             if slot_id in self._slot_ips:
                 return self._slot_ips[slot_id]
-            ip = self._resolve_container_ip(slot_id)
+        # Cache miss: resolve outside the lock
+        ip = self._resolve_container_ip(slot_id)
+        with self._slot_ips_lock:
+            # Another thread may have resolved it while we were waiting
+            if slot_id in self._slot_ips:
+                return self._slot_ips[slot_id]
             self._slot_ips[slot_id] = ip
             logger.info("[slot %d] Container IP: %s", slot_id, ip)
             return ip
 
     def _wait_for_port(self, ip: str, port: int, timeout: float, poll: float = 2.0,
-                       slot_id: int | None = None) -> bool:
+                       slot_id: int | None = None) -> tuple[bool, str]:
         """Wait until GET /health responds 200 on ip:port.
 
-        If slot_id is provided, periodically checks whether the container is in a
-        crash loop (exited/restarting).  If detected, removes and recreates it,
-        refreshes the IP, and continues waiting.
+        Returns (success: bool, current_ip: str).  The IP may change if
+        slot_id is provided and a crash-loop forces container recreation.
+        Callers MUST use the returned IP for subsequent operations.
         """
         deadline = time.time() + timeout
         recreate_count = 0
@@ -479,7 +501,7 @@ class DockerProvider(Provider):
             try:
                 r = requests.get(f"http://{ip}:{port}/health", timeout=5)
                 if r.status_code == 200:
-                    return True
+                    return True, ip
             except Exception:
                 pass
 
@@ -516,7 +538,7 @@ class DockerProvider(Provider):
                     logger.debug("[slot %d] Crash-loop check error: %s", slot_id, e)
 
             time.sleep(poll)
-        return False
+        return False, ip
 
     def _call_resetd(self, ip: str, endpoint: str, timeout: float = RESETD_RESET_TIMEOUT) -> dict:
         r = requests.post(
@@ -541,17 +563,17 @@ class DockerProvider(Provider):
             ip = self._get_container_ip(slot_id)
 
             logger.info("[slot %d] Waiting for osworld-resetd (port %d) ...", slot_id, CONTAINER_RESETD_PORT)
-            if not self._wait_for_port(ip, CONTAINER_RESETD_PORT, timeout=CONTAINER_STARTUP_TIMEOUT,
-                                       poll=CONTAINER_STARTUP_POLL, slot_id=slot_id):
+            ok, ip = self._wait_for_port(ip, CONTAINER_RESETD_PORT, timeout=CONTAINER_STARTUP_TIMEOUT,
+                                         poll=CONTAINER_STARTUP_POLL, slot_id=slot_id)
+            if not ok:
                 raise RuntimeError(
                     f"[slot {slot_id}] resetd at {ip}:{CONTAINER_RESETD_PORT} did not come up within "
                     f"{CONTAINER_STARTUP_TIMEOUT}s"
                 )
-            # Refresh IP in case the container was recreated during the wait
-            ip = self._get_container_ip(slot_id)
             logger.info("[slot %d] Waiting for osworld-server (port %d) ...", slot_id, CONTAINER_SERVER_PORT)
-            if not self._wait_for_port(ip, CONTAINER_SERVER_PORT, timeout=CONTAINER_STARTUP_TIMEOUT,
-                                       poll=CONTAINER_STARTUP_POLL, slot_id=slot_id):
+            ok, ip = self._wait_for_port(ip, CONTAINER_SERVER_PORT, timeout=CONTAINER_STARTUP_TIMEOUT,
+                                         poll=CONTAINER_STARTUP_POLL, slot_id=slot_id)
+            if not ok:
                 raise RuntimeError(
                     f"[slot {slot_id}] osworld-server at {ip}:{CONTAINER_SERVER_PORT} did not come up within "
                     f"{CONTAINER_STARTUP_TIMEOUT}s"
@@ -617,12 +639,30 @@ class DockerProvider(Provider):
 
             status = result.get("status", "unknown")
             logger.info("[slot %d] resetd /reset response: status=%s", slot_id, status)
-            if status not in ("ok", "busy"):
-                logger.warning("[slot %d] Unexpected reset status: %s", slot_id, result)
+            if status == "busy":
+                # Another reset is in progress.  Wait for it to finish and retry once.
+                logger.warning("[slot %d] resetd returned 'busy', waiting 15s then retrying ...", slot_id)
+                time.sleep(15)
+                try:
+                    result = self._call_resetd(ip, "/reset", timeout=RESETD_RESET_TIMEOUT)
+                    status = result.get("status", "unknown")
+                    logger.info("[slot %d] resetd /reset retry: status=%s", slot_id, status)
+                except Exception as e2:
+                    logger.error("[slot %d] resetd /reset retry failed: %s", slot_id, e2)
+                    raise RuntimeError(f"[slot {slot_id}] overlay reset failed on retry: {e2}") from e2
+                if status == "busy":
+                    raise RuntimeError(
+                        f"[slot {slot_id}] overlay reset still busy after retry — "
+                        f"concurrent reset may be stuck"
+                    )
+            if status not in ("ok",):
+                logger.warning("[slot %d] Unexpected reset status: %s — proceeding but state may be stale", slot_id, result)
 
             # Wait for osworld-server (port 5000) to be healthy after reset
             logger.info("[slot %d] Waiting for osworld-server to recover (up to %ds) ...", slot_id, RESET_VERIFY_TIMEOUT)
-            if not self._wait_for_port(ip, CONTAINER_SERVER_PORT, timeout=RESET_VERIFY_TIMEOUT, poll=RESET_VERIFY_POLL):
+            ok, ip = self._wait_for_port(ip, CONTAINER_SERVER_PORT, timeout=RESET_VERIFY_TIMEOUT,
+                                         poll=RESET_VERIFY_POLL, slot_id=slot_id)
+            if not ok:
                 raise RuntimeError(
                     f"[slot {slot_id}] osworld-server did not recover within {RESET_VERIFY_TIMEOUT}s after reset"
                 )
@@ -727,15 +767,17 @@ class DockerProvider(Provider):
                 ip = self._get_container_ip(slot_id)
 
                 # 4. Wait for services
-                if not self._wait_for_port(ip, CONTAINER_RESETD_PORT,
-                                           timeout=CONTAINER_STARTUP_TIMEOUT,
-                                           poll=CONTAINER_STARTUP_POLL, slot_id=slot_id):
+                ok, ip = self._wait_for_port(ip, CONTAINER_RESETD_PORT,
+                                             timeout=CONTAINER_STARTUP_TIMEOUT,
+                                             poll=CONTAINER_STARTUP_POLL, slot_id=slot_id)
+                if not ok:
                     logger.error("[slot %d] Recovery: resetd did not come up", slot_id)
                     return False
 
-                if not self._wait_for_port(ip, CONTAINER_SERVER_PORT,
-                                           timeout=CONTAINER_STARTUP_TIMEOUT,
-                                           poll=CONTAINER_STARTUP_POLL, slot_id=slot_id):
+                ok, ip = self._wait_for_port(ip, CONTAINER_SERVER_PORT,
+                                             timeout=CONTAINER_STARTUP_TIMEOUT,
+                                             poll=CONTAINER_STARTUP_POLL, slot_id=slot_id)
+                if not ok:
                     logger.error("[slot %d] Recovery: osworld-server did not come up", slot_id)
                     return False
 
@@ -758,15 +800,18 @@ class DockerProvider(Provider):
 
     def stop_emulator(self, path_to_vm: str):
         slot_id = _slot_id_from_path(path_to_vm)
-        with self._slot_ips_lock:
-            self._slot_ips.pop(slot_id, None)
-        name = self._container_name(slot_id)
-        try:
-            container = self.client.containers.get(name)
-            container.stop(timeout=10)
-            container.remove()
-            logger.info("[slot %d] Container %s stopped and removed.", slot_id, name)
-        except self._docker.errors.NotFound:
-            pass
-        except Exception as e:
-            logger.warning("[slot %d] Could not stop/remove %s: %s", slot_id, name, e)
+        lock = self._get_slot_lock(slot_id)
+        with lock:
+            self._invalidate_cached_ip(slot_id)
+            with self._baseline_prepared_lock:
+                self._baseline_prepared.discard(slot_id)
+            name = self._container_name(slot_id)
+            try:
+                container = self.client.containers.get(name)
+                container.stop(timeout=10)
+                container.remove()
+                logger.info("[slot %d] Container %s stopped and removed.", slot_id, name)
+            except self._docker.errors.NotFound:
+                pass
+            except Exception as e:
+                logger.warning("[slot %d] Could not stop/remove %s: %s", slot_id, name, e)

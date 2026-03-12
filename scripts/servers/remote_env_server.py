@@ -90,6 +90,33 @@ def _default_provider() -> str:
     return "docker"
 
 
+# Timeout for blocking env operations (step/evaluate) that can hang if container is unresponsive.
+# The underlying HTTP calls already have per-request timeouts, but this is a safety net for the
+# overall operation (e.g., multiple HTTP calls in evaluate, or evaluate running many getters).
+ENV_STEP_TIMEOUT = float(os.environ.get("REMOTE_ENV_STEP_TIMEOUT", "30"))
+ENV_EVALUATE_TIMEOUT = float(os.environ.get("REMOTE_ENV_EVALUATE_TIMEOUT", "30"))
+
+# Single-thread executor for running blocking env operations with a timeout.
+# We use one per call (no pool) to avoid thread starvation.
+def _run_with_timeout(fn, timeout: float, label: str):
+    """Run fn() in a thread with a timeout. Raises TimeoutError if it exceeds the deadline.
+
+    NOTE: On timeout the worker thread may continue running (Python threads are not
+    interruptible).  We use shutdown(wait=False) so the *calling* thread is not blocked.
+    The leaked daemon thread will die when the process exits or when the blocking call
+    inside fn() eventually returns/times-out on its own.
+    """
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=label)
+    future = executor.submit(fn)
+    try:
+        return future.result(timeout=timeout)
+    except Exception:
+        future.cancel()
+        raise
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 # --- Global constants (shared across all slots) ---
 _provider_name: str = (os.environ.get("PROVIDER") or _default_provider()).strip().lower()
 max_steps = int(os.environ.get("REMOTE_MAX_STEPS", "32"))
@@ -820,6 +847,12 @@ class ContainerHealthMonitor:
         self._health_lock = threading.RLock()
         self._recovery_in_progress: set[int] = set()
         self._recovery_lock = threading.Lock()
+        self._consecutive_failures: dict[int, int] = {}  # slot_id -> consecutive unhealthy count
+        self._recovery_started_at: dict[int, float] = {}  # slot_id -> timestamp
+        self._recovery_attempts: dict[int, int] = {}  # slot_id -> total recovery attempts (circuit breaker)
+        self._RECOVERY_TIMEOUT = 600  # 10 min max for recovery before we allow re-trigger
+        self._DEGRADED_THRESHOLD = 2  # require 2 consecutive degraded checks before recovery
+        self._MAX_RECOVERY_ATTEMPTS = 5  # give up after 5 failed recoveries per slot
         self._stats = {
             "checks": 0,
             "recoveries_attempted": 0,
@@ -888,8 +921,21 @@ class ContainerHealthMonitor:
             with self._health_lock:
                 self._slot_health[slot_id] = health
 
-            if health["status"] in ("down", "missing", "error"):
-                unhealthy.append(slot_id)
+            status = health["status"]
+            with self._health_lock:
+                if status == "healthy":
+                    # Clear consecutive failure counter on healthy
+                    self._consecutive_failures.pop(slot_id, None)
+                elif status in ("down", "missing", "error"):
+                    # Hard failures: recover immediately
+                    self._consecutive_failures[slot_id] = self._consecutive_failures.get(slot_id, 0) + 1
+                    unhealthy.append(slot_id)
+                elif status == "degraded":
+                    # Degraded: require consecutive failures before recovery (avoid transient triggers)
+                    count = self._consecutive_failures.get(slot_id, 0) + 1
+                    self._consecutive_failures[slot_id] = count
+                    if count >= self._DEGRADED_THRESHOLD:
+                        unhealthy.append(slot_id)
 
         with self._health_lock:
             healthy_count = sum(1 for h in self._slot_health.values() if h.get("status") == "healthy")
@@ -903,14 +949,36 @@ class ContainerHealthMonitor:
             for slot_id in unhealthy:
                 self._trigger_recovery(slot_id)
         else:
-            logger.info("[health_monitor] %d/%d healthy — all OK", healthy_count, total_checked)
+            not_healthy = total_checked - healthy_count
+            if not_healthy > 0:
+                logger.info("[health_monitor] %d/%d healthy — %d recovering", healthy_count, total_checked, not_healthy)
+            else:
+                logger.info("[health_monitor] %d/%d healthy — all OK", healthy_count, total_checked)
 
     def _trigger_recovery(self, slot_id: int):
         with self._recovery_lock:
-            if slot_id in self._recovery_in_progress:
-                logger.info("[health_monitor] Slot %d recovery already in progress, skipping", slot_id)
+            # Circuit breaker: stop trying after too many failures
+            attempts = self._recovery_attempts.get(slot_id, 0)
+            if attempts >= self._MAX_RECOVERY_ATTEMPTS:
+                logger.error(
+                    "[health_monitor] Slot %d hit circuit breaker (%d/%d attempts). "
+                    "Giving up — manual intervention needed.",
+                    slot_id, attempts, self._MAX_RECOVERY_ATTEMPTS,
+                )
                 return
+            if slot_id in self._recovery_in_progress:
+                started = self._recovery_started_at.get(slot_id, 0)
+                elapsed = time.time() - started
+                if elapsed < self._RECOVERY_TIMEOUT:
+                    logger.info("[health_monitor] Slot %d recovery in progress (%.0fs), skipping", slot_id, elapsed)
+                    return
+                else:
+                    logger.warning("[health_monitor] Slot %d recovery stuck (%.0fs > %ds), allowing re-trigger",
+                                   slot_id, elapsed, self._RECOVERY_TIMEOUT)
+                    self._recovery_in_progress.discard(slot_id)
             self._recovery_in_progress.add(slot_id)
+            self._recovery_started_at[slot_id] = time.time()
+            self._recovery_attempts[slot_id] = attempts + 1
 
         def _do_recovery():
             try:
@@ -928,15 +996,44 @@ class ContainerHealthMonitor:
 
                 if success:
                     self._stats["recoveries_succeeded"] += 1
-                    with self._health_lock:
-                        self._slot_health[slot_id] = {
-                            "slot_id": slot_id, "status": "healthy",
-                            "recovered_at": time.time(),
-                        }
-                    logger.info("[health_monitor] Slot %d recovered successfully", slot_id)
+                    # Refresh DesktopEnv controller IPs for the new container
+                    env = slot.env
+                    ip_refreshed = False
+                    try:
+                        new_ip_str = provider.get_ip_address(env.vm_path)
+                        new_ip = new_ip_str.split(":")[0]
+                        env.vm_ip = new_ip
+                        env.controller.vm_ip = new_ip
+                        env.controller.http_server = f"http://{new_ip}:{env.server_port}"
+                        env.setup_controller.vm_ip = new_ip
+                        env.setup_controller.http_server = f"http://{new_ip}:{env.server_port}"
+                        env.setup_controller.http_server_setup_root = f"http://{new_ip}:{env.server_port}/setup"
+                        logger.info("[health_monitor] Slot %d controller IPs refreshed to %s", slot_id, new_ip)
+                        ip_refreshed = True
+                    except Exception as ip_err:
+                        logger.error("[health_monitor] Slot %d IP refresh FAILED after recovery: %s", slot_id, ip_err)
+                    if ip_refreshed:
+                        with self._health_lock:
+                            self._slot_health[slot_id] = {
+                                "slot_id": slot_id, "status": "healthy",
+                                "recovered_at": time.time(),
+                            }
+                        logger.info("[health_monitor] Slot %d recovered successfully", slot_id)
+                        # Reset circuit breaker and failure counter on success
+                        with self._recovery_lock:
+                            self._recovery_attempts.pop(slot_id, None)
+                        with self._health_lock:
+                            self._consecutive_failures.pop(slot_id, None)
+                    else:
+                        # Container is up but IPs are stale — count as failed
+                        self._stats["recoveries_failed"] += 1
+                        logger.error("[health_monitor] Slot %d recovery succeeded but IP refresh failed — "
+                                     "marking as failed (attempt %d/%d)",
+                                     slot_id, self._recovery_attempts.get(slot_id, 0), self._MAX_RECOVERY_ATTEMPTS)
                 else:
                     self._stats["recoveries_failed"] += 1
-                    logger.error("[health_monitor] Slot %d recovery FAILED", slot_id)
+                    logger.error("[health_monitor] Slot %d recovery FAILED (attempt %d/%d)",
+                                 slot_id, self._recovery_attempts.get(slot_id, 0), self._MAX_RECOVERY_ATTEMPTS)
             except Exception as e:
                 self._stats["recoveries_failed"] += 1
                 logger.error("[health_monitor] Slot %d recovery exception: %s", slot_id, e)
@@ -944,6 +1041,7 @@ class ContainerHealthMonitor:
             finally:
                 with self._recovery_lock:
                     self._recovery_in_progress.discard(slot_id)
+                    self._recovery_started_at.pop(slot_id, None)
 
         recovery_thread = threading.Thread(target=_do_recovery, name=f"recovery-{slot_id}", daemon=True)
         recovery_thread.start()
@@ -1138,9 +1236,28 @@ def _env_reset_locked(slot_id: int, body: ResetRequest):
             print(f"[slot {slot_id}] Reset failed with container error: {e}. Attempting recovery ...")
             try:
                 provider = env.provider
-                success = provider.recover_slot(slot_id)
+                # Check if health monitor is already recovering this slot
+                if _health_monitor and slot_id in _health_monitor._recovery_in_progress:
+                    print(f"[slot {slot_id}] Health monitor already recovering this slot, waiting ...")
+                    # Wait up to 2 min for the health monitor to finish (don't hold lock too long)
+                    for _ in range(24):
+                        time.sleep(5)
+                        if slot_id not in _health_monitor._recovery_in_progress:
+                            break
+                    success = slot_id not in _health_monitor._recovery_in_progress
+                else:
+                    success = provider.recover_slot(slot_id)
                 if success:
-                    print(f"[slot {slot_id}] Recovery succeeded, retrying reset ...")
+                    # Refresh DesktopEnv controller IPs — the container has a new IP
+                    new_ip_str = provider.get_ip_address(env.vm_path)
+                    new_ip = new_ip_str.split(":")[0]
+                    env.vm_ip = new_ip
+                    env.controller.vm_ip = new_ip
+                    env.controller.http_server = f"http://{new_ip}:{env.server_port}"
+                    env.setup_controller.vm_ip = new_ip
+                    env.setup_controller.http_server = f"http://{new_ip}:{env.server_port}"
+                    env.setup_controller.http_server_setup_root = f"http://{new_ip}:{env.server_port}/setup"
+                    print(f"[slot {slot_id}] Recovery succeeded (new IP: {new_ip}), retrying reset ...")
                     obs = env.reset(task_config)
                 else:
                     print(f"[slot {slot_id}] Recovery failed")
@@ -1435,7 +1552,21 @@ def _env_step_locked(slot_id: int, body: StepRequest):
     step_stall_penalized = False
     appended_any_step_screenshot = False
     for action in actions:
-        obs, reward, step_done, info = env.step(action, pause=ACTION_PAUSE_SEC)
+        try:
+            obs, reward, step_done, info = _run_with_timeout(
+                lambda a=action: env.step(a, pause=ACTION_PAUSE_SEC),
+                timeout=ENV_STEP_TIMEOUT,
+                label=f"step-slot-{slot_id}",
+            )
+        except TimeoutError:
+            logger.error("[slot %d] env.step() timed out after %.0fs — marking done", slot_id, ENV_STEP_TIMEOUT)
+            slot.is_done = True
+            format_reward = max(format_reward - 0.3, -1.0)
+            reward_components["step_timeout"] = -0.3
+            slot._last_step_reward_components = reward_components
+            _log_step_reward_final(slot, format_reward, slot.is_done)
+            final_obs = messages_to_wire(slot.history_messages) if slot.history_messages else None
+            return {"env_idx": slot_id, "obs_messages": final_obs, "is_done": True, "format_reward": format_reward}
         if step_done:
             slot.is_done = True
         slot.step_counter += 1
@@ -1579,7 +1710,13 @@ def env_evaluate(body: SlotRequest):
     slot_id = body.slot_id
     endpoint_lock = _get_slot_endpoint_lock(slot_id)
     with endpoint_lock:
-        return _env_evaluate_locked(slot_id)
+        try:
+            return _env_evaluate_locked(slot_id)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("[slot %d] /env/evaluate unhandled error: %s", slot_id, e, exc_info=True)
+            return {"score": 0.0, "error": str(e)}
 
 
 def _env_evaluate_locked(slot_id: int):
@@ -1596,7 +1733,15 @@ def _env_evaluate_locked(slot_id: int):
                 detail="Env not ready for evaluation (no setup_controller; reset may have failed). Client should retry.",
             )
         _safe_env_unpause(env)
-        score = env.evaluate()
+        try:
+            score = _run_with_timeout(
+                lambda: env.evaluate(),
+                timeout=ENV_EVALUATE_TIMEOUT,
+                label=f"eval-slot-{slot_id}",
+            )
+        except TimeoutError:
+            logger.error("[slot %d] env.evaluate() timed out after %.0fs — returning 0.0", slot_id, ENV_EVALUATE_TIMEOUT)
+            return {"score": 0.0}
         post_evidence = _absence_metric_evidence(env, when="evaluate_post")
         if post_evidence is not None and slot._eval_precondition_state is not None:
             pre = slot._eval_precondition_state
@@ -1642,17 +1787,21 @@ def _env_evaluate_locked(slot_id: int):
 @app.post("/env/history_messages")
 def env_history_messages(body: SlotRequest):
     slot_id = body.slot_id
-    slot = _get_slot(slot_id)
-    return {"history_messages": messages_to_wire(slot.history_messages) if slot.history_messages else []}
+    endpoint_lock = _get_slot_endpoint_lock(slot_id)
+    with endpoint_lock:
+        slot = _get_slot(slot_id)
+        return {"history_messages": messages_to_wire(slot.history_messages) if slot.history_messages else []}
 
 
 @app.get("/env/history_messages")
 def env_history_messages_get(slot_id: int = 0):
     """GET variant for compatibility — defaults to slot 0."""
-    slot = _get_slot(slot_id)
-    msgs = messages_to_wire(slot.history_messages) if slot.history_messages else []
-    # Return under multiple keys for client compatibility
-    return {"history_messages": msgs, "messages": msgs, "history": msgs}
+    endpoint_lock = _get_slot_endpoint_lock(slot_id)
+    with endpoint_lock:
+        slot = _get_slot(slot_id)
+        msgs = messages_to_wire(slot.history_messages) if slot.history_messages else []
+        # Return under multiple keys for client compatibility
+        return {"history_messages": msgs, "messages": msgs, "history": msgs}
 
 
 @app.get("/health")
@@ -1726,16 +1875,42 @@ def health_containers():
 def health_recover(body: SlotRequest):
     """Manually trigger recovery for a specific slot."""
     slot_id = body.slot_id
-    with _slots_lock:
-        slot = _slots.get(slot_id)
-    if slot is None or slot.env is None:
-        raise HTTPException(status_code=404, detail=f"Slot {slot_id} not initialized")
+    endpoint_lock = _get_slot_endpoint_lock(slot_id)
+    with endpoint_lock:
+        with _slots_lock:
+            slot = _slots.get(slot_id)
+        if slot is None or slot.env is None:
+            raise HTTPException(status_code=404, detail=f"Slot {slot_id} not initialized")
 
-    provider = slot.env.provider
-    success = provider.recover_slot(slot_id)
-    if success:
-        return {"status": "recovered", "slot_id": slot_id}
-    raise HTTPException(status_code=500, detail=f"Recovery failed for slot {slot_id}")
+        env = slot.env
+        provider = env.provider
+        success = provider.recover_slot(slot_id)
+        if success:
+            # Refresh DesktopEnv controller IPs for the new container
+            new_ip = None
+            try:
+                new_ip_str = provider.get_ip_address(env.vm_path)
+                new_ip = new_ip_str.split(":")[0]
+                env.vm_ip = new_ip
+                env.controller.vm_ip = new_ip
+                env.controller.http_server = f"http://{new_ip}:{env.server_port}"
+                env.setup_controller.vm_ip = new_ip
+                env.setup_controller.http_server = f"http://{new_ip}:{env.server_port}"
+                env.setup_controller.http_server_setup_root = f"http://{new_ip}:{env.server_port}/setup"
+            except Exception as ip_err:
+                logger.warning("[slot %d] Manual recovery: IP refresh failed: %s", slot_id, ip_err)
+            # Reset circuit breaker so health monitor resumes monitoring
+            if _health_monitor:
+                with _health_monitor._recovery_lock:
+                    _health_monitor._recovery_attempts.pop(slot_id, None)
+                with _health_monitor._health_lock:
+                    _health_monitor._consecutive_failures.pop(slot_id, None)
+                    _health_monitor._slot_health[slot_id] = {
+                        "slot_id": slot_id, "status": "healthy",
+                        "recovered_at": time.time(),
+                    }
+            return {"status": "recovered", "slot_id": slot_id, "new_ip": new_ip}
+        raise HTTPException(status_code=500, detail=f"Recovery failed for slot {slot_id}")
 
 
 if __name__ == "__main__":
