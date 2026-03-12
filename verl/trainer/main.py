@@ -20,6 +20,8 @@ python -m verl.trainer.main config=configs/smoke_remote_env_16gpu_a100.yaml
 
 python -m verl.trainer.main config=configs/smoke_remote_env_8gpu_a100_n8_env16.yaml
 
+python -m verl.trainer.main config=configs/smoke_remote_env_8gpu_a100_n8_env32.yaml
+
 bash scripts/training/run_smoke_remote_env_8gpu_a100.sh
 
 bash scripts/training/run_smoke_remote_env_8gpu_a100_paper_candidate.sh

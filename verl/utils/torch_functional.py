@@ -77,7 +77,7 @@ def log_probs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.T
         # to fp32 can significantly increase memory and trigger CUDA OOM in smoke tests.
         # We keep logits in their existing (typically bf16/fp16) dtype to reduce peak
         # activation memory during cross-entropy.
-        output = F.cross_entropy(logits, labels, reduction="none")
+        output = -F.cross_entropy(logits, labels, reduction="none")
 
     return output.view(*batch_dim)
 
@@ -191,10 +191,14 @@ def postprocess_data(
             input_ids = input_ids[..., -max_length:]
             attention_mask = attention_mask[..., -max_length:]
             position_ids = position_ids[..., -max_length:]
+            if labels is not None:
+                labels = labels[..., -max_length:]
         elif truncation == "right":
             input_ids = input_ids[..., :max_length]
             attention_mask = attention_mask[..., :max_length]
             position_ids = position_ids[..., :max_length]
+            if labels is not None:
+                labels = labels[..., :max_length]
         elif truncation == "error":
             raise NotImplementedError(f"{seq_length} is larger than {max_length}.")
         else:

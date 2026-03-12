@@ -558,15 +558,15 @@ class EnvWorker():
 
         self.action_parse_res_factor = 1000
         self.model_type = "qwen25vl"
-        self.max_pixels = 2116800
-        self.min_pixels = 256
+        self.max_pixels = config.data.max_pixels
+        self.min_pixels = config.data.min_pixels
 
         self.instruction = None
         self.task_config = None
         self.step_counter = 0
         self.history_images = []
         self.history_messages = []
-    
+
         self.reset_train_tensors()
 
     def reset_train_tensors(self):
@@ -812,8 +812,8 @@ class EnvWorker():
                     {
                         "type": "image",
                         "image": f"data:image/jpeg;base64,{image_base64}",
-                        "min_pixels": 3136,
-                        "max_pixels": 2116800,
+                        "min_pixels": self.min_pixels,
+                        "max_pixels": self.max_pixels,
                     }
                 ]
             }
@@ -943,8 +943,8 @@ class EnvWorker():
                     {
                         "type": "image",
                         "image": f"data:image/jpeg;base64,{image_base64}",
-                        "min_pixels": 3136,
-                        "max_pixels": 2116800,
+                        "min_pixels": self.min_pixels,
+                        "max_pixels": self.max_pixels,
                     }
                 ]
             })
@@ -1053,8 +1053,8 @@ class RemoteEnvWorker:
         )
         self.action_parse_res_factor = 1000
         self.model_type = "qwen25vl"
-        self.max_pixels = 2116800
-        self.min_pixels = 256
+        self.max_pixels = config.data.max_pixels
+        self.min_pixels = config.data.min_pixels
         self.reset_train_tensors()
 
     def reset_train_tensors(self):
@@ -1277,6 +1277,9 @@ class RemoteEnvWorker:
             pm_err = None
             for pm_attempt in range(self.REMOTE_RESET_RETRIES + 1):
                 try:
+                    # Re-clear train tensors before each attempt so a partial
+                    # first attempt doesn't leave stale data that gets doubled.
+                    self.reset_train_tensors()
                     self.history_messages = wire_to_messages(obs_wire)
                     self.process_message(self.history_messages)
                     pm_err = None

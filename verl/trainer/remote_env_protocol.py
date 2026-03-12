@@ -44,7 +44,7 @@ def wire_content_to_message(content: List[Dict]) -> List[Dict]:
                 "type": "image",
                 "image": IMAGE_DATA_URL_PREFIX + c["b64"],
                 "min_pixels": c.get("min_pixels", 3136),
-                "max_pixels": c.get("max_pixels", 129024),
+                "max_pixels": c.get("max_pixels", 2116800),
             })
         else:
             out.append(c)

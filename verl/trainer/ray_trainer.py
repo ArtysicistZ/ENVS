@@ -715,8 +715,8 @@ class RayPPOTrainer:
             screen_w, screen_h = 1920, 1080
             if getattr(self.config, "env", None) is not None and getattr(self.config.env, "screen_size", None):
                 screen_w, screen_h = self.config.env.screen_size
-            max_px = getattr(getattr(self.config, "data", None), "max_pixels", 2116800)
-            min_px = getattr(getattr(self.config, "data", None), "min_pixels", 3136)
+            max_px = self.config.data.max_pixels
+            min_px = self.config.data.min_pixels
             parse_action_to_structure_output(
                 text,
                 1000,  # matches gui_agent worker parse factor
@@ -1127,6 +1127,36 @@ class RayPPOTrainer:
         merge_timing_raw(timing_raw, local_timing)
         return process_results, eval_results, format_rewards, task_configs
     
+    @staticmethod
+    def _align_replay_seq_len(pos_batch, target_seq_len, pad_token_id=0):
+        """Left-pad or left-truncate replay batch tensors to match target_seq_len.
+
+        Replay items come from previous steps with different collated max lengths.
+        Since collate_fn_dataproto uses left-padding, the left side is always pad
+        tokens. Left-truncation removes padding; left-padding adds it.
+        """
+        _SEQ_PAD = {"input_ids": pad_token_id, "attention_mask": 0, "position_ids": 0, "labels": -100}
+        for key in list(pos_batch.batch.keys()):
+            tensor = pos_batch.batch[key]
+            if tensor.dim() < 2 or key not in _SEQ_PAD:
+                continue
+            cur_len = tensor.size(-1)
+            if cur_len == target_seq_len:
+                continue
+            if cur_len > target_seq_len:
+                # Left-truncate: remove left-padding
+                excess = cur_len - target_seq_len
+                pos_batch.batch[key] = tensor[..., excess:].contiguous()
+            else:
+                # Left-pad: prepend padding
+                pad_size = target_seq_len - cur_len
+                pad_shape = list(tensor.shape)
+                pad_shape[-1] = pad_size
+                pad_val = _SEQ_PAD[key]
+                pad_t = torch.full(pad_shape, pad_val, dtype=tensor.dtype, device=tensor.device)
+                pos_batch.batch[key] = torch.cat([pad_t, tensor], dim=-1)
+        return pos_batch
+
     def apply_replay(self, task_configs, batch):
         eval_results = batch.batch["eval_results"].tolist()
         assert len(task_configs) == len(batch)
@@ -1135,6 +1165,9 @@ class RayPPOTrainer:
         bsz = len(task_configs) // rollout_n
         if bsz == 0:
             return batch  # e.g. 1 remote env with 1 rollout, no replay grouping
+
+        cur_seq_len = batch.batch["input_ids"].size(-1)
+        pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
 
         final_batch = []
         final_eval_results = []
@@ -1156,14 +1189,16 @@ class RayPPOTrainer:
                 pos_batch = []
 
             if len(pos_batch) > 0:
+                # Align replay item's sequence length to current batch (different
+                # steps may collate to different max lengths).
+                pos_batch = self._align_replay_seq_len(pos_batch, cur_seq_len, pad_token_id)
                 final_batch.append(pos_batch)
                 final_batch.append(cur_batch[len(pos_batch):])
             else:
                 final_batch.append(cur_batch)
 
             print(f'Task {task_id} {instruction} replay_buffer: {len(pos_batch)}| rewards: {cur_rewards}')
-            # print(f'len(final_messages): {len(final_messages)}, len(final_eval_results): {len(final_eval_results)}')
-        
+
         # update replay buffer
         self.replay.update_replay_buffer_batch(task_configs, batch)
         print('Update replay buffer done')
@@ -1366,8 +1401,8 @@ class RayPPOTrainer:
                             "reward_tensor": reward_tensor.tolist(),
                             "reward_std": reward_stds_list,
                             'num_invalid_group': num_invalid_group,
-                            'traj_reward': eval_results,
-                            'foramt_reward': format_rewards,
+                            'traj_reward': all_eval_results,
+                            'format_reward': all_format_rewards,
                             'format_reward_clipped': format_rewards_clipped.tolist(),
                         }
 

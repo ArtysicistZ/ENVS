@@ -192,10 +192,32 @@ class DataParallelPPOActor(BasePPOActor):
             )  # input_ids_rmpad (total_nnz, ...)
             input_ids_rmpad = input_ids_rmpad.transpose(0, 1)  # (1, total_nnz)
 
-            # Guard: if all tokens were padding (failed env reset → empty trajectory),
-            # return zero log_probs. response_mask is all-zero so these don't affect training.
+            # Guard: if all tokens were padding (failed env reset → empty trajectory).
+            # FSDP requires ALL ranks to participate in forward (all-gather collective).
+            # With DP_COMPUTE_PROTO, each rank gets different data — one rank may have
+            # 0 tokens while another has valid tokens. Skipping self.actor_module() on
+            # this rank causes NCCL deadlock. Call the model with a minimal dummy input
+            # to keep FSDP synchronized, then return zero log_probs (response_mask is
+            # all-zero so these don't affect training).
             if input_ids_rmpad.numel() == 0:
-                return torch.zeros(batch_size, response_length, device=input_ids.device)
+                dummy_ids = torch.zeros(1, 1, dtype=input_ids.dtype, device=input_ids.device)
+                if position_ids.dim() == 3:
+                    # mRoPE: position_ids is (3, bsz, seqlen) after transpose above
+                    dummy_pos = torch.zeros(3, 1, 1, dtype=position_ids.dtype, device=position_ids.device)
+                else:
+                    dummy_pos = torch.zeros(1, 1, dtype=position_ids.dtype, device=position_ids.device)
+                dummy_out = self.actor_module(
+                    input_ids=dummy_ids, attention_mask=None,
+                    position_ids=dummy_pos, use_cache=False,
+                )
+                # Anchor to model output so backward (if called during update_policy)
+                # flows through FSDP parameters for reduce-scatter synchronization.
+                # Under @torch.no_grad (compute_log_prob), anchor is a plain zero — harmless.
+                anchor = dummy_out.logits.sum() * 0.0
+                del dummy_out
+                # Use anchor's dtype (model output dtype, typically bfloat16) to avoid
+                # float32 upcast when concatenated with other micro-batch log_probs.
+                return anchor.new_zeros(batch_size, response_length) + anchor
 
             # unpad the position_ids to align the rotary
             if position_ids.dim() == 3:
@@ -513,8 +535,16 @@ class DataParallelPPOActor(BasePPOActor):
                         response_mask = response_mask[:, :seq_len].contiguous()
                         old_log_probs = old_log_probs[:, :seq_len].contiguous()
                         advantages = advantages[:, :seq_len].contiguous()
-                    # Guard against all-zero response_mask (no valid tokens) => skip to avoid NaN
+                    # Guard against all-zero response_mask (no valid tokens).
+                    # FSDP requires ALL ranks to call backward (reduce-scatter collective).
+                    # With DP_COMPUTE_PROTO, ranks have different data — one rank may have
+                    # all-zero mask while another has valid tokens. Skipping backward here
+                    # causes NCCL deadlock. Instead, backward a zero-valued loss anchored
+                    # to the model output so gradients are zero but reduce-scatter still runs.
                     if response_mask.sum() == 0:
+                        dummy_loss = 0.0 * log_probs.sum() / gradient_accumulation
+                        dummy_loss.backward()
+                        del log_probs
                         continue
                     entropy_loss = -VF.masked_mean(log_probs, response_mask)
 
