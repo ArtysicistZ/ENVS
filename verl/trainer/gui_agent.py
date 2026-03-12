@@ -1029,6 +1029,10 @@ class RemoteEnvWorker:
     system_prompt = uitars_system_prompt
 
     def __init__(self, worker_idx, max_steps, config, remote_server_url: str):
+        import os
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
         self.worker_idx = worker_idx
         self.max_steps = max_steps
         self.config = config

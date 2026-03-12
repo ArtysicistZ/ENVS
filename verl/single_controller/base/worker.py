@@ -24,6 +24,7 @@ os.environ["NCCL_SOCKET_IFNAME"] = "^lo,docker0"
 os.environ["NCCL_DEBUG"] = "WARN"
 # Prevent HuggingFace Hub API calls (avoids 429 rate limiting with many Ray workers).
 os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 import socket
 from dataclasses import dataclass

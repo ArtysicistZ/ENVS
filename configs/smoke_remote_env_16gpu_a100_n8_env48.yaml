@@ -12,8 +12,8 @@
 #   3) Run: python -m verl.trainer.main config=configs/smoke_remote_env_16gpu_a100_n8_env48.yaml
 
 data:
-  train_files: OSWorld/evaluation_examples/test_subset32.json
-  val_files: OSWorld/evaluation_examples/test_subset32.json
+  train_files: OSWorld/evaluation_examples/test_subset32_noproxy.json
+  val_files: OSWorld/evaluation_examples/test_subset32_noproxy.json
   prompt_key: instruction
   answer_key: ""
   image_key: images
@@ -100,7 +100,7 @@ env:
 
 trainer:
   total_episodes: 10
-  logger: ["console", "wandb"]
+  logger: ["console"]
   project_name: arpo-smoke-test
   experiment_name: uitars_7b_16xa100_n8_env48_48tasks
   n_gpus_per_node: 8
