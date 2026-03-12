@@ -10,8 +10,8 @@
 #   2) Run: python -m verl.trainer.main config=configs/smoke_remote_env_8gpu_a100_n8_env32.yaml
 
 data:
-  train_files: OSWorld/evaluation_examples/test_subset32.json
-  val_files: OSWorld/evaluation_examples/test_subset32.json
+  train_files: OSWorld/evaluation_examples/test_subset32_noproxy.json
+  val_files: OSWorld/evaluation_examples/test_subset32_noproxy.json
   prompt_key: instruction
   answer_key: ""
   image_key: images

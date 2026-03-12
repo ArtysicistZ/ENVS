@@ -1000,7 +1000,7 @@ class ContainerHealthMonitor:
                     env = slot.env
                     ip_refreshed = False
                     try:
-                        new_ip_str = provider.get_ip_address(env.vm_path)
+                        new_ip_str = provider.get_ip_address(env.path_to_vm)
                         new_ip = new_ip_str.split(":")[0]
                         env.vm_ip = new_ip
                         env.controller.vm_ip = new_ip
@@ -1249,7 +1249,7 @@ def _env_reset_locked(slot_id: int, body: ResetRequest):
                     success = provider.recover_slot(slot_id)
                 if success:
                     # Refresh DesktopEnv controller IPs — the container has a new IP
-                    new_ip_str = provider.get_ip_address(env.vm_path)
+                    new_ip_str = provider.get_ip_address(env.path_to_vm)
                     new_ip = new_ip_str.split(":")[0]
                     env.vm_ip = new_ip
                     env.controller.vm_ip = new_ip
@@ -1889,7 +1889,7 @@ def health_recover(body: SlotRequest):
             # Refresh DesktopEnv controller IPs for the new container
             new_ip = None
             try:
-                new_ip_str = provider.get_ip_address(env.vm_path)
+                new_ip_str = provider.get_ip_address(env.path_to_vm)
                 new_ip = new_ip_str.split(":")[0]
                 env.vm_ip = new_ip
                 env.controller.vm_ip = new_ip
