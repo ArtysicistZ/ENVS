@@ -1002,16 +1002,27 @@ class RayPPOTrainer:
         slot_by_env_idx = {output["env_idx"]: slot for slot, output in enumerate(reset_outputs)}
         env_outputs = reset_outputs
 
+        done_slots = set()  # Track workers that finished and launched evaluate
         with _timer("gen", local_timing):
             for step_idx in range(self.config.env.max_steps):
-                is_done_stats = _ray_get_robust(
-                    [worker.is_done.remote() for worker in active_workers],
-                    timeout=30.0, fallback_fn=lambda _: True,
-                    label=f"chunk{chunk_idx+1}/is_done",
-                )
+                # Only check is_done on workers that haven't finished yet.
+                # Done workers have evaluate.remote() running on their single-threaded
+                # Ray actor; calling is_done.remote() would queue behind evaluate and
+                # block for up to 30s per remaining step iteration.
+                pending_workers = [(i, w) for i, w in enumerate(active_workers) if i not in done_slots]
+                if pending_workers:
+                    _, pending_worker_list = zip(*pending_workers)
+                    pending_is_done = _ray_get_robust(
+                        [w.is_done.remote() for w in pending_worker_list],
+                        timeout=30.0, fallback_fn=lambda _: True,
+                        label=f"chunk{chunk_idx+1}/is_done",
+                    )
+                    n_done_pending = sum(pending_is_done)
+                else:
+                    n_done_pending = 0
                 print(
                     f"[chunk={chunk_idx + 1}/{total_chunks}] step_idx: {step_idx}, "
-                    f"finished: {sum(is_done_stats)}/{len(is_done_stats)}"
+                    f"finished: {len(done_slots) + n_done_pending}/{len(active_workers)}"
                 )
 
                 _obs = next((x["obs_messages"] for x in env_outputs if x.get("obs_messages")), None)
@@ -1047,7 +1058,11 @@ class RayPPOTrainer:
 
                 if vllm_batch is None or not isinstance(vllm_batch, DataProto):
                     batch_skipped = True
-                    format_rewards = [0.0] * len(task_configs)
+                    # Only zero out format_rewards for workers that haven't finished yet.
+                    # Workers already in done_slots have valid accumulated rewards.
+                    for i in range(len(task_configs)):
+                        if i not in done_slots:
+                            format_rewards[i] = 0.0
                     _t = getattr(self, "_last_remote_fail_log", 0)
                     if _t == 0 or time.time() - _t >= 30:
                         print(
@@ -1100,8 +1115,15 @@ class RayPPOTrainer:
                     format_rewards[slot] += float(single_output.get("format_reward", 0.0))
                     if single_output["is_done"] and eval_results_objects[slot] is None:
                         eval_results_objects[slot] = active_workers[slot].evaluate.remote()
+                        done_slots.add(slot)
 
-                if env_outputs and all(single_output["is_done"] for single_output in env_outputs):
+                # Remove done workers from env_outputs so they are excluded from
+                # prepare_vllm_inputs_full, generate_sequences, and step.remote()
+                # on subsequent iterations.  This prevents queuing calls behind the
+                # running evaluate on the same single-threaded Ray actor.
+                env_outputs = [x for x in env_outputs if slot_by_env_idx[x["env_idx"]] not in done_slots]
+
+                if len(done_slots) >= len(active_workers) or not env_outputs:
                     break
 
         if not batch_skipped:
@@ -1114,11 +1136,27 @@ class RayPPOTrainer:
                 for slot in missing_eval_idx:
                     eval_results_objects[slot] = active_workers[slot].evaluate.remote()
 
+        # Launch get_train_dict on all workers BEFORE waiting on evaluate.
+        # Since evaluate and get_train_dict are methods on the same single-threaded
+        # Ray actor, get_train_dict queues behind evaluate on each actor.  By launching
+        # these futures now, each actor processes evaluate -> get_train_dict back-to-back
+        # with no driver round-trip in between.  This eliminates the old sequential wait
+        # pattern (wait eval -> launch get_train_dict -> wait get_train_dict).
+        train_dict_futures = [worker.get_train_dict.remote() for worker in active_workers]
+
+        _eval_timeout = float(os.environ.get("ROLLOUT_EVAL_TIMEOUT", "350"))
         with _timer("evaluate_env", local_timing):
             if batch_skipped:
+                # Collect real eval results for workers that already completed
+                # (in done_slots with valid ObjectRefs); default 0.0 for the rest.
                 eval_results = [0.0] * len(task_configs)
+                for slot in done_slots:
+                    if eval_results_objects[slot] is not None:
+                        try:
+                            eval_results[slot] = ray.get(eval_results_objects[slot], timeout=_eval_timeout)
+                        except Exception:
+                            eval_results[slot] = 0.0
             else:
-                _eval_timeout = float(os.environ.get("ROLLOUT_EVAL_TIMEOUT", "350"))
                 eval_results = _ray_get_robust(
                     eval_results_objects,
                     timeout=_eval_timeout,
@@ -1130,13 +1168,19 @@ class RayPPOTrainer:
             f"| eval_results: {eval_results} | format_rewards: {format_rewards}"
         )
 
+        # get_train_dict futures were launched before the eval wait above; by now each
+        # actor has finished evaluate -> get_train_dict sequentially.  This wait should
+        # be near-instant for workers whose evaluate completed during the eval wait.
+        # Timeout accounts for evaluate potentially still running on the actor (if eval
+        # timed out on the driver side, get_train_dict is still queued behind it).
+        _train_dict_timeout = float(os.environ.get("ROLLOUT_TRAIN_DICT_TIMEOUT", str(_eval_timeout + 60)))
         process_results = _ray_get_robust(
-            [worker.get_train_dict.remote() for worker in active_workers],
-            timeout=60.0,
+            train_dict_futures,
+            timeout=_train_dict_timeout,
             fallback_fn=lambda _: {
-                "input_ids": torch.zeros((1, 1), dtype=torch.int64),
-                "labels": torch.full((1, 1), -100, dtype=torch.int64),
-                "attention_mask": torch.zeros((1, 1), dtype=torch.int64),
+                "input_ids": torch.zeros((1,), dtype=torch.int64),
+                "labels": torch.full((1,), -100, dtype=torch.int64),
+                "attention_mask": torch.zeros((1,), dtype=torch.int64),
                 "position_ids": torch.zeros((3, 1), dtype=torch.int64),
             },
             label=f"chunk{chunk_idx+1}/get_train_dict",
