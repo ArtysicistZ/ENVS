@@ -3,7 +3,7 @@
 #   - num_envs=32 (32 VMs)
 #   - rollout.n=8 (8 rollouts per task, matching upstream paper)
 #   - rollout_batch_size=4 (32 envs / 8 rollouts = 4 tasks per chunk)
-#   - global_batch_size=32 (32 tasks × 8 rollouts = 256 samples → 8 mini-batches)
+#   - global_batch_size=4 (must match rollout_batch_size; ×n=8 → 32 samples per update → 4/GPU)
 #
 # Prerequisites:
 #   1) 32 remote env VMs running
@@ -15,7 +15,7 @@ data:
   prompt_key: instruction
   answer_key: ""
   image_key: images
-  max_prompt_length: 36000
+  max_prompt_length: 32000
   max_response_length: 1024
   rollout_batch_size: 4
   val_batch_size: -1
@@ -33,7 +33,7 @@ algorithm:
 
 worker:
   actor:
-    global_batch_size: 32
+    global_batch_size: 4
     micro_batch_size_per_device_for_update: 1
     micro_batch_size_per_device_for_experience: 1
     max_grad_norm: 1.0
@@ -68,8 +68,8 @@ worker:
     enforce_eager: false
     enable_chunked_prefill: false
     tensor_parallel_size: 1
-    limit_images: 10
-    max_num_batched_tokens: 38000
+    limit_images: 8
+    max_num_batched_tokens: 34000
     max_num_seqs: 4
     old_logprob_source: "recompute"
     val_override_config:

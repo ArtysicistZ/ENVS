@@ -301,16 +301,18 @@ class OSWorldTaskConfigDataset(Dataset):
     def __init__(
         self,
         data_path: str,
+        n_repeats: int = 1,
     ):
         self.data_path = os.path.abspath(data_path)
         with open(self.data_path, "r") as f:
             task_configs = json.load(f)
-        
+
         self.dataset = []
         for domain, task_config_list in task_configs.items():
             for task_config in task_config_list:
-                self.dataset.append((domain, task_config))
-    
+                for _ in range(n_repeats):
+                    self.dataset.append((domain, task_config))
+
     def __len__(self):
         return len(self.dataset)
 
@@ -422,7 +424,7 @@ class OSWorldDataset(Dataset, ImageProcessMixin):
         return row_dict
 
 import ray
-@ray.remote(num_cpus=1)
+@ray.remote(num_cpus=0)
 class GRPODatasetProcessor:
     def __init__(self, procosser, tokenizer, max_prompt_length=65000, truncation="right"):
         self.processor = procosser

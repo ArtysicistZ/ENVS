@@ -1,27 +1,25 @@
-# ARPO Smoke Test - 2×8 A100 80G (16 GPUs) + Remote AWS Env
-# Matches upstream JIA-Lab ARPO (osworld_full_arpo.sh) 2-node setup.
-#
-# Key differences vs 8-GPU config:
-#   - nnodes=2 → 16 GPUs across 2 VMs
-#   - global_batch_size=8 → upstream value (double of 8-GPU's 4)
-#   - gpu_memory_utilization=0.6 → upstream value (FSDP shards halved = more headroom)
-#   - max_num_batched_tokens=128000 → upstream value
+# ARPO Test - 8x A100 80G + 48 Remote Envs + n=8 + 48 tasks
+# Based on 8gpu_a100_n8_env32.yaml with:
+#   - num_envs=48 (48 VMs across 2 clusters, 24 each)
+#   - rollout.n=8 (8 rollouts per task, matching upstream paper)
+#   - rollout_batch_size=6 (48 envs / 8 rollouts = 6 tasks per chunk)
+#   - global_batch_size=6 (must match rollout_batch_size; ×n=8 → 48 samples per update → 6/GPU)
 #
 # Prerequisites:
-#   1) Ray cluster: head node `ray start --head --num-gpus=8`
-#                   worker node `ray start --address=<HEAD_IP>:6379 --num-gpus=8`
-#   2) AWS env server running: curl http://YOUR_AWS_IP:15001/health
-#   3) Run on head node: python -m verl.trainer.main config=configs/smoke_remote_env_16gpu_a100.yaml
+#   1) 48 remote env VMs running (24 per cluster on 2 machines)
+#   2) Run: python -m verl.trainer.main config=configs/8gpu_a100_n8_env48.yaml
+#   sudo -E /home/kevinzyz/yincheng/arpo/.venv/bin/python -m verl.trainer.main config=configs/8gpu_a100_n8_env48.yaml
+
 
 data:
-  train_files: OSWorld/evaluation_examples/test_smoke_4.json
-  val_files: OSWorld/evaluation_examples/test_smoke_4.json
+  train_files: OSWorld/evaluation_examples/test_subset32_noproxy.json
+  val_files: OSWorld/evaluation_examples/test_subset32_noproxy.json
   prompt_key: instruction
   answer_key: ""
   image_key: images
-  max_prompt_length: 64000
+  max_prompt_length: 32000
   max_response_length: 1024
-  rollout_batch_size: 1
+  rollout_batch_size: 6
   val_batch_size: -1
   shuffle: true
   seed: 1
@@ -37,7 +35,7 @@ algorithm:
 
 worker:
   actor:
-    global_batch_size: 8
+    global_batch_size: 6
     micro_batch_size_per_device_for_update: 1
     micro_batch_size_per_device_for_experience: 1
     max_grad_norm: 1.0
@@ -67,17 +65,14 @@ worker:
 
   rollout:
     temperature: 1.0
-    n: 2
-    # With 16 GPUs, FSDP shards are half the size (~0.875 GiB model + ~1.75 GiB optimizer
-    # per GPU vs ~1.75 + ~3.5 on 8 GPUs). This leaves ~3.5 GiB more headroom per GPU,
-    # so upstream's 0.6 is safe here.
-    gpu_memory_utilization: 0.6
+    n: 8
+    gpu_memory_utilization: 0.4
     enforce_eager: false
     enable_chunked_prefill: false
     tensor_parallel_size: 1
-    limit_images: 15
-    max_num_batched_tokens: 128000
-    max_num_seqs: 1
+    limit_images: 8
+    max_num_batched_tokens: 34000
+    max_num_seqs: 6
     old_logprob_source: "recompute"
     val_override_config:
       temperature: 0.5
@@ -96,15 +91,17 @@ worker:
     skip_special_tokens: true
 
 env:
-  num_envs: 1
+  num_envs: 48
   max_steps: 15
-  remote_server_url: "http://10.100.4.7:15001"
+  remote_server_urls:
+    - "http://10.100.4.7:15001"
+    - "http://10.100.4.6:15001"
 
 trainer:
   total_episodes: 10
   logger: ["console", "wandb"]
   project_name: arpo-smoke-test
-  experiment_name: uitars_7b_16xa100_remote_smoke
+  experiment_name: uitars_7b_8xa100_n8_env48_48tasks
   n_gpus_per_node: 8
-  nnodes: 2
+  nnodes: 1
   val_before_train: false

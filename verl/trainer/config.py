@@ -42,6 +42,7 @@ class DataConfig:
     max_response_length: int = 512
     rollout_batch_size: int = 512
     val_batch_size: int = -1
+    val_n_repeats: int = 1  # repeat each val task N times (for n=8 filtering runs)
     format_prompt: Optional[str] = None
     shuffle: bool = True
     seed: int = 1
@@ -83,6 +84,7 @@ class TrainerConfig:
     save_limit: int = -1
     save_checkpoint_path: Optional[str] = None
     load_checkpoint_path: Optional[str] = None
+    replay_data_path: Optional[str] = None  # path to pre-collected replay trajectories (.pt)
 
     def post_init(self):
         if self.save_checkpoint_path is None:
@@ -96,6 +98,7 @@ class EnvConfig:
     # Remote env (Mac/AWS): when set, EnvWorkers talk to this URL instead of local Docker.
     remote_server_url: Optional[str] = None
     remote_server_urls: Optional[list[str]] = None
+    remote_server_env_counts: Optional[list[int]] = None  # VMs per server; if set, distribute workers proportionally instead of round-robin
 
 @dataclass
 class PPOConfig:

@@ -370,8 +370,23 @@ class RayPPOTrainer:
         self._load_replay_data()
     
     def _load_replay_data(self):
-        data_path = None
-        self.replay = ReplayBuffer(data_path, 8)
+        self.replay = ReplayBuffer(None, 8)
+        replay_path = self.config.trainer.replay_data_path
+        if replay_path and os.path.exists(replay_path):
+            import torch as _torch
+            saved = _torch.load(replay_path, map_location="cpu", weights_only=False)
+            count = 0
+            for item in saved:
+                task_id = item["task_id"]
+                train_dict = item["train_dict"]
+                eval_result = item["eval_result"]
+                # Collate single item into DataProto
+                batch = collate_fn_dataproto([train_dict], pad_token_id=getattr(self.tokenizer, "pad_token_id", 0))
+                batch_proto = DataProto.from_single_dict(batch)
+                batch_proto.batch["eval_results"] = torch.tensor([eval_result], dtype=torch.float32)
+                self.replay.update_replay_buffer({"task_id": task_id}, batch_proto[0], eval_result)
+                count += 1
+            print(f"[replay] Loaded {count} trajectories for {len(self.replay.pos_dataset)} tasks from {replay_path}")
 
 
 
@@ -389,16 +404,27 @@ class RayPPOTrainer:
         )
 
         if remote_urls:
-            # Create num_envs workers, distributing across available URLs
-            # (round-robin). A single URL with multiple slots is the common case.
+            # Distribute workers across servers proportionally if env_counts given,
+            # otherwise round-robin.
+            env_counts = getattr(self.config.env, "remote_server_env_counts", None)
+            if env_counts and len(env_counts) == len(remote_urls):
+                assert sum(env_counts) >= num_envs, (
+                    f"Sum of remote_server_env_counts ({sum(env_counts)}) < num_envs ({num_envs})"
+                )
+                # Build URL assignment: first env_counts[0] workers → url[0], next env_counts[1] → url[1], ...
+                url_assignment = []
+                for url, count in zip(remote_urls, env_counts):
+                    url_assignment.extend([url] * count)
+            else:
+                url_assignment = [remote_urls[i % len(remote_urls)] for i in range(num_envs)]
+
             self.env_workers = []
             for i in range(num_envs):
-                remote_url = remote_urls[i % len(remote_urls)]
-                w = RemoteEnvWorker.options(name=f"remote_env_worker_{i}").remote(
-                    i, max_steps, self.config, remote_url
+                w = RemoteEnvWorker.options(name=f"remote_env_worker_{i}", num_cpus=0).remote(
+                    i, max_steps, self.config, url_assignment[i]
                 )
                 self.env_workers.append(w)
-            print(f"RemoteEnvWorker created (urls={remote_urls}), num_envs={num_envs}, total: {len(self.env_workers)}")
+            print(f"RemoteEnvWorker created (urls={remote_urls}, counts={env_counts}), num_envs={num_envs}, total: {len(self.env_workers)}")
         else:
             # Local Docker env workers pinned to nodes with docker resource
             all_res = ray.cluster_resources().keys()
@@ -452,6 +478,7 @@ class RayPPOTrainer:
 
         self.val_dataset = OSWorldTaskConfigDataset(
             data_path=self.config.data.val_files,
+            n_repeats=self.config.data.val_n_repeats,
         )
         # Val batch size = number of envs (env_workers not created yet; use config)
         remote_urls = normalize_remote_server_urls(
@@ -509,10 +536,29 @@ class RayPPOTrainer:
         # Lists to collect samples for the table
         sample_inputs, sample_outputs, sample_labels, sample_scores = [], [], [], []
         reward_metrics_lst = defaultdict(list)
-
         task_configs_total = []
         eval_results_total = []
-        for batch_dict in self.val_dataloader:
+
+        # --- Resume: load previous incremental results if they exist ---
+        skip_batches = 0
+        if self.config.trainer.val_only:
+            _resume_path = os.path.join(self.config.trainer.save_checkpoint_path, f"eval_results_at_{self.global_step}.json")
+            if os.path.exists(_resume_path) and os.path.getsize(_resume_path) > 0:
+                with open(_resume_path, 'r') as _f:
+                    _prev = json.load(_f)
+                if _prev:
+                    _completed_entries = sum(v["n_attempts"] for v in _prev.values())
+                    _batch_size = self.config.env.num_envs
+                    skip_batches = _completed_entries // _batch_size
+                    for _tid, _v in _prev.items():
+                        for _r in _v["results"]:
+                            task_configs_total.append({"task_id": _tid})
+                            eval_results_total.append(_r)
+                    print(f"[val] Resuming: found {len(_prev)} tasks ({_completed_entries} entries) from previous run, skipping {skip_batches} batches")
+
+        for batch_idx, batch_dict in enumerate(self.val_dataloader):
+            if batch_idx < skip_batches:
+                continue
             task_configs = batch_dict
             num_tasks = len(task_configs)
             assert num_tasks <= len(self.env_workers)
@@ -619,17 +665,49 @@ class RayPPOTrainer:
 
             reward_tensor_lst.append(reward_tensor)
 
-        # Store eval_results
+            # --- Incremental save after each batch (inference-only) ---
+            if self.config.trainer.val_only:
+                _inc_save_path = os.path.join(self.config.trainer.save_checkpoint_path, f"eval_results_at_{self.global_step}.json")
+                os.makedirs(os.path.dirname(_inc_save_path), exist_ok=True)
+                from collections import defaultdict as _dd
+                _rpt = _dd(list)
+                for _tc, _er in zip(task_configs_total, eval_results_total):
+                    _rpt[_tc['task_id']].append(_er)
+                _inc_dict = {}
+                for _tid, _res in _rpt.items():
+                    _ns = sum(1 for r in _res if r > 0.5)
+                    _inc_dict[_tid] = {"success_rate": _ns / len(_res), "n_success": _ns, "n_attempts": len(_res), "results": _res}
+                with open(_inc_save_path, 'w') as _f:
+                    json.dump(_inc_dict, _f, indent=4)
+                _done = len(_rpt)
+                _doable = sum(1 for v in _inc_dict.values() if v["n_success"] > 0)
+                print(f"[val] Batch done — {_done} tasks evaluated so far, {_doable} doable, saved to {_inc_save_path}")
+
+        # Store eval_results — aggregate duplicate task_ids (e.g. n=8 inference)
         save_path = os.path.join(self.config.trainer.save_checkpoint_path, f"eval_results_at_{self.global_step}.json")
-        save_dict = dict()
+        from collections import defaultdict as _defaultdict
+        results_per_task = _defaultdict(list)
         for task_config, eval_result in zip(task_configs_total, eval_results_total):
             task_id = task_config['task_id']
-            save_dict[task_id] = eval_result
+            results_per_task[task_id].append(eval_result)
 
-        if not os.path.exists(save_path):
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        save_dict = {}
+        for task_id, results in results_per_task.items():
+            n_attempts = len(results)
+            n_success = sum(1 for r in results if r > 0.5)
+            save_dict[task_id] = {
+                "success_rate": n_success / n_attempts,
+                "n_success": n_success,
+                "n_attempts": n_attempts,
+                "results": results,
+            }
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         with open(save_path, 'w') as f:
             json.dump(save_dict, f, indent=4)
+        print(f"[val] Saved eval results for {len(save_dict)} tasks to {save_path}")
+        doable = sum(1 for v in save_dict.values() if v["n_success"] > 0)
+        print(f"[val] Doable tasks (>=1 success): {doable}/{len(save_dict)}")
 
         self._maybe_log_val_generations(sample_inputs, sample_outputs, sample_labels, sample_scores)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
@@ -1633,14 +1711,19 @@ class RayPPOTrainer:
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
 
 
-                    # compute reward (eval_results = task success 0/1 from remote env.evaluate(); format_rewards = parse/step bonuses)
-                    # eval 0.0 is expected until the policy learns; format_reward gives signal for parse success and meaningful actions
+                    # compute reward — paper-style: r = r_task + r_format
+                    # r_task = eval_results (0 or 1), r_format = -1 if parse failure, 0 if valid
+                    # Reference: ARPO paper Section 4.2 (Reward Design)
                     with _timer("reward", timing_raw):
-                        # self.save_rollout_trajectories(action_batch_output, history_messages_global, eval_results_global, task_conf
-                        # Remote env now emits step-level format rewards across longer horizons (e.g., 32 steps).
-                        # Clip and downweight shaped reward so task success remains dominant.
-                        format_rewards_clipped = torch.clamp(batch.batch["format_rewards"], -1.0, 1.0)
-                        rewards = batch.batch["eval_results"] + 0.1 * format_rewards_clipped
+                        # Convert accumulated server format_rewards to binary paper-style:
+                        # negative accumulated value → had parse failures → -1; otherwise → 0
+                        raw_fmt = batch.batch["format_rewards"]
+                        format_rewards_clipped = torch.where(
+                            raw_fmt < -0.01,
+                            torch.tensor(-1.0, device=raw_fmt.device, dtype=raw_fmt.dtype),
+                            torch.tensor(0.0, device=raw_fmt.device, dtype=raw_fmt.dtype),
+                        )
+                        rewards = batch.batch["eval_results"] + format_rewards_clipped
                         # Guard against NaN/Inf from corrupt evaluator results — replace with 0.0
                         if not torch.isfinite(rewards).all():
                             nan_count = (~torch.isfinite(rewards)).sum().item()
