@@ -1,3 +1,4 @@
+import os
 import random
 import requests
 import logging
@@ -6,6 +7,9 @@ from typing import List, Dict, Optional
 from dataclasses import dataclass
 from threading import Lock
 import json
+
+import dotenv
+dotenv.load_dotenv()
 
 logger = logging.getLogger("desktopenv.providers.aws.ProxyPool")
 logger.setLevel(logging.INFO)
@@ -39,11 +43,22 @@ class ProxyPool:
                 proxy_configs = json.load(f)
                 
             for config in proxy_configs:
+                username = config.get('username')
+                password = config.get('password')
+                # Allow env var substitution: if value looks like a placeholder, read from env
+                if username and username.startswith('$'):
+                    username = os.getenv(username[1:], username)
+                elif not username or username == 'your_username':
+                    username = os.getenv('DATAIMPULSE_USERNAME', username)
+                if password and password.startswith('$'):
+                    password = os.getenv(password[1:], password)
+                elif not password or password == 'your_password':
+                    password = os.getenv('DATAIMPULSE_PASSWORD', password)
                 proxy = ProxyInfo(
                     host=config['host'],
                     port=config['port'],
-                    username=config.get('username'),
-                    password=config.get('password'),
+                    username=username,
+                    password=password,
                     protocol=config.get('protocol', 'http')
                 )
                 self.proxies.append(proxy)
