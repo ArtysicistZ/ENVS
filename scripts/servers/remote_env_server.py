@@ -566,7 +566,7 @@ def _repair_prediction_for_parser(prediction: str) -> tuple[str, str] | None:
         # Case 1: Missing Action: line but contains a recognizable action call.
         if "Action:" not in text:
             m = re.search(
-                r"\b(click|left_double|right_single|drag|hotkey|type|press|scroll|wait|finished|error_env)\s*\([^)]*\)?",
+                r"\b(click|left_double|right_single|drag|hotkey|type|press|scroll|wait|finished|error_env|fail)\s*\([^)]*\)?",
                 text,
                 re.DOTALL,
             )
@@ -1402,7 +1402,7 @@ def _env_step_locked(slot_id: int, body: StepRequest):
                 if pr["action_type"] == FINISH_WORD:
                     actions = ["DONE"]
                     break
-                if pr["action_type"] in (WAIT_WORD, ENV_FAIL_WORD, CALL_USER):
+                if pr["action_type"] in (WAIT_WORD, ENV_FAIL_WORD, CALL_USER, "fail"):
                     actions = ["WAIT"] if pr["action_type"] == WAIT_WORD else ["FAIL"]
                     break
             code = parsing_response_to_pyautogui_code(pr, obs_image_height, obs_image_width, False)
@@ -1412,7 +1412,7 @@ def _env_step_locked(slot_id: int, body: StepRequest):
         _KNOWN_ACTION_TYPES = {
             "hotkey", "press", "keyup", "keydown", "type", "drag", "select",
             "scroll", "click", "left_single", "left_double", "right_single", "hover",
-            FINISH_WORD, WAIT_WORD, ENV_FAIL_WORD, CALL_USER,
+            FINISH_WORD, WAIT_WORD, ENV_FAIL_WORD, CALL_USER, "fail",
         }
         unknown_types = [at for at in action_types if at not in _KNOWN_ACTION_TYPES]
         if unknown_types:

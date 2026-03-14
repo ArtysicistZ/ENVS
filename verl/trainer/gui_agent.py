@@ -38,6 +38,7 @@ type(content='xxx') # Use escape characters \\', \\\", and \\n in content part t
 scroll(start_box='<|box_start|>(x1,y1)<|box_end|>', direction='down or up or right or left')
 wait() #Sleep for 5s and take a screenshot to check for any changes.
 finished(content='xxx') # Use escape characters \\', \\", and \\n in content part to ensure we can parse the content in normal python string format.
+fail() # Use when you think the task is not feasible or cannot be completed.
 
 ## Note
 - Use English in `Thought` and `Action` part.
