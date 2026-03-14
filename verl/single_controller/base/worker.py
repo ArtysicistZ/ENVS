@@ -16,6 +16,16 @@ the class for Worker
 """
 
 import os
+
+# Force NCCL to use TCP sockets instead of InfiniBand for multi-node stability.
+# Must be set before any NCCL/torch.distributed import or initialization.
+os.environ["NCCL_IB_DISABLE"] = "1"
+os.environ["NCCL_SOCKET_IFNAME"] = "^lo,docker0"
+os.environ["NCCL_DEBUG"] = "WARN"
+# Prevent HuggingFace Hub API calls (avoids 429 rate limiting with many Ray workers).
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
 import socket
 from dataclasses import dataclass
 from typing import Tuple
@@ -111,6 +121,11 @@ class Worker(WorkerHelper):
         return instance
 
     def _configure_before_init(self, register_center_name: str, rank: int):
+        # Force NCCL to use TCP sockets instead of InfiniBand for multi-node stability
+        os.environ["NCCL_IB_DISABLE"] = "1"
+        os.environ["NCCL_SOCKET_IFNAME"] = "^lo,docker0"
+        os.environ.setdefault("NCCL_DEBUG", "INFO")
+
         assert isinstance(rank, int), f"rank must be int, instead of {type(rank)}"
 
         if rank == 0:
@@ -123,6 +138,11 @@ class Worker(WorkerHelper):
             os.environ.update(rank_zero_info)
 
     def __init__(self, cuda_visible_devices=None) -> None:
+        # Force NCCL to use TCP sockets instead of InfiniBand for multi-node stability
+        os.environ["NCCL_IB_DISABLE"] = "1"
+        os.environ["NCCL_SOCKET_IFNAME"] = "^lo,docker0"
+        os.environ.setdefault("NCCL_DEBUG", "INFO")
+
         # construct a meta from envrionment variable. Note that the import must be inside the class because it is executed remotely
         world_size = int(os.getenv("WORLD_SIZE"))
         rank = int(os.getenv("RANK"))

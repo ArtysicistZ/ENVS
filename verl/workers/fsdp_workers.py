@@ -98,12 +98,16 @@ class FSDPWorker(Worker):
         self.role = role
 
         if not dist.is_initialized():
-            # Pin each rank to its GPU so NCCL doesn't guess (avoids hang/OOM on heterogeneous mapping)
+            # Force NCCL to use TCP sockets instead of InfiniBand for multi-node stability
+            os.environ["NCCL_IB_DISABLE"] = "1"
+            os.environ["NCCL_SOCKET_IFNAME"] = "^lo,docker0"
+
+            # Pin each rank to its GPU
             local_rank = int(
                 os.environ.get("LOCAL_RANK", os.environ.get("RAY_LOCAL_RANK", os.environ.get("RANK", "0"))))
-            # PyTorch 2.x init_process_group expects device_id as torch.device, not int
-            device_id = torch.device("cuda", local_rank)
-            dist.init_process_group(backend="nccl", device_id=device_id)
+            torch.cuda.set_device(local_rank)
+            # Do NOT pass device_id — eager connect is incompatible with NCCL over TCP sockets
+            dist.init_process_group(backend="nccl")
 
         # improve numerical stability
         torch.backends.cuda.matmul.allow_tf32 = False

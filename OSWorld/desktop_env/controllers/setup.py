@@ -73,7 +73,7 @@ class SetupController:
         retry = 0
         while retry < MAX_RETRIES:
             try:
-                _ = requests.get(self.http_server + "/terminal")
+                _ = requests.get(self.http_server + "/terminal", timeout=30)
                 break
             except:
                 time.sleep(5)
@@ -282,7 +282,7 @@ class SetupController:
 
         # send request to server to change wallpaper
         try:
-            response = requests.post(self.http_server + "/setup" + "/change_wallpaper", headers=headers, data=payload)
+            response = requests.post(self.http_server + "/setup" + "/change_wallpaper", headers=headers, data=payload, timeout=60)
             if response.status_code == 200:
                 logger.info("Command executed successfully: %s", response.text)
             else:
@@ -306,7 +306,7 @@ class SetupController:
         try:
             # The server-side call is now blocking and can take time.
             # We set a timeout that is slightly longer than the server's timeout (1800s).
-            response = requests.post(self.http_server + "/setup" + "/open_file", headers=headers, data=payload, timeout=1810)
+            response = requests.post(self.http_server + "/setup" + "/open_file", headers=headers, data=payload, timeout=120)
             response.raise_for_status()  # This will raise an exception for 4xx and 5xx status codes
             logger.info("Command executed successfully: %s", response.text)
         except requests.exceptions.RequestException as e:
@@ -329,7 +329,7 @@ class SetupController:
 
         try:
             logger.info("REQUEST ADDRESS: %s", self.http_server + "/setup" + "/launch")
-            response = requests.post(self.http_server + "/setup" + "/launch", headers=headers, data=payload)
+            response = requests.post(self.http_server + "/setup" + "/launch", headers=headers, data=payload, timeout=60)
             if response.status_code == 200:
                 logger.info("Command executed successfully: %s", response.text)
             else:
@@ -351,6 +351,7 @@ class SetupController:
         until: Dict[str, Any] = until or {}
         terminates: bool = False
         nb_failings = 0
+        max_iterations = 100  # safety limit: prevent infinite loops when 'until' never matches
 
         def replace_screen_env_in_command(command):
             password = self.client_password
@@ -380,9 +381,15 @@ class SetupController:
         payload = json.dumps({"command": command, "shell": shell})
         headers = {"Content-Type": "application/json"}
 
+        iteration_count = 0
         while not terminates:
+            iteration_count += 1
+            if iteration_count > max_iterations:
+                logger.error("_execute_setup exceeded max_iterations=%d for command=%s with until=%s — breaking",
+                             max_iterations, command, until)
+                break
             try:
-                response = requests.post(self.http_server + "/setup" + "/execute", headers=headers, data=payload)
+                response = requests.post(self.http_server + "/setup" + "/execute", headers=headers, data=payload, timeout=60)
                 if response.status_code == 200:
                     results: Dict[str, str] = response.json()
                     if stdout:
@@ -497,7 +504,7 @@ class SetupController:
 
         # send request to server to open file
         try:
-            response = requests.post(self.http_server + "/setup" + "/activate_window", headers=headers, data=payload)
+            response = requests.post(self.http_server + "/setup" + "/activate_window", headers=headers, data=payload, timeout=60)
             if response.status_code == 200:
                 logger.info("Command executed successfully: %s", response.text)
             else:
@@ -516,7 +523,7 @@ class SetupController:
 
         # send request to server to open file
         try:
-            response = requests.post(self.http_server + "/setup" + "/close_window", headers=headers, data=payload)
+            response = requests.post(self.http_server + "/setup" + "/close_window", headers=headers, data=payload, timeout=60)
             if response.status_code == 200:
                 logger.info("Command executed successfully: %s", response.text)
             else:
@@ -533,7 +540,7 @@ class SetupController:
         retry = 0
         while retry < MAX_RETRIES:
             try:
-                _ = requests.get(self.http_server + "/terminal")
+                _ = requests.get(self.http_server + "/terminal", timeout=30)
                 break
             except:
                 time.sleep(5)
@@ -750,7 +757,7 @@ class SetupController:
                 params = config['args'][oid]
                 url = params['url']
                 with tempfile.NamedTemporaryFile(mode='wb', delete=False) as tmpf:
-                    response = requests.get(url, stream=True)
+                    response = requests.get(url, stream=True, timeout=120)
                     response.raise_for_status()
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
@@ -835,7 +842,7 @@ class SetupController:
             e = None
             for i in range(max_retries):
                 try:
-                    response = requests.get(db_url, stream=True)
+                    response = requests.get(db_url, stream=True, timeout=120)
                     response.raise_for_status()
 
                     with open(cache_path, 'wb') as f:
@@ -929,7 +936,7 @@ else:
             # send request to server to upload file
             try:
                 logger.debug("REQUEST ADDRESS: %s", self.http_server + "/setup" + "/upload")
-                response = requests.post(self.http_server + "/setup" + "/upload", headers=headers, data=form)
+                response = requests.post(self.http_server + "/setup" + "/upload", headers=headers, data=form, timeout=120)
                 if response.status_code == 200:
                     logger.info("Command executed successfully: %s", response.text)
                 else:

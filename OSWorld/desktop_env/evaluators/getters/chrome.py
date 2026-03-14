@@ -98,101 +98,111 @@ def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
                 payload = json.dumps({"command": command, "shell": False})
                 headers = {"Content-Type": "application/json"}
                 #requests.post("http://" + host + ":" + server_port + "/setup" + "/launch", headers=headers, data=payload)
-                requests.post(backend_url + "/setup" + "/launch", headers=headers, data=payload)
+                requests.post(backend_url + "/setup" + "/launch", headers=headers, data=payload, timeout=15)
                 time.sleep(5)
                 browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                 logger.info(f"[INFO_FROM_WEBSITE] Successfully connected to new Chrome instance")
 
             page = browser.contexts[0].new_page()
-            logger.info(f"[INFO_FROM_WEBSITE] Created new page, navigating to: {config['url']}")
-            
-            page.goto(config["url"])
-            page.wait_for_load_state('load')
-            
-            # 记录页面加载完成后的信息
-            logger.info(f"[INFO_FROM_WEBSITE] Page loaded successfully")
-            logger.info(f"[INFO_FROM_WEBSITE] Page title: '{page.title()}'")
-            logger.info(f"[INFO_FROM_WEBSITE] Current URL: '{page.url}'")
-            
-            infos = []
-            for idx, info_dict in enumerate(config.get('infos', [])):
-                logger.info(f"[INFO_FROM_WEBSITE] Processing info operation {idx + 1}/{len(config.get('infos', []))}")
-                logger.debug(f"[INFO_FROM_WEBSITE] Info config: {info_dict}")
-                
-                if page.url != config["url"]:
-                    logger.info(f"[INFO_FROM_WEBSITE] Page URL changed, navigating back to: {config['url']}")
-                    page.goto(config["url"])
-                    page.wait_for_load_state('load')
-                    logger.info(f"[INFO_FROM_WEBSITE] Back to original page")
-                
-                action = info_dict.get('action', 'inner_text')
-                selector = info_dict.get('selector')
-                logger.info(f"[INFO_FROM_WEBSITE] Action: {action}, Selector: {selector}")
-                
-                if action == "inner_text":
-                    logger.debug(f"[INFO_FROM_WEBSITE] Waiting for element with selector: {selector}")
-                    ele = page.wait_for_selector(info_dict['selector'], state='attached', timeout=10000)
-                    extracted_text = ele.inner_text()
-                    logger.info(f"[INFO_FROM_WEBSITE] Successfully extracted inner_text: '{extracted_text}'")
-                    infos.append(extracted_text)
-                    
-                elif action == "attribute":
-                    attribute = info_dict.get('attribute')
-                    logger.debug(f"[INFO_FROM_WEBSITE] Waiting for element with selector: {selector}")
-                    logger.debug(f"[INFO_FROM_WEBSITE] Extracting attribute: {attribute}")
-                    ele = page.wait_for_selector(info_dict['selector'], state='attached', timeout=10000)
-                    extracted_attr = ele.get_attribute(info_dict['attribute'])
-                    logger.info(f"[INFO_FROM_WEBSITE] Successfully extracted attribute '{attribute}': '{extracted_attr}'")
-                    infos.append(extracted_attr)
-                    
-                elif action == 'click_and_inner_text':
-                    logger.debug(f"[INFO_FROM_WEBSITE] Performing click_and_inner_text with {len(info_dict['selector'])} selectors")
-                    for idx, sel in enumerate(info_dict['selector']):
-                        logger.debug(f"[INFO_FROM_WEBSITE] Processing selector {idx + 1}/{len(info_dict['selector'])}: {sel}")
-                        if idx != len(info_dict['selector']) - 1:
-                            logger.debug(f"[INFO_FROM_WEBSITE] Clicking element with selector: {sel}")
-                            link = page.wait_for_selector(sel, state='attached', timeout=10000)
-                            link.click()
-                            page.wait_for_load_state('load')
-                            logger.info(f"[INFO_FROM_WEBSITE] Successfully clicked element, page loaded")
-                            logger.debug(f"[INFO_FROM_WEBSITE] New page URL: {page.url}")
-                        else:
-                            logger.debug(f"[INFO_FROM_WEBSITE] Extracting inner_text from final element: {sel}")
-                            ele = page.wait_for_selector(sel, state='attached', timeout=10000)
-                            extracted_text = ele.inner_text()
-                            logger.info(f"[INFO_FROM_WEBSITE] Successfully extracted inner_text after clicks: '{extracted_text}'")
-                            infos.append(extracted_text)
-                            
-                elif action == 'click_and_attribute':
-                    attribute = info_dict.get('attribute')
-                    logger.debug(f"[INFO_FROM_WEBSITE] Performing click_and_attribute with {len(info_dict['selector'])} selectors")
-                    logger.debug(f"[INFO_FROM_WEBSITE] Target attribute: {attribute}")
-                    for idx, sel in enumerate(info_dict['selector']):
-                        logger.debug(f"[INFO_FROM_WEBSITE] Processing selector {idx + 1}/{len(info_dict['selector'])}: {sel}")
-                        if idx != len(info_dict['selector']) - 1:
-                            logger.debug(f"[INFO_FROM_WEBSITE] Clicking element with selector: {sel}")
-                            link = page.wait_for_selector(sel, state='attached', timeout=10000)
-                            link.click()
-                            page.wait_for_load_state('load')
-                            logger.info(f"[INFO_FROM_WEBSITE] Successfully clicked element, page loaded")
-                            logger.debug(f"[INFO_FROM_WEBSITE] New page URL: {page.url}")
-                        else:
-                            logger.debug(f"[INFO_FROM_WEBSITE] Extracting attribute from final element: {sel}")
-                            ele = page.wait_for_selector(sel, state='attached')
-                            extracted_attr = ele.get_attribute(info_dict['attribute'])
-                            logger.info(f"[INFO_FROM_WEBSITE] Successfully extracted attribute '{attribute}' after clicks: '{extracted_attr}'")
-                            infos.append(extracted_attr)
-                else:
-                    logger.error(f"[INFO_FROM_WEBSITE] Unsupported action: {action}")
-                    raise NotImplementedError(f'The action {action} is not supported yet.')
-                
-                logger.info(f"[INFO_FROM_WEBSITE] Completed info operation {idx + 1}")
-            
-            # 记录最终提取的所有信息
-            logger.info(f"[INFO_FROM_WEBSITE] All operations completed successfully")
-            logger.info(f"[INFO_FROM_WEBSITE] Total extracted information count: {len(infos)}")
-            logger.info(f"[INFO_FROM_WEBSITE] Final extracted information: {infos}")
-            
+            try:
+                logger.info(f"[INFO_FROM_WEBSITE] Created new page, navigating to: {config['url']}")
+
+                page.goto(config["url"], timeout=30000)
+                page.wait_for_load_state('load', timeout=30000)
+
+                # 记录页面加载完成后的信息
+                logger.info(f"[INFO_FROM_WEBSITE] Page loaded successfully")
+                logger.info(f"[INFO_FROM_WEBSITE] Page title: '{page.title()}'")
+                logger.info(f"[INFO_FROM_WEBSITE] Current URL: '{page.url}'")
+
+                infos = []
+                for idx, info_dict in enumerate(config.get('infos', [])):
+                    logger.info(f"[INFO_FROM_WEBSITE] Processing info operation {idx + 1}/{len(config.get('infos', []))}")
+                    logger.debug(f"[INFO_FROM_WEBSITE] Info config: {info_dict}")
+
+                    if page.url != config["url"]:
+                        logger.info(f"[INFO_FROM_WEBSITE] Page URL changed, navigating back to: {config['url']}")
+                        page.goto(config["url"], timeout=30000)
+                        page.wait_for_load_state('load', timeout=30000)
+                        logger.info(f"[INFO_FROM_WEBSITE] Back to original page")
+
+                    action = info_dict.get('action', 'inner_text')
+                    selector = info_dict.get('selector')
+                    logger.info(f"[INFO_FROM_WEBSITE] Action: {action}, Selector: {selector}")
+
+                    if action == "inner_text":
+                        logger.debug(f"[INFO_FROM_WEBSITE] Waiting for element with selector: {selector}")
+                        ele = page.wait_for_selector(info_dict['selector'], state='attached', timeout=10000)
+                        extracted_text = ele.inner_text()
+                        logger.info(f"[INFO_FROM_WEBSITE] Successfully extracted inner_text: '{extracted_text}'")
+                        infos.append(extracted_text)
+
+                    elif action == "attribute":
+                        attribute = info_dict.get('attribute')
+                        logger.debug(f"[INFO_FROM_WEBSITE] Waiting for element with selector: {selector}")
+                        logger.debug(f"[INFO_FROM_WEBSITE] Extracting attribute: {attribute}")
+                        ele = page.wait_for_selector(info_dict['selector'], state='attached', timeout=10000)
+                        extracted_attr = ele.get_attribute(info_dict['attribute'])
+                        logger.info(f"[INFO_FROM_WEBSITE] Successfully extracted attribute '{attribute}': '{extracted_attr}'")
+                        infos.append(extracted_attr)
+
+                    elif action == 'click_and_inner_text':
+                        logger.debug(f"[INFO_FROM_WEBSITE] Performing click_and_inner_text with {len(info_dict['selector'])} selectors")
+                        for idx, sel in enumerate(info_dict['selector']):
+                            logger.debug(f"[INFO_FROM_WEBSITE] Processing selector {idx + 1}/{len(info_dict['selector'])}: {sel}")
+                            if idx != len(info_dict['selector']) - 1:
+                                logger.debug(f"[INFO_FROM_WEBSITE] Clicking element with selector: {sel}")
+                                link = page.wait_for_selector(sel, state='attached', timeout=10000)
+                                link.click()
+                                page.wait_for_load_state('load')
+                                logger.info(f"[INFO_FROM_WEBSITE] Successfully clicked element, page loaded")
+                                logger.debug(f"[INFO_FROM_WEBSITE] New page URL: {page.url}")
+                            else:
+                                logger.debug(f"[INFO_FROM_WEBSITE] Extracting inner_text from final element: {sel}")
+                                ele = page.wait_for_selector(sel, state='attached', timeout=10000)
+                                extracted_text = ele.inner_text()
+                                logger.info(f"[INFO_FROM_WEBSITE] Successfully extracted inner_text after clicks: '{extracted_text}'")
+                                infos.append(extracted_text)
+
+                    elif action == 'click_and_attribute':
+                        attribute = info_dict.get('attribute')
+                        logger.debug(f"[INFO_FROM_WEBSITE] Performing click_and_attribute with {len(info_dict['selector'])} selectors")
+                        logger.debug(f"[INFO_FROM_WEBSITE] Target attribute: {attribute}")
+                        for idx, sel in enumerate(info_dict['selector']):
+                            logger.debug(f"[INFO_FROM_WEBSITE] Processing selector {idx + 1}/{len(info_dict['selector'])}: {sel}")
+                            if idx != len(info_dict['selector']) - 1:
+                                logger.debug(f"[INFO_FROM_WEBSITE] Clicking element with selector: {sel}")
+                                link = page.wait_for_selector(sel, state='attached', timeout=10000)
+                                link.click()
+                                page.wait_for_load_state('load')
+                                logger.info(f"[INFO_FROM_WEBSITE] Successfully clicked element, page loaded")
+                                logger.debug(f"[INFO_FROM_WEBSITE] New page URL: {page.url}")
+                            else:
+                                logger.debug(f"[INFO_FROM_WEBSITE] Extracting attribute from final element: {sel}")
+                                ele = page.wait_for_selector(sel, state='attached')
+                                extracted_attr = ele.get_attribute(info_dict['attribute'])
+                                logger.info(f"[INFO_FROM_WEBSITE] Successfully extracted attribute '{attribute}' after clicks: '{extracted_attr}'")
+                                infos.append(extracted_attr)
+                    else:
+                        logger.error(f"[INFO_FROM_WEBSITE] Unsupported action: {action}")
+                        raise NotImplementedError(f'The action {action} is not supported yet.')
+
+                    logger.info(f"[INFO_FROM_WEBSITE] Completed info operation {idx + 1}")
+
+                # 记录最终提取的所有信息
+                logger.info(f"[INFO_FROM_WEBSITE] All operations completed successfully")
+                logger.info(f"[INFO_FROM_WEBSITE] Total extracted information count: {len(infos)}")
+                logger.info(f"[INFO_FROM_WEBSITE] Final extracted information: {infos}")
+            finally:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+
         return infos
     except Exception as e:
         logger.error(f'[INFO_FROM_WEBSITE] ERROR: Failed to obtain information from website: {config.get("url", "N/A")}')
@@ -266,18 +276,22 @@ def get_cookie_data(env, config: Dict[str, str]):
 
     try:
         content = env.controller.get_file(chrome_cookie_file_path)
+        if content is None:
+            logger.error("get_cookie_data: get_file returned None for %s", chrome_cookie_file_path)
+            return None
         _path = os.path.join(env.cache_dir, config["dest"])
 
         with open(_path, "wb") as f:
             f.write(content)
 
         conn = sqlite3.connect(_path)
-        cursor = conn.cursor()
-
-        # Query to check for OpenAI cookies
-        cursor.execute("SELECT * FROM cookies")
-        cookies = cursor.fetchall()
-        return cookies
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM cookies")
+            cookies = cursor.fetchall()
+            return cookies
+        finally:
+            conn.close()
     except Exception as e:
         logger.error(f"Error: {e}")
         return None
@@ -307,18 +321,22 @@ def get_history(env, config: Dict[str, str]):
 
     try:
         content = env.controller.get_file(chrome_history_path)
+        if content is None:
+            logger.error("get_history: get_file returned None for %s", chrome_history_path)
+            return None
         _path = os.path.join(env.cache_dir, config["dest"])
 
         with open(_path, "wb") as f:
             f.write(content)
 
         conn = sqlite3.connect(_path)
-        cursor = conn.cursor()
-
-        # Query to check for OpenAI cookies
-        cursor.execute("SELECT url, title, last_visit_time FROM urls")
-        history_items = cursor.fetchall()
-        return history_items
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT url, title, last_visit_time FROM urls")
+            history_items = cursor.fetchall()
+            return history_items
+        finally:
+            conn.close()
     except Exception as e:
         logger.error(f"Error: {e}")
         return None
@@ -499,45 +517,47 @@ def get_bookmarks(env, config: Dict[str, str]):
     return bookmarks
 
 
-# todo: move this to the main.py
 def get_extensions_installed_from_shop(env, config: Dict[str, str]):
-    """Find the Chrome extensions directory based on the operating system."""
+    """Find Chrome extensions on the VM by executing commands remotely."""
     os_type = _get_platform(env)
-    if os_type == 'Windows':
-        chrome_extension_dir = env.controller.execute_python_command(
-            """os.path.expanduser('~') + '\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Extensions\\'""")[
-            'output'].strip().split('\n')[-1]
-    elif os_type == 'Darwin':  # macOS
-        chrome_extension_dir = env.controller.execute_python_command(
-            """os.path.expanduser('~') + '/Library/Application Support/Google/Chrome/Default/Extensions/'""")[
-            'output'].strip().split('\n')[-1]
-    elif os_type == 'Linux':
+    if os_type == 'Linux':
         if "arm" in platform.machine():
-            chrome_extension_dir = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Extensions/'))")[
-                'output'].strip().split('\n')[-1]
+            ext_dir = "~/snap/chromium/common/chromium/Default/Extensions"
         else:
-            chrome_extension_dir = env.controller.execute_python_command(
-                """os.path.expanduser('~') + '/.config/google-chrome/Default/Extensions/'""")['output'].strip().split('\n')[-1]
+            ext_dir = "~/.config/google-chrome/Default/Extensions"
+    elif os_type == 'Darwin':
+        ext_dir = "~/Library/Application Support/Google/Chrome/Default/Extensions"
+    elif os_type == 'Windows':
+        ext_dir = "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Extensions"
     else:
         raise Exception('Unsupported operating system')
 
-    manifests = []
-    for extension_id in os.listdir(chrome_extension_dir):
-        extension_path = os.path.join(chrome_extension_dir, extension_id)
-        if os.path.isdir(extension_path):
-            # Iterate through version-named subdirectories
-            for version_dir in os.listdir(extension_path):
-                version_path = os.path.join(extension_path, version_dir)
-                manifest_path = os.path.join(version_path, 'manifest.json')
-                if os.path.isfile(manifest_path):
-                    with open(manifest_path, 'r') as file:
-                        try:
-                            manifest = json.load(file)
-                            manifests.append(manifest)
-                        except json.JSONDecodeError:
-                            logger.error(f"Error reading {manifest_path}")
-    return manifests
+    # Run a Python script ON THE VM to list extensions and read their manifests
+    script = f"""
+import os, json, glob
+ext_dir = os.path.expanduser({ext_dir!r})
+manifests = []
+if os.path.isdir(ext_dir):
+    for ext_id in os.listdir(ext_dir):
+        ext_path = os.path.join(ext_dir, ext_id)
+        if os.path.isdir(ext_path):
+            for ver_dir in os.listdir(ext_path):
+                mf = os.path.join(ext_path, ver_dir, 'manifest.json')
+                if os.path.isfile(mf):
+                    try:
+                        with open(mf) as f:
+                            manifests.append(json.load(f))
+                    except Exception:
+                        pass
+print(json.dumps(manifests))
+"""
+    try:
+        result = env.controller.execute_python_command(script)
+        output = result['output'].strip().split('\n')[-1]
+        return json.loads(output)
+    except Exception as e:
+        logger.error(f"get_extensions_installed_from_shop error: {e}")
+        return []
 
 
 # The following ones require Playwright to be installed on the target machine, and the chrome needs to be pre-config on
@@ -584,7 +604,7 @@ def get_page_info(env, config: Dict[str, str]):
                         f"http://{host}:{server_port}/setup/launch",
                         headers=headers,
                         data=payload,
-                        timeout=30,
+                        timeout=15,
                     )
                     time.sleep(5)
 
@@ -693,7 +713,7 @@ def get_open_tabs_info(env, config: Dict[str, str]):
                         ], "shell": False})
 
                     headers = {"Content-Type": "application/json"}
-                    requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload)
+                    requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload, timeout=15)
                     time.sleep(5)
                     try:
                         browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
@@ -865,16 +885,16 @@ def get_active_tab_info(env, config: Dict[str, str]):
                     logger.info(f"[ACTIVE_TAB_INFO] Navigating to URL: {active_tab_url}")
                     page.goto(active_tab_url, wait_until='load', timeout=timeout_ms)
                     page.wait_for_load_state('load', timeout=timeout_ms)  # Wait for the 'load' event to complete
-                    
+
                     active_tab_info = {
                         'title': page.title(),
                         'url': page.url,
                         'content': page.content()  # get the HTML content of the page
                     }
-                    
+
                     logger.info(f"[ACTIVE_TAB_INFO] Successfully loaded page. Title: '{active_tab_info['title']}'")
                     logger.info(f"[ACTIVE_TAB_INFO] Current URL: '{active_tab_info['url']}'")
-                    
+
                 except TimeoutError:
                     logger.warning(f"[ACTIVE_TAB_INFO] Page load timeout for URL: {active_tab_url}")
                     active_tab_info = {
@@ -884,9 +904,17 @@ def get_active_tab_info(env, config: Dict[str, str]):
                     }
                 except Exception as e:
                     logger.error(f"[ACTIVE_TAB_INFO] Failed to go to the target URL page: {e}")
-                    return None
+                    active_tab_info = None
+                finally:
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
 
-                browser.close()
                 return active_tab_info
                 
         except Exception as e:
@@ -952,7 +980,7 @@ def get_pdf_from_url(env, config: Dict[str, str]) -> str:
                         ], "shell": False})
 
                     headers = {"Content-Type": "application/json"}
-                    requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload)
+                    requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload, timeout=15)
                     time.sleep(5)
                     browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[PDF_FROM_URL] Successfully connected to new Chrome instance")
@@ -1055,7 +1083,7 @@ def get_chrome_saved_address(env, config: Dict[str, str]):
                         ], "shell": False})
 
                     headers = {"Content-Type": "application/json"}
-                    requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload)
+                    requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload, timeout=15)
                     time.sleep(5)
                     browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[CHROME_SAVED_ADDRESS] Successfully connected to new Chrome instance")
@@ -1171,7 +1199,7 @@ def get_number_of_search_results(env, config: Dict[str, str]):
                         ], "shell": False})
 
                     headers = {"Content-Type": "application/json"}
-                    requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload)
+                    requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload, timeout=15)
                     time.sleep(5)
                     browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[SEARCH_RESULTS] Successfully connected to new Chrome instance")
@@ -1340,7 +1368,7 @@ def get_enable_enhanced_safety_browsing(env, config: Dict[str, str]):
         return "true" if if_enable_do_not_track else "false"
     except Exception as e:
         logger.error(f"Error: {e}")
-        return "Google"
+        return "false"
 
 
 def get_enable_safe_browsing(env, config: Dict[str, str]):
@@ -1412,7 +1440,7 @@ def get_new_startup_page(env, config: Dict[str, str]):
             return "true" if if_enable_do_not_track == 5 else "false"
     except Exception as e:
         logger.error(f"Error: {e}")
-        return "Google"
+        return "false"
 
 
 def get_find_unpacked_extension_path(env, config: Dict[str, str]):
@@ -1520,7 +1548,7 @@ def get_data_delete_automacally(env, config: Dict[str, str]):
         return "true" if data_delete_state is not None else "false"
     except Exception as e:
         logger.error(f"Error: {e}")
-        return "Google"
+        return "false"
 
 
 def get_active_tab_html_parse(env, config: Dict[str, Any]):
@@ -1588,7 +1616,7 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                 ], "shell": False})
 
             headers = {"Content-Type": "application/json"}
-            requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload)
+            requests.post(f"http://{host}:{server_port}/setup/launch", headers=headers, data=payload, timeout=15)
             time.sleep(5)
             browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
         target_page = None
@@ -1642,6 +1670,10 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                     except Exception as e:
                         logger.error(f"[DEBUG] - Tab URL: [Unable to get URL: {e}]")
             logger.error(f"[DEBUG] Expected URL: {active_tab_url}")
+            try:
+                browser.close()
+            except Exception:
+                pass
             return {}
 
         return_json = {}
@@ -1966,8 +1998,11 @@ def get_active_tab_html_parse(env, config: Dict[str, Any]):
                     if value.lower() not in return_json.keys():
                         return_json[value.lower()] = False
 
-        browser.close()
-        
+        try:
+            browser.close()
+        except Exception:
+            pass
+
         # DEBUG: Add logging for final result and check for None values
         logger.info(f"[DEBUG] get_active_tab_html_parse final result: {return_json}")
         
@@ -2049,7 +2084,7 @@ def get_gotoRecreationPage_and_get_html_content(env, config: Dict[str, Any]):
                     logger.info(f"[RECREATION_PAGE] Starting browser with command: {' '.join(command)}")
                     payload = json.dumps({"command": command, "shell": False})
                     headers = {"Content-Type": "application/json"}
-                    requests.post(backend_url + "/setup/launch", headers=headers, data=payload)
+                    requests.post(backend_url + "/setup/launch", headers=headers, data=payload, timeout=15)
                     time.sleep(8)  # Give more time for browser to start
                     browser = p.chromium.connect_over_cdp(remote_debugging_url, timeout=15000)
                     logger.info(f"[RECREATION_PAGE] Successfully connected to new Chrome instance")
