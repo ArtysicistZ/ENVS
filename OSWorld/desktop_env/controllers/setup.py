@@ -562,15 +562,18 @@ class SetupController:
         proxy_url = proxy_pool._format_proxy_url(current_proxy)
         logger.info(f"Setting up proxy: {current_proxy.host}:{current_proxy.port}")
         
-        # Configure system proxy environment variables  
+        # Configure system proxy environment variables
         proxy_commands = [
             f"echo '{client_password}' | sudo -S bash -c \"apt-get update\"", ## TODO: remove this line if ami is already updated
             f"echo '{client_password}' | sudo -S bash -c \"apt-get install -y tinyproxy\"", ## TODO: remove this line if tinyproxy is already installed
+            # Kill any existing tinyproxy before reconfiguring (soft reset doesn't stop it)
+            f"echo '{client_password}' | sudo -S pkill -f tinyproxy || true",
             f"echo '{client_password}' | sudo -S bash -c \"echo 'Port 18888' > /tmp/tinyproxy.conf\"",
             f"echo '{client_password}' | sudo -S bash -c \"echo 'Allow 127.0.0.1' >> /tmp/tinyproxy.conf\"",
             f"echo '{client_password}' | sudo -S bash -c \"echo 'Upstream http {current_proxy.username}:{current_proxy.password}@{current_proxy.host}:{current_proxy.port}' >> /tmp/tinyproxy.conf\"",
-            
-            # CML commands to set environment variables for proxy
+
+            # Set proxy env vars (remove old ones first to prevent bashrc duplication across soft resets)
+            f"sed -i '/^export http_proxy=/d; /^export https_proxy=/d; /^export HTTP_PROXY=/d; /^export HTTPS_PROXY=/d' ~/.bashrc",
             f"echo 'export http_proxy={proxy_url}' >> ~/.bashrc",
             f"echo 'export https_proxy={proxy_url}' >> ~/.bashrc",
             f"echo 'export HTTP_PROXY={proxy_url}' >> ~/.bashrc",
@@ -585,18 +588,22 @@ class SetupController:
                 logger.error(f"Failed to execute proxy setup command: {e}")
                 proxy_pool.mark_proxy_failed(current_proxy)
                 raise
-        
+
         self._launch_setup(["tinyproxy -c /tmp/tinyproxy.conf -d"], shell=True)
-        
-        # Reload environment variables
-        reload_cmd = "source /etc/environment"
+
+        # Verify tinyproxy started and is listening on port 18888
+        time.sleep(2)
         try:
-            logger.info(f"Proxy setup completed successfully for {current_proxy.host}:{current_proxy.port}")
-            proxy_pool.mark_proxy_success(current_proxy)
+            verify_cmd = f"echo '{client_password}' | sudo -S bash -c \"ss -tlnp | grep :18888\""
+            self._execute_setup([verify_cmd], shell=True)
+            logger.info("Tinyproxy is listening on port 18888")
         except Exception as e:
-            logger.error(f"Failed to reload environment variables: {e}")
+            logger.error(f"Tinyproxy failed to start on port 18888: {e}")
             proxy_pool.mark_proxy_failed(current_proxy)
-            raise
+            raise Exception("Tinyproxy did not start successfully")
+        
+        logger.info(f"Proxy setup completed successfully for {current_proxy.host}:{current_proxy.port}")
+        proxy_pool.mark_proxy_success(current_proxy)
 
     # Chrome setup
     def _chrome_open_tabs_setup(self, urls_to_open: List[str]):

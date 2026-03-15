@@ -430,7 +430,7 @@ class DesktopEnv(gym.Env):
 
         postconfig = self.evaluator.get("postconfig", [])
         try:
-            self.setup_controller.setup(postconfig, self.enable_proxy)
+            self.setup_controller.setup(postconfig, self.current_use_proxy)
         except Exception as e:
             logger.error("Postconfig setup failed (env may be corrupted by agent): %s", e)
             return 0
