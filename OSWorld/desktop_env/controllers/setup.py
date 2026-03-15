@@ -567,10 +567,11 @@ class SetupController:
         # Handles both HTTPS (CONNECT tunnel) and plain HTTP (inject Proxy-Authorization header).
         # Written via base64 to avoid shell-escaping issues with credentials containing special chars.
         import base64 as _b64
+        # Pre-compute auth header in setup.py — base64 alphabet [A-Za-z0-9+/=] is safe in single quotes
+        auth_b64 = _b64.b64encode(f"{current_proxy.username}:{current_proxy.password}".encode()).decode()
         proxy_script = (
-            "import socket,threading,base64\n"
-            f"H='{current_proxy.host}';P={current_proxy.port}\n"
-            f"A=base64.b64encode(b'{current_proxy.username}:{current_proxy.password}').decode()\n"
+            "import socket,threading\n"
+            f"H='{current_proxy.host}';P={current_proxy.port};A='{auth_b64}'\n"
             "def relay(a,b):\n"
             " try:\n"
             "  while True:\n"
@@ -583,17 +584,23 @@ class SetupController:
             " u=None\n"
             " try:\n"
             "  buf=b''\n"
-            "  while b'\\r\\n\\r\\n' not in buf:buf+=c.recv(4096)\n"
+            "  while b'\\r\\n\\r\\n' not in buf:\n"
+            "   d=c.recv(4096)\n"
+            "   if not d:raise OSError\n"
+            "   buf+=d\n"
             "  parts=buf.split(b'\\r\\n')[0].decode('latin-1').split()\n"
-            "  if len(parts)<2:return\n"
+            "  if len(parts)<2:c.close();return\n"
             "  method,target=parts[0],parts[1]\n"
             "  u=socket.create_connection((H,P),20)\n"
             "  if method=='CONNECT':\n"
             "   host_only=target.split(':')[0]\n"
             "   u.sendall(f'CONNECT {target} HTTP/1.1\\r\\nHost: {host_only}\\r\\nProxy-Authorization: Basic {A}\\r\\n\\r\\n'.encode())\n"
             "   r=b''\n"
-            "   while b'\\r\\n\\r\\n' not in r:r+=u.recv(4096)\n"
-            "   if b'200' not in r.split(b'\\r\\n')[0]:c.sendall(b'HTTP/1.1 502 Bad Gateway\\r\\n\\r\\n');return\n"
+            "   while b'\\r\\n\\r\\n' not in r:\n"
+            "    d=u.recv(4096)\n"
+            "    if not d:raise OSError\n"
+            "    r+=d\n"
+            "   if b'200' not in r.split(b'\\r\\n')[0]:c.sendall(b'HTTP/1.1 502 Bad Gateway\\r\\n\\r\\n');u.close();u=None;c.close();return\n"
             "   c.sendall(b'HTTP/1.1 200 Connection established\\r\\n\\r\\n')\n"
             "  else:\n"
             "   lines=buf.split(b'\\r\\n')\n"
