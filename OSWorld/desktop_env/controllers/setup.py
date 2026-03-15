@@ -31,6 +31,7 @@ dotenv.load_dotenv()
 PROXY_CONFIG_FILE = os.getenv("PROXY_CONFIG_FILE", "OSWorld/evaluation_examples/settings/proxy/dataimpulse.json")  # Default proxy config file
 
 logger = logging.getLogger("desktopenv.setup")
+logger.setLevel(logging.INFO)
 
 FILE_PATH = os.path.dirname(os.path.abspath(__file__))
 
@@ -561,26 +562,86 @@ class SetupController:
         # Format proxy URL
         proxy_url = proxy_pool._format_proxy_url(current_proxy)
         logger.info(f"Setting up proxy: {current_proxy.host}:{current_proxy.port}")
-        
-        # Configure system proxy environment variables
-        proxy_commands = [
-            f"echo '{client_password}' | sudo -S bash -c \"apt-get update\"", ## TODO: remove this line if ami is already updated
-            f"echo '{client_password}' | sudo -S bash -c \"apt-get install -y tinyproxy\"", ## TODO: remove this line if tinyproxy is already installed
-            # Kill any existing tinyproxy before reconfiguring (soft reset doesn't stop it)
-            f"echo '{client_password}' | sudo -S pkill -f tinyproxy || true",
-            f"echo '{client_password}' | sudo -S bash -c \"echo 'Port 18888' > /tmp/tinyproxy.conf\"",
-            f"echo '{client_password}' | sudo -S bash -c \"echo 'Allow 127.0.0.1' >> /tmp/tinyproxy.conf\"",
-            f"echo '{client_password}' | sudo -S bash -c \"echo 'Upstream http {current_proxy.username}:{current_proxy.password}@{current_proxy.host}:{current_proxy.port}' >> /tmp/tinyproxy.conf\"",
 
+        # Python CONNECT proxy — replaces tinyproxy (Ubuntu 22.04 ships 1.10.x, no upstream auth support).
+        # Handles both HTTPS (CONNECT tunnel) and plain HTTP (inject Proxy-Authorization header).
+        # Written via base64 to avoid shell-escaping issues with credentials containing special chars.
+        import base64 as _b64
+        # Pre-compute auth header in setup.py — base64 alphabet [A-Za-z0-9+/=] is safe in single quotes
+        auth_b64 = _b64.b64encode(f"{current_proxy.username}:{current_proxy.password}".encode()).decode()
+        proxy_script = (
+            "import socket,threading,time\n"
+            f"H='{current_proxy.host}';P={current_proxy.port};A='{auth_b64}'\n"
+            "def relay(a,b):\n"
+            " try:\n"
+            "  while True:\n"
+            "   d=a.recv(8192)\n"
+            "   if not d:break\n"
+            "   b.sendall(d)\n"
+            " except:pass\n"
+            " [s.close() for s in(a,b)]\n"
+            "def handle(c):\n"
+            " u=None\n"
+            " try:\n"
+            "  buf=b''\n"
+            "  while b'\\r\\n\\r\\n' not in buf:\n"
+            "   d=c.recv(4096)\n"
+            "   if not d:raise OSError\n"
+            "   buf+=d\n"
+            "  parts=buf.split(b'\\r\\n')[0].decode('latin-1').split()\n"
+            "  if len(parts)<2:c.close();return\n"
+            "  method,target=parts[0],parts[1]\n"
+            "  u=socket.create_connection((H,P),20)\n"
+            "  if method=='CONNECT':\n"
+            "   host_only=target.split(':')[0]\n"
+            "   u.sendall(f'CONNECT {target} HTTP/1.1\\r\\nHost: {host_only}\\r\\nProxy-Authorization: Basic {A}\\r\\n\\r\\n'.encode())\n"
+            "   r=b''\n"
+            "   while b'\\r\\n\\r\\n' not in r:\n"
+            "    d=u.recv(4096)\n"
+            "    if not d:raise OSError\n"
+            "    r+=d\n"
+            "   if b'200' not in r.split(b'\\r\\n')[0]:c.sendall(b'HTTP/1.1 502 Bad Gateway\\r\\n\\r\\n');u.close();u=None;c.close();return\n"
+            "   c.sendall(b'HTTP/1.1 200 Connection established\\r\\n\\r\\n')\n"
+            "  else:\n"
+            "   lines=buf.split(b'\\r\\n')\n"
+            "   auth=f'Proxy-Authorization: Basic {A}'.encode()\n"
+            "   buf=lines[0]+b'\\r\\n'+auth+b'\\r\\n'+b'\\r\\n'.join(lines[1:])\n"
+            "   u.sendall(buf)\n"
+            "  t1=threading.Thread(target=relay,args=(c,u),daemon=True)\n"
+            "  t2=threading.Thread(target=relay,args=(u,c),daemon=True)\n"
+            "  t1.start();t2.start();t1.join();t2.join()\n"
+            " except:\n"
+            "  for s in(c,u):\n"
+            "   if s:\n"
+            "    try:s.close()\n"
+            "    except:pass\n"
+            "s=socket.socket()\n"
+            "s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\n"
+            "for _i in range(10):\n"
+            " try:s.bind(('127.0.0.1',18888));break\n"
+            " except OSError:time.sleep(0.5)\n"
+            "else:raise RuntimeError('port 18888 in use after 10 retries')\n"
+            "s.listen(100)\n"
+            "while True:\n"
+            " c,_=s.accept()\n"
+            " threading.Thread(target=handle,args=(c,),daemon=True).start()\n"
+        )
+        script_b64 = _b64.b64encode(proxy_script.encode()).decode()
+
+        proxy_commands = [
+            # Kill ANY process on port 18888 (tinyproxy from old code, or previous mini_proxy.py)
+            "fuser -k 18888/tcp 2>/dev/null || true",
+            "pkill -KILL tinyproxy 2>/dev/null || true",
+            # Write script via base64 — avoids heredoc breakage if credentials contain special chars
+            f"echo '{script_b64}' | base64 -d > /tmp/mini_proxy.py",
             # Set proxy env vars (remove old ones first to prevent bashrc duplication across soft resets)
-            f"sed -i '/^export http_proxy=/d; /^export https_proxy=/d; /^export HTTP_PROXY=/d; /^export HTTPS_PROXY=/d' ~/.bashrc",
+            "sed -i '/^export http_proxy=/d; /^export https_proxy=/d; /^export HTTP_PROXY=/d; /^export HTTPS_PROXY=/d' ~/.bashrc",
             f"echo 'export http_proxy={proxy_url}' >> ~/.bashrc",
             f"echo 'export https_proxy={proxy_url}' >> ~/.bashrc",
             f"echo 'export HTTP_PROXY={proxy_url}' >> ~/.bashrc",
             f"echo 'export HTTPS_PROXY={proxy_url}' >> ~/.bashrc",
         ]
 
-        # Execute all proxy configuration commands
         for cmd in proxy_commands:
             try:
                 self._execute_setup([cmd], shell=True)
@@ -589,20 +650,18 @@ class SetupController:
                 proxy_pool.mark_proxy_failed(current_proxy)
                 raise
 
-        self._launch_setup(["tinyproxy -c /tmp/tinyproxy.conf -d"], shell=True)
+        # Launch Python proxy in background (python3 always available, no apt-get needed)
+        self._launch_setup(["python3 /tmp/mini_proxy.py"], shell=True)
 
-        # Verify tinyproxy started and is listening on port 18888
+        # Verify proxy is listening. _execute_setup never raises on non-zero exit (server always
+        # returns HTTP 200), so use until={"returncode": 0} to make it retry the command up to
+        # 5 times until the socket connection succeeds.
         time.sleep(2)
-        try:
-            verify_cmd = f"echo '{client_password}' | sudo -S bash -c \"ss -tlnp | grep :18888\""
-            self._execute_setup([verify_cmd], shell=True)
-            logger.info("Tinyproxy is listening on port 18888")
-        except Exception as e:
-            logger.error(f"Tinyproxy failed to start on port 18888: {e}")
-            proxy_pool.mark_proxy_failed(current_proxy)
-            raise Exception("Tinyproxy did not start successfully")
-        
-        logger.info(f"Proxy setup completed successfully for {current_proxy.host}:{current_proxy.port}")
+        verify_cmd = "python3 -c \"import socket; socket.create_connection(('127.0.0.1',18888),2).close(); print('proxy OK')\""
+        self._execute_setup([verify_cmd], shell=True, until={"returncode": 0})
+        logger.info("Mini proxy is listening on port 18888")
+
+        logger.info(f"Proxy setup completed for {current_proxy.host}:{current_proxy.port}")
         proxy_pool.mark_proxy_success(current_proxy)
 
     # Chrome setup
@@ -647,8 +706,8 @@ class SetupController:
                     logger.warning("Opening %s exceeds time limit", url)  # only for human test
                 logger.info(f"Opened tab {i + 1}: {url}")
 
-                if i == 0:
-                    # clear the default tab
+                if i == 0 and len(context.pages) > 1:
+                    # clear the default tab (pages[0] is the original about:blank)
                     default_page = context.pages[0]
                     default_page.close()
 

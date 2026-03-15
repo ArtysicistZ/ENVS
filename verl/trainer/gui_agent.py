@@ -915,7 +915,6 @@ class EnvWorker():
         
         self.env.pause()
 
-        self.history_images.append(obs['screenshot'])
         self.history_messages.append({
             "role": "assistant",
             "content": [{
@@ -935,6 +934,7 @@ class EnvWorker():
                     'is_done': self.is_done,
                     'format_reward': format_reward
                 }
+            self.history_images.append(obs['screenshot'])
 
             image_base64 = base64.b64encode(BytesIO(obs['screenshot']).getvalue()).decode('utf-8')
 
@@ -1011,7 +1011,7 @@ class EnvWorker():
             steps.append({"screenshot_b64": b64, "action": action})
 
         return {
-            "task_id": self.task_config.get("task_id", "") if self.task_config else "",
+            "task_id": (self.task_config.get("task_id") or self.task_config.get("id", "")) if self.task_config else "",
             "instruction": self.instruction or "",
             "eval_result": getattr(self, "_last_eval_result", 0.0),
             "limit_images": limit_images,
@@ -1065,12 +1065,13 @@ class RemoteEnvWorker:
     """Env worker that forwards reset/step/evaluate to a remote HTTP server (one env on Mac/AWS)."""
     system_prompt = uitars_system_prompt
 
-    def __init__(self, worker_idx, max_steps, config, remote_server_url: str):
+    def __init__(self, worker_idx, max_steps, config, remote_server_url: str, slot_id: int = None):
         import os
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
         self.worker_idx = worker_idx
+        self.slot_id = slot_id if slot_id is not None else worker_idx  # local slot on the remote server
         self.max_steps = max_steps
         self.config = config
         self.remote_server_url = remote_server_url.rstrip("/")
@@ -1299,7 +1300,7 @@ class RemoteEnvWorker:
         resp = None
         for attempt in range(self.REMOTE_RESET_RETRIES + 1):
             try:
-                resp = self._post("/env/reset", {"task_config": task_config, "slot_id": self.worker_idx}, timeout=self.REMOTE_RESET_TIMEOUT)
+                resp = self._post("/env/reset", {"task_config": task_config, "slot_id": self.slot_id}, timeout=self.REMOTE_RESET_TIMEOUT)
                 break
             except Exception as e:
                 last_err = e
@@ -1322,6 +1323,7 @@ class RemoteEnvWorker:
                     # first attempt doesn't leave stale data that gets doubled.
                     self.reset_train_tensors()
                     self.history_messages = wire_to_messages(obs_wire)
+                    self.history_images = self._extract_images_from_messages(self.history_messages)
                     self.process_message(self.history_messages)
                     pm_err = None
                     break
@@ -1346,7 +1348,7 @@ class RemoteEnvWorker:
     def step(self, prediction):
         self._is_init = False
         try:
-            resp = self._post("/env/step", {"prediction": prediction, "slot_id": self.worker_idx}, timeout=self.REMOTE_STEP_TIMEOUT)
+            resp = self._post("/env/step", {"prediction": prediction, "slot_id": self.slot_id}, timeout=self.REMOTE_STEP_TIMEOUT)
         except Exception as e:
             print(f"RemoteEnvWorker step HTTP error: {e}")
             return {"env_idx": self.worker_idx, "obs_messages": None, "is_done": True, "format_reward": -1.0}
@@ -1355,6 +1357,13 @@ class RemoteEnvWorker:
         obs_wire = resp.get("obs_messages")
         if obs_wire:
             self.history_messages = wire_to_messages(obs_wire)
+            # Extract new screenshot(s) from the latest user message(s).
+            # When is_done=True (e.g. "finished()" action), the server returns
+            # the full history WITHOUT a new screenshot — skip extraction to
+            # avoid duplicating the previous step's screenshot.
+            if not self._is_done:
+                new_imgs = self._extract_images_from_messages(self.history_messages[-2:])
+                self.history_images.extend(new_imgs)
             try:
                 self.process_message(self.history_messages[-2:])
             except Exception as e:
@@ -1372,7 +1381,7 @@ class RemoteEnvWorker:
         last_err = None
         for attempt in range(self.REMOTE_EVALUATE_RETRIES + 1):
             try:
-                result = self._post("/env/evaluate", {"slot_id": self.worker_idx}, timeout=self.REMOTE_EVALUATE_TIMEOUT)
+                result = self._post("/env/evaluate", {"slot_id": self.slot_id}, timeout=self.REMOTE_EVALUATE_TIMEOUT)
                 score = result["score"] if isinstance(result, dict) else result
                 score_float = float(score)
                 print(f"RemoteEnvWorker[{self.worker_idx}] evaluate: score={score_float}, instruction={self.instruction}")
@@ -1388,6 +1397,22 @@ class RemoteEnvWorker:
         print(f"RemoteEnvWorker evaluate HTTP error (all {self.REMOTE_EVALUATE_RETRIES + 1} attempts failed): {last_err}. Returning 0.0.")
         self._last_eval_result = 0.0
         return 0.0
+
+    @staticmethod
+    def _extract_images_from_messages(messages) -> list:
+        """Extract raw JPEG bytes from message image content (base64 data URLs)."""
+        import base64 as _b64
+        images = []
+        for m in messages:
+            if m.get("role") != "user":
+                continue
+            for c in (m.get("content", []) if isinstance(m.get("content"), list) else []):
+                if isinstance(c, dict) and c.get("type") == "image" and "image" in c:
+                    img_str = c["image"]
+                    if "," in img_str:
+                        img_str = img_str.split(",", 1)[1]
+                    images.append(_b64.b64decode(img_str))
+        return images
 
     def get_history_messages(self):
         return self.history_messages
@@ -1420,7 +1445,7 @@ class RemoteEnvWorker:
             steps.append({"screenshot_b64": b64, "action": action})
 
         return {
-            "task_id": self.task_config.get("task_id", "") if self.task_config else "",
+            "task_id": (self.task_config.get("task_id") or self.task_config.get("id", "")) if self.task_config else "",
             "instruction": self.instruction or "",
             "eval_result": getattr(self, "_last_eval_result", 0.0),
             "limit_images": limit_images,

@@ -1331,7 +1331,7 @@ def get_enable_do_not_track(env, config: Dict[str, str]):
         content = env.controller.get_file(preference_file_path)
         data = json.loads(content)
 
-        if_enable_do_not_track = data.get('enable_do_not_track', {})  # bool
+        if_enable_do_not_track = data.get('enable_do_not_track', False)
         return "true" if if_enable_do_not_track else "false"
     except Exception as e:
         logger.error(f"Error: {e}")
@@ -1364,8 +1364,8 @@ def get_enable_enhanced_safety_browsing(env, config: Dict[str, str]):
         content = env.controller.get_file(preference_file_path)
         data = json.loads(content)
 
-        if_enable_do_not_track = data.get('safebrowsing', {}).get('enhanced', {})  # bool
-        return "true" if if_enable_do_not_track else "false"
+        if_enable_enhanced = data.get('safebrowsing', {}).get('enhanced', False)
+        return "true" if if_enable_enhanced else "false"
     except Exception as e:
         logger.error(f"Error: {e}")
         return "false"
@@ -1544,8 +1544,13 @@ def get_data_delete_automacally(env, config: Dict[str, str]):
     try:
         content = env.controller.get_file(preference_file_path)
         data = json.loads(content)
-        data_delete_state = data["profile"].get("default_content_setting_values", None)
-        return "true" if data_delete_state is not None else "false"
+        # "Delete cookies and site data when you close all windows" sets
+        # profile.default_content_setting_values.cookies to 4 (SESSION_ONLY).
+        # The old check just tested whether default_content_setting_values
+        # existed — that key is always present, so it always returned "true".
+        content_settings = data.get("profile", {}).get("default_content_setting_values", {})
+        cookies_setting = content_settings.get("cookies", None)
+        return "true" if cookies_setting == 4 else "false"
     except Exception as e:
         logger.error(f"Error: {e}")
         return "false"

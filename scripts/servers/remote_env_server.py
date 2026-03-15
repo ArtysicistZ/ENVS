@@ -1159,7 +1159,7 @@ def _get_slot(slot_id: int = 0) -> SlotState:
                 headless=True,
                 os_type="Ubuntu",
                 require_a11y_tree=False,
-                enable_proxy=True,
+                enable_proxy=False,
             )
             print(f"[slot {slot_id}] DesktopEnv initialized successfully (provider={provider_name})")
         except HTTPException:
@@ -1516,36 +1516,14 @@ def _env_step_locked(slot_id: int, body: StepRequest):
         reward_components["wrong_affordance"] = reward_components.get("wrong_affordance", 0.0) - WRONG_AFFORDANCE_PENALTY
         print(f"step_trace: wrong_affordance key={intent_key!r} penalty={WRONG_AFFORDANCE_PENALTY:.2f}")
 
-    if _is_abab_cycle(slot._recent_action_signatures):
-        format_reward = max(format_reward - CYCLE_REPEAT_PENALTY, -1.0)
-        reward_components["abab_cycle"] = reward_components.get("abab_cycle", 0.0) - CYCLE_REPEAT_PENALTY
-        slot.is_done = True
-        print(
-            f"loop_breaker: abab_cycle detected last4={list(slot._recent_action_signatures)!r}; "
-            f"terminating episode with penalty {CYCLE_REPEAT_PENALTY:.2f}"
-        )
-        slot._last_step_reward_components = reward_components
-        _log_step_reward_final(slot, format_reward, slot.is_done)
-        final_obs = messages_to_wire(slot.history_messages) if slot.history_messages else None
-        return {"env_idx": slot_id, "obs_messages": final_obs, "is_done": True, "format_reward": format_reward}
+    # NOTE: ABAB cycle breaker removed — let the agent keep trying until max_steps.
+    # The agent may recover from a temporary loop on its own.
 
     # Keep trajectory order consistent: assistant action text, then resulting screenshot(s).
     slot.history_messages.append({"role": "assistant", "content": [{"type": "text", "text": add_box_token(prediction)}]})
 
-    repeat_limit = WAIT_REPEAT_THRESHOLD if _is_wait_action(actions) else REPEAT_ACTION_THRESHOLD
-    if slot._repeat_action_count > repeat_limit:
-        repeat_penalty = WAIT_REPEAT_PENALTY if _is_wait_action(actions) else REPEAT_ACTION_PENALTY
-        format_reward = max(format_reward - repeat_penalty, -1.0)
-        reward_components["repeat_loop"] = reward_components.get("repeat_loop", 0.0) - repeat_penalty
-        slot.is_done = True
-        print(
-            f"loop_breaker: repeated action signature x{slot._repeat_action_count}; "
-            f"action={actions[0] if actions else None!r} threshold={repeat_limit} penalty={repeat_penalty:.2f}"
-        )
-        slot._last_step_reward_components = reward_components
-        _log_step_reward_final(slot, format_reward, slot.is_done)
-        final_obs = messages_to_wire(slot.history_messages) if slot.history_messages else None
-        return {"env_idx": slot_id, "obs_messages": final_obs, "is_done": True, "format_reward": format_reward}
+    # NOTE: repeat action breaker removed — let the agent keep trying until max_steps.
+    # The agent may recover from repeating the same action on its own.
 
     _safe_env_unpause(env)
     obs = None
@@ -1635,21 +1613,11 @@ def _env_step_locked(slot_id: int, body: StepRequest):
                                 "step_trace: browser_menu_progress "
                                 f"diff={diff_score:.3f} bonus={BROWSER_MENU_OPEN_PROGRESS_BONUS:.2f}"
                             )
-                if (
-                    slot._repeat_action_count >= 2
-                    and diff_score <= SCREENSHOT_ZERO_DIFF_EPS
-                    and not _is_wait_action(actions)
-                ):
-                    format_reward = max(format_reward - ZERO_DIFF_REPEAT_BREAK_PENALTY, -1.0)
-                    reward_components["zero_diff_repeat_break"] = (
-                        reward_components.get("zero_diff_repeat_break", 0.0) - ZERO_DIFF_REPEAT_BREAK_PENALTY
-                    )
-                    slot.is_done = True
-                    print(
-                        "loop_breaker: zero_diff_repeat_click;"
-                        f" repeat_count={slot._repeat_action_count} diff={diff_score:.3f} "
-                        f"penalty={ZERO_DIFF_REPEAT_BREAK_PENALTY:.2f}"
-                    )
+                # NOTE: zero_diff_repeat breaker removed — screenshot not changing
+                # is NOT a valid termination reason.  The model may simply be
+                # clicking inaccurately and should be allowed to keep trying.
+                # The regular repeat_action breaker (threshold=3) still catches
+                # true infinite loops.
             slot._last_screenshot_fingerprint = curr_fp or slot._last_screenshot_fingerprint
             if _append_screenshot_message(slot.history_messages, obs.get("screenshot")):
                 appended_any_step_screenshot = True

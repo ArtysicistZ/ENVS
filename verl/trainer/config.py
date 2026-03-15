@@ -85,6 +85,7 @@ class TrainerConfig:
     save_checkpoint_path: Optional[str] = None
     load_checkpoint_path: Optional[str] = None
     replay_data_path: Optional[str] = None  # path to pre-collected replay trajectories (.pt)
+    save_trajectories: bool = False  # save compact episode trajectories to JSONL for SFT
 
     def post_init(self):
         if self.save_checkpoint_path is None:

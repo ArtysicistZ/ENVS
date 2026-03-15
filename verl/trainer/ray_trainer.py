@@ -411,17 +411,29 @@ class RayPPOTrainer:
                 assert sum(env_counts) >= num_envs, (
                     f"Sum of remote_server_env_counts ({sum(env_counts)}) < num_envs ({num_envs})"
                 )
-                # Build URL assignment: first env_counts[0] workers → url[0], next env_counts[1] → url[1], ...
+                # Build (url, local_slot_id) assignment:
+                # Workers 0..counts[0]-1 → (url[0], 0..counts[0]-1)
+                # Workers counts[0]..counts[0]+counts[1]-1 → (url[1], 0..counts[1]-1)
                 url_assignment = []
+                slot_assignment = []
                 for url, count in zip(remote_urls, env_counts):
                     url_assignment.extend([url] * count)
+                    slot_assignment.extend(range(count))
             else:
                 url_assignment = [remote_urls[i % len(remote_urls)] for i in range(num_envs)]
+                slot_assignment = [i % len(remote_urls) for i in range(num_envs)]
+                # For round-robin, count how many workers per server to compute local slot
+                _rr_counters = {url: 0 for url in remote_urls}
+                slot_assignment = []
+                for i in range(num_envs):
+                    url = url_assignment[i]
+                    slot_assignment.append(_rr_counters[url])
+                    _rr_counters[url] += 1
 
             self.env_workers = []
             for i in range(num_envs):
                 w = RemoteEnvWorker.options(name=f"remote_env_worker_{i}", num_cpus=0).remote(
-                    i, max_steps, self.config, url_assignment[i]
+                    i, max_steps, self.config, url_assignment[i], slot_assignment[i]
                 )
                 self.env_workers.append(w)
             print(f"RemoteEnvWorker created (urls={remote_urls}, counts={env_counts}), num_envs={num_envs}, total: {len(self.env_workers)}")
@@ -570,8 +582,10 @@ class RayPPOTrainer:
             ]
             reset_outputs = _ray_get_robust(futures, timeout=600, label="val_reset",
                                             fallback_fn=lambda idx: {"env_idx": idx, "obs_messages": None, "is_done": True, "format_reward": 0.0})
+            print(f"[val] Batch {batch_idx}: all {num_tasks} resets completed, preparing vLLM engine...", flush=True)
 
             self.actor_rollout_wg.prepare_generate_sequences()
+            print(f"[val] vLLM engine ready.", flush=True)
             generate_sequences_started = True
             batch_all_failed = False  # tracks if all envs failed (vllm_batch is None)
 
@@ -645,21 +659,32 @@ class RayPPOTrainer:
             history_messages = _ray_get_robust(history_futures, timeout=60, label="val_history",
                                                fallback_fn=lambda idx: [])
 
-            # --- Trajectory saving (if enabled) ---
+            # --- Trajectory saving (if enabled) — only successful episodes ---
             if getattr(self.config.trainer, 'save_trajectories', False):
                 from verl.utils.trajectory_io import TrajectoryWriter
                 if not hasattr(self, '_traj_writer'):
                     _traj_path = os.path.join(self.config.trainer.save_checkpoint_path,
                                               f"trajectories_at_{self.global_step}.jsonl")
+                    # On resume, delete old trajectory file to avoid duplicates
+                    # (eval_results are resumed from JSON, but trajectories are not)
+                    if skip_batches > 0 and os.path.exists(_traj_path):
+                        os.remove(_traj_path)
+                        print(f"[val] Removed stale trajectory file for clean resume: {_traj_path}")
                     self._traj_writer = TrajectoryWriter(_traj_path)
-                _limit_images = getattr(self.config.worker.rollout, 'limit_images', 8)
-                _traj_futures = [w.get_compact_trajectory.remote(_limit_images)
-                                 for w in self.env_workers[:num_tasks]]
-                _trajs = _ray_get_robust(_traj_futures, timeout=120, label="val_traj",
-                                         fallback_fn=lambda idx: None)
-                for _traj in _trajs:
-                    if _traj is not None:
-                        self._traj_writer.write(_traj)
+                # Only fetch trajectories for successful episodes (eval_result > 0)
+                _success_indices = [i for i, score in enumerate(eval_results) if score > 0]
+                if _success_indices:
+                    _limit_images = getattr(self.config.worker.rollout, 'limit_images', 8)
+                    _traj_futures = [self.env_workers[i].get_compact_trajectory.remote(_limit_images)
+                                     for i in _success_indices]
+                    _trajs = _ray_get_robust(_traj_futures, timeout=120, label="val_traj",
+                                             fallback_fn=lambda idx: None)
+                    _saved = 0
+                    for _traj in _trajs:
+                        if _traj is not None and _traj.get("steps"):
+                            self._traj_writer.write(_traj)
+                            _saved += 1
+                    print(f"[val] Batch {batch_idx}: saved {_saved}/{len(_success_indices)} successful trajectories")
 
             # Store scores
             scores = eval_results
@@ -725,10 +750,21 @@ class RayPPOTrainer:
         doable = sum(1 for v in save_dict.values() if v["n_success"] > 0)
         print(f"[val] Doable tasks (>=1 success): {doable}/{len(save_dict)}")
 
+        # Always close trajectory writer (even if _validate had errors earlier)
         if hasattr(self, '_traj_writer'):
-            self._traj_writer.close()
+            _traj_path = self._traj_writer.path
+            try:
+                self._traj_writer.close()
+            except Exception:
+                pass
             del self._traj_writer
-            print(f"[val] Trajectory file closed.")
+            # Count lines to report total saved
+            try:
+                with open(_traj_path, 'r') as _f:
+                    _n_saved = sum(1 for _ in _f)
+            except Exception:
+                _n_saved = "?"
+            print(f"[val] Trajectory file closed: {_n_saved} successful episodes saved to {_traj_path}")
 
         self._maybe_log_val_generations(sample_inputs, sample_outputs, sample_labels, sample_scores)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()

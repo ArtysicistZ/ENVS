@@ -35,7 +35,20 @@ class ProxyPool:
         
         if config_file:
             self.load_proxies_from_file(config_file)
-    
+
+        # Fallback: if no proxies loaded (file missing/empty), try environment variables
+        if not self.proxies:
+            username = os.getenv('DATAIMPULSE_USERNAME')
+            password = os.getenv('DATAIMPULSE_PASSWORD')
+            host = os.getenv('DATAIMPULSE_HOST', 'gw.dataimpulse.com')
+            port = int(os.getenv('DATAIMPULSE_PORT', '823'))
+            if username and password:
+                proxy = ProxyInfo(host=host, port=port, username=username, password=password, protocol='http')
+                self.proxies.append(proxy)
+                logger.info(f"Loaded 1 proxy from environment variables (fallback)")
+            else:
+                logger.warning("No proxies loaded and no DATAIMPULSE_USERNAME/PASSWORD env vars set")
+
     def load_proxies_from_file(self, config_file: str):
         """Load proxy list from config file"""
         try:
