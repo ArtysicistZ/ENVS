@@ -706,8 +706,8 @@ class SetupController:
                     logger.warning("Opening %s exceeds time limit", url)  # only for human test
                 logger.info(f"Opened tab {i + 1}: {url}")
 
-                if i == 0:
-                    # clear the default tab
+                if i == 0 and len(context.pages) > 1:
+                    # clear the default tab (pages[0] is the original about:blank)
                     default_page = context.pages[0]
                     default_page.close()
 

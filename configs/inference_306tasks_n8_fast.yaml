@@ -1,13 +1,12 @@
-# Inference-only: All 355 tasks (306 noproxy + 49 proxy softreset) — fast variant
-# limit_images=2, max_prompt_length=10000 to reduce token count and speed up generation
-# 355 tasks × 8 rollouts = 2840 entries, 64 VMs → ~45 batches
+# Inference-only: 306 tasks — fast variant
+# limit_images=2, max_prompt_length=12000 to reduce token count and speed up generation
 #
-# Run: sudo -E /home/kevinzyz/yincheng/arpo/.venv/bin/python -m verl.trainer.main config=configs/inference_355tasks_n8_fast.yaml
+# Run: sudo -E /home/kevinzyz/yincheng/arpo/.venv/bin/python -m verl.trainer.main config=configs/inference_306tasks_n8_fast.yaml
 
 data:
-  train_files: OSWorld/evaluation_examples/test_all_softreset.json  # unused but must be valid
-  val_files: OSWorld/evaluation_examples/test_all_softreset.json
-  val_n_repeats: 8  # 355 tasks × 8 = 2840 independent rollouts
+  train_files: OSWorld/evaluation_examples/test_all_noproxy_softreset.json  # unused but must be valid
+  val_files: OSWorld/evaluation_examples/test_all_noproxy_softreset.json
+  val_n_repeats: 8  # 306 tasks × 8 = 2448 independent rollouts
   prompt_key: instruction
   answer_key: ""
   image_key: images
@@ -97,10 +96,10 @@ trainer:
   total_episodes: 1
   logger: ["console"]
   project_name: arpo-inference
-  experiment_name: base_model_355tasks_n8
+  experiment_name: base_model_306tasks_n8
   n_gpus_per_node: 8
   nnodes: 1
   val_before_train: true
   val_only: true
-  save_checkpoint_path: checkpoints/arpo-inference/base_model_355tasks_n8
+  save_checkpoint_path: checkpoints/arpo-inference/base_model_306tasks_n8
   save_trajectories: true

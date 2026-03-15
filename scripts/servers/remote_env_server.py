@@ -1159,7 +1159,7 @@ def _get_slot(slot_id: int = 0) -> SlotState:
                 headless=True,
                 os_type="Ubuntu",
                 require_a11y_tree=False,
-                enable_proxy=True,
+                enable_proxy=False,
             )
             print(f"[slot {slot_id}] DesktopEnv initialized successfully (provider={provider_name})")
         except HTTPException:
