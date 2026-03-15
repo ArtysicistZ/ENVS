@@ -629,8 +629,9 @@ class SetupController:
         script_b64 = _b64.b64encode(proxy_script.encode()).decode()
 
         proxy_commands = [
-            # SIGKILL (not SIGTERM) — kernel frees port immediately, eliminates bind() race
-            "pkill -KILL -f mini_proxy.py 2>/dev/null || true",
+            # Kill ANY process on port 18888 (tinyproxy from old code, or previous mini_proxy.py)
+            "fuser -k 18888/tcp 2>/dev/null || true",
+            "pkill -KILL tinyproxy 2>/dev/null || true",
             # Write script via base64 — avoids heredoc breakage if credentials contain special chars
             f"echo '{script_b64}' | base64 -d > /tmp/mini_proxy.py",
             # Set proxy env vars (remove old ones first to prevent bashrc duplication across soft resets)
