@@ -570,7 +570,7 @@ class SetupController:
         # Pre-compute auth header in setup.py — base64 alphabet [A-Za-z0-9+/=] is safe in single quotes
         auth_b64 = _b64.b64encode(f"{current_proxy.username}:{current_proxy.password}".encode()).decode()
         proxy_script = (
-            "import socket,threading\n"
+            "import socket,threading,time\n"
             f"H='{current_proxy.host}';P={current_proxy.port};A='{auth_b64}'\n"
             "def relay(a,b):\n"
             " try:\n"
@@ -617,7 +617,11 @@ class SetupController:
             "    except:pass\n"
             "s=socket.socket()\n"
             "s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\n"
-            "s.bind(('127.0.0.1',18888));s.listen(100)\n"
+            "for _i in range(10):\n"
+            " try:s.bind(('127.0.0.1',18888));break\n"
+            " except OSError:time.sleep(0.5)\n"
+            "else:raise RuntimeError('port 18888 in use after 10 retries')\n"
+            "s.listen(100)\n"
             "while True:\n"
             " c,_=s.accept()\n"
             " threading.Thread(target=handle,args=(c,),daemon=True).start()\n"
@@ -625,8 +629,8 @@ class SetupController:
         script_b64 = _b64.b64encode(proxy_script.encode()).decode()
 
         proxy_commands = [
-            # Kill any existing proxy on port 18888 (soft reset doesn't stop it)
-            "pkill -f mini_proxy.py 2>/dev/null || true",
+            # SIGKILL (not SIGTERM) — kernel frees port immediately, eliminates bind() race
+            "pkill -KILL -f mini_proxy.py 2>/dev/null || true",
             # Write script via base64 — avoids heredoc breakage if credentials contain special chars
             f"echo '{script_b64}' | base64 -d > /tmp/mini_proxy.py",
             # Set proxy env vars (remove old ones first to prevent bashrc duplication across soft resets)
