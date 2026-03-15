@@ -2,7 +2,7 @@
 # limit_images=2, max_prompt_length=10000 to reduce token count and speed up generation
 # 355 tasks × 8 rollouts = 2840 entries, 64 VMs → ~45 batches
 #
-# Run: sudo -E python -m verl.trainer.main config=configs/inference_355tasks_n8_fast.yaml
+# Run: sudo -E /home/kevinzyz/yincheng/arpo/.venv/bin/python -m verl.trainer.main config=configs/inference_355tasks_n8_fast.yaml
 
 data:
   train_files: OSWorld/evaluation_examples/test_all_softreset.json  # unused but must be valid
@@ -11,7 +11,7 @@ data:
   prompt_key: instruction
   answer_key: ""
   image_key: images
-  max_prompt_length: 10000
+  max_prompt_length: 12000
   max_response_length: 1024
   rollout_batch_size: 8
   val_batch_size: -1
@@ -65,7 +65,7 @@ worker:
     enable_chunked_prefill: false
     tensor_parallel_size: 1
     limit_images: 3
-    max_num_batched_tokens: 12000
+    max_num_batched_tokens: 14000
     max_num_seqs: 8
     old_logprob_source: "recompute"
     val_override_config:
@@ -97,10 +97,10 @@ trainer:
   total_episodes: 1
   logger: ["console"]
   project_name: arpo-inference
-  experiment_name: base_model_filtering_306tasks_n8_fast
+  experiment_name: base_model_355tasks_n8
   n_gpus_per_node: 8
   nnodes: 1
   val_before_train: true
   val_only: true
-  save_checkpoint_path: checkpoints/arpo-inference/base_model_filtering_306tasks_n8_fast
+  save_checkpoint_path: checkpoints/arpo-inference/base_model_355tasks_n8
   save_trajectories: true
