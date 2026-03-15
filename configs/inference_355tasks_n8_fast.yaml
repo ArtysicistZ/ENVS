@@ -1,19 +1,22 @@
-# ARPO Throughput Candidate - 8x A100 80G + Remote AWS Env
-# Aligned with upstream JIA-Lab ARPO (osworld_full_arpo.sh) adapted for 1-node 8-GPU.
-# Use this after the smoke profile is confirmed stable.
+# Inference-only: All 355 tasks (306 noproxy + 49 proxy softreset) — fast variant
+# limit_images=2, max_prompt_length=10000 to reduce token count and speed up generation
+# 355 tasks × 8 rollouts = 2840 entries, 64 VMs → ~45 batches
+#
+# Run: sudo -E python -m verl.trainer.main config=configs/inference_355tasks_n8_fast.yaml
 
 data:
-  train_files: OSWorld/evaluation_examples/test_smoke_4.json
-  val_files: OSWorld/evaluation_examples/test_smoke_4.json
+  train_files: OSWorld/evaluation_examples/test_all_softreset.json  # unused but must be valid
+  val_files: OSWorld/evaluation_examples/test_all_softreset.json
+  val_n_repeats: 8  # 355 tasks × 8 = 2840 independent rollouts
   prompt_key: instruction
   answer_key: ""
   image_key: images
-  max_prompt_length: 64000
+  max_prompt_length: 10000
   max_response_length: 1024
-  rollout_batch_size: 1
+  rollout_batch_size: 8
   val_batch_size: -1
   shuffle: true
-  seed: 1
+  seed: 42
   max_pixels: 2116800
   min_pixels: 256
 
@@ -22,11 +25,11 @@ algorithm:
   disable_kl: true
   use_kl_loss: false
   kl_coef: 0
-  enable_replay: true
+  enable_replay: false
 
 worker:
   actor:
-    global_batch_size: 4
+    global_batch_size: 8
     micro_batch_size_per_device_for_update: 1
     micro_batch_size_per_device_for_experience: 1
     max_grad_norm: 1.0
@@ -37,7 +40,7 @@ worker:
     clip_ratio_high: 0.3
     model:
       model_path: ByteDance-Seed/UI-TARS-1.5-7B
-      enable_gradient_checkpointing: true
+      enable_gradient_checkpointing: false
       trust_remote_code: true
       freeze_vision_tower: true
     optim:
@@ -56,17 +59,17 @@ worker:
 
   rollout:
     temperature: 1.0
-    n: 2
-    gpu_memory_utilization: 0.4
+    n: 8
+    gpu_memory_utilization: 0.6
     enforce_eager: false
     enable_chunked_prefill: false
     tensor_parallel_size: 1
-    limit_images: 15
-    max_num_batched_tokens: 128000
-    max_num_seqs: 1
+    limit_images: 3
+    max_num_batched_tokens: 12000
+    max_num_seqs: 8
     old_logprob_source: "recompute"
     val_override_config:
-      temperature: 0.5
+      temperature: 1.0
       n: 1
 
   ref:
@@ -82,15 +85,22 @@ worker:
     skip_special_tokens: true
 
 env:
-  num_envs: 1
+  num_envs: 64
   max_steps: 15
-  remote_server_url: "http://10.100.4.7:15001"
+  remote_server_urls:
+    - "http://10.100.4.7:15001"
+    - "http://10.100.4.6:15001"
+    - "http://10.100.4.8:15001"
+  remote_server_env_counts: [24, 16, 24]
 
 trainer:
-  total_episodes: 10
-  logger: ["console", "wandb"]
-  project_name: arpo-smoke-test
-  experiment_name: uitars_7b_8xa100_remote_paper_candidate
+  total_episodes: 1
+  logger: ["console"]
+  project_name: arpo-inference
+  experiment_name: base_model_filtering_306tasks_n8_fast
   n_gpus_per_node: 8
   nnodes: 1
-  val_before_train: false
+  val_before_train: true
+  val_only: true
+  save_checkpoint_path: checkpoints/arpo-inference/base_model_filtering_306tasks_n8_fast
+  save_trajectories: true

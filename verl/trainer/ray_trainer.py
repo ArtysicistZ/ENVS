@@ -645,6 +645,22 @@ class RayPPOTrainer:
             history_messages = _ray_get_robust(history_futures, timeout=60, label="val_history",
                                                fallback_fn=lambda idx: [])
 
+            # --- Trajectory saving (if enabled) ---
+            if getattr(self.config.trainer, 'save_trajectories', False):
+                from verl.utils.trajectory_io import TrajectoryWriter
+                if not hasattr(self, '_traj_writer'):
+                    _traj_path = os.path.join(self.config.trainer.save_checkpoint_path,
+                                              f"trajectories_at_{self.global_step}.jsonl")
+                    self._traj_writer = TrajectoryWriter(_traj_path)
+                _limit_images = getattr(self.config.worker.rollout, 'limit_images', 8)
+                _traj_futures = [w.get_compact_trajectory.remote(_limit_images)
+                                 for w in self.env_workers[:num_tasks]]
+                _trajs = _ray_get_robust(_traj_futures, timeout=120, label="val_traj",
+                                         fallback_fn=lambda idx: None)
+                for _traj in _trajs:
+                    if _traj is not None:
+                        self._traj_writer.write(_traj)
+
             # Store scores
             scores = eval_results
             reward_tensor = torch.tensor(scores, dtype=torch.float32).unsqueeze(-1)
@@ -708,6 +724,11 @@ class RayPPOTrainer:
         print(f"[val] Saved eval results for {len(save_dict)} tasks to {save_path}")
         doable = sum(1 for v in save_dict.values() if v["n_success"] > 0)
         print(f"[val] Doable tasks (>=1 success): {doable}/{len(save_dict)}")
+
+        if hasattr(self, '_traj_writer'):
+            self._traj_writer.close()
+            del self._traj_writer
+            print(f"[val] Trajectory file closed.")
 
         self._maybe_log_val_generations(sample_inputs, sample_outputs, sample_labels, sample_scores)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()

@@ -970,18 +970,54 @@ class EnvWorker():
         try:
             self.env.unpause()
             # we dont care the env after evaluation, since the reset will destroy it and create new env.
-            return self.env.evaluate()
+            result = self.env.evaluate()
+            self._last_eval_result = result
+            return result
         except Exception as e:
             print(f"Evaluation error: {e}")
+            self._last_eval_result = 0.0
             return 0.0
-            
-    
+
+
     def get_history_messages(self):
         return self.history_messages
-    
+
     def get_history_images(self):
         return self.history_images
-    
+
+    def get_compact_trajectory(self, limit_images: int = 8) -> dict:
+        """Return a deduplicated episode dict: each screenshot stored once.
+
+        Each step stores the screenshot the model SAW and the action it took.
+        Screenshots are raw JPEG bytes re-encoded as base64 at quality=85.
+        """
+        import base64
+        import io as _io
+        from PIL import Image as _Image
+
+        actions = [
+            (m["content"][0]["text"] if isinstance(m["content"], list) else m["content"])
+            for m in self.history_messages if m.get("role") == "assistant"
+        ]
+        images = self.history_images  # List of raw JPEG bytes (one per step)
+
+        steps = []
+        for img_bytes, action in zip(images, actions):
+            # Re-encode as JPEG at quality=85 to save space
+            pil = _Image.open(_io.BytesIO(img_bytes))
+            buf = _io.BytesIO()
+            pil.save(buf, format="JPEG", quality=85)
+            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            steps.append({"screenshot_b64": b64, "action": action})
+
+        return {
+            "task_id": self.task_config.get("task_id", "") if self.task_config else "",
+            "instruction": self.instruction or "",
+            "eval_result": getattr(self, "_last_eval_result", 0.0),
+            "limit_images": limit_images,
+            "steps": steps,
+        }
+
     def is_done(self):
         return self.is_done
 
@@ -1340,6 +1376,7 @@ class RemoteEnvWorker:
                 score = result["score"] if isinstance(result, dict) else result
                 score_float = float(score)
                 print(f"RemoteEnvWorker[{self.worker_idx}] evaluate: score={score_float}, instruction={self.instruction}")
+                self._last_eval_result = score_float
                 return score_float
             except Exception as e:
                 last_err = e
@@ -1349,6 +1386,7 @@ class RemoteEnvWorker:
                     wait = 5 * (attempt + 1)  # 5s, 10s, 15s, 20s backoff
                     time.sleep(wait)
         print(f"RemoteEnvWorker evaluate HTTP error (all {self.REMOTE_EVALUATE_RETRIES + 1} attempts failed): {last_err}. Returning 0.0.")
+        self._last_eval_result = 0.0
         return 0.0
 
     def get_history_messages(self):
@@ -1356,6 +1394,38 @@ class RemoteEnvWorker:
 
     def get_history_images(self):
         return self.history_images
+
+    def get_compact_trajectory(self, limit_images: int = 8) -> dict:
+        """Return a deduplicated episode dict: each screenshot stored once.
+
+        Mirrors EnvWorker.get_compact_trajectory(). Uses history_images (raw JPEG
+        bytes) and extracts actions from history_messages assistant turns.
+        """
+        import base64
+        import io as _io
+        from PIL import Image as _Image
+
+        actions = [
+            (m["content"][0]["text"] if isinstance(m["content"], list) else m["content"])
+            for m in self.history_messages if m.get("role") == "assistant"
+        ]
+        images = self.history_images  # List of raw JPEG bytes (one per step)
+
+        steps = []
+        for img_bytes, action in zip(images, actions):
+            pil = _Image.open(_io.BytesIO(img_bytes))
+            buf = _io.BytesIO()
+            pil.save(buf, format="JPEG", quality=85)
+            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            steps.append({"screenshot_b64": b64, "action": action})
+
+        return {
+            "task_id": self.task_config.get("task_id", "") if self.task_config else "",
+            "instruction": self.instruction or "",
+            "eval_result": getattr(self, "_last_eval_result", 0.0),
+            "limit_images": limit_images,
+            "steps": steps,
+        }
 
     def is_done(self):
         return self._is_done
