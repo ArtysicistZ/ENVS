@@ -28,7 +28,7 @@ import dotenv
 dotenv.load_dotenv()
 
 
-PROXY_CONFIG_FILE = os.getenv("PROXY_CONFIG_FILE", "evaluation_examples/settings/proxy/dataimpulse.json")  # Default proxy config file
+PROXY_CONFIG_FILE = os.getenv("PROXY_CONFIG_FILE", "OSWorld/evaluation_examples/settings/proxy/dataimpulse.json")  # Default proxy config file
 
 logger = logging.getLogger("desktopenv.setup")
 
