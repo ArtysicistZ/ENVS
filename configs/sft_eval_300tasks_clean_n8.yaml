@@ -1,13 +1,25 @@
-# SFT Evaluation: 306 tasks × 1 rollout
+# SFT Evaluation: 300 tasks × 8 rollouts (6 false-positive tasks removed)
 # Used after each SFT epoch to measure model performance.
 #
+# Removed tasks (wrong evaluator / init-state already passes):
+#   99146c54 (chrome), 030eeff7 (chrome), bedcedc4 (os),
+#   2c1ebcd7 (multi_apps), ef9d12bd (libreoffice_impress), 4d117223 (os)
+#
 # MODEL_PATH is overridden by the wrapper script per epoch.
-# Run: sudo -E python -m verl.trainer.main config=configs/sft_eval_306tasks_n1.yaml
+# Run: sudo -E python -m verl.trainer.main config=configs/sft_eval_300tasks_clean_n8.yaml
+
+#!/bin/bash
+# cd /home/kevinzyz/yincheng/arpo
+# sudo -E .venv/bin/python3 -m verl.trainer.main \
+#     config=configs/sft_eval_300tasks_clean_n8.yaml \
+#     worker.actor.model.model_path=checkpoints/sft_86tasks/epoch_1 \
+#     trainer.experiment_name=sft_eval_epoch1_300tasks_n8 \
+#     trainer.save_checkpoint_path=checkpoints/sft_86tasks/eval_epoch1_300clean_n8
 
 data:
-  train_files: OSWorld/evaluation_examples/test_all_noproxy_softreset.json
-  val_files: OSWorld/evaluation_examples/test_all_noproxy_softreset.json
-  val_n_repeats: 1  # 306 tasks × 1 = 306 rollouts
+  train_files: OSWorld/evaluation_examples/test_all_300tasks_noproxy_softreset_clean.json
+  val_files: OSWorld/evaluation_examples/test_all_300tasks_noproxy_softreset_clean.json
+  val_n_repeats: 8  # 300 tasks × 8 = 2400 rollouts
   prompt_key: instruction
   answer_key: ""
   image_key: images
@@ -15,7 +27,7 @@ data:
   max_response_length: 1024
   rollout_batch_size: 8
   val_batch_size: -1
-  shuffle: false
+  shuffle: true
   seed: 42
   max_pixels: 2116800
   min_pixels: 256
@@ -59,7 +71,7 @@ worker:
 
   rollout:
     temperature: 1.0
-    n: 2  # Must be >1 to pass GRPO init check; val_override_config.n=1 is used for actual eval
+    n: 8
     gpu_memory_utilization: 0.6
     enforce_eager: false
     enable_chunked_prefill: false
@@ -102,5 +114,5 @@ trainer:
   nnodes: 1
   val_before_train: true
   val_only: true
-  save_checkpoint_path: checkpoints/sft_eval
+  save_checkpoint_path: checkpoints/sft_86tasks/eval_epoch1_300clean_n8
   save_trajectories: false
