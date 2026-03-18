@@ -1016,8 +1016,8 @@ class RayPPOTrainer:
         obs_messages = [x['obs_messages'] for x in env_outputs]
         env_idx = [x['env_idx'] for x in env_outputs]
 
-        valid_obs_messages = [x['obs_messages'] for x in env_outputs if x['obs_messages'] is not None]
-        valid_env_idx = [x['env_idx'] for x in env_outputs if x['obs_messages'] is not None]
+        valid_obs_messages = [x['obs_messages'] for x in env_outputs if x['obs_messages'] is not None and not x.get('is_done', False)]
+        valid_env_idx = [x['env_idx'] for x in env_outputs if x['obs_messages'] is not None and not x.get('is_done', False)]
 
         if not valid_obs_messages:
             return None, []

@@ -1,0 +1,108 @@
+{
+  "chrome": [
+    "2ad9387a-65d8-4e33-ad5b-7580065a27ca",
+    "2ae9ba84-3a0d-4d4c-8338-3a1478dc5fe3",
+    "ae78f875-5b98-4907-bbb5-9c737fc68c03",
+    "af630914-714e-4a24-a7bb-f9af687d3b91",
+    "bb5e4c0d-f964-439c-97b6-bdb9747de3f4"
+  ],
+  "gimp": [
+    "06ca5602-62ca-47f6-ad4f-da151cde54cc",
+    "554785e9-4523-4e7a-b8e1-8016f565f56a",
+    "58d3eeeb-e9d0-499f-962e-fd0db2a744d8",
+    "72f83cdc-bf76-4531-9a1b-eb893a13f8aa",
+    "7767eef2-56a3-4cea-8c9f-48c070c7d65b",
+    "77b8ab4d-994f-43ac-8930-8ca087d7c4b4",
+    "7a4deb26-d57d-4ea9-9a73-630f66a7b568",
+    "7b7617bd-57cc-468e-9c91-40c4ec2bcb3d",
+    "a746add2-cab0-4740-ac36-c3769d9bfb46",
+    "b148e375-fe0b-4bec-90e7-38632b0d73c2",
+    "d16c99dc-2a1e-46f2-b350-d97c86c85c15",
+    "d52d6308-ec58-42b7-a2c9-de80e4837b2b",
+    "dbbf4b99-2253-4b10-9274-45f246af2466",
+    "e2dd0213-26db-4349-abe5-d5667bfd725c",
+    "f723c744-e62c-4ae6-98d1-750d3cd7d79d"
+  ],
+  "libreoffice_calc": [
+    "1273e544-688f-496b-8d89-3e0f40aa0606",
+    "2bd59342-0664-4ccb-ba87-79379096cc08",
+    "3aaa4e37-dc91-482e-99af-132a612d40f3",
+    "4172ea6e-6b77-4edb-a9cc-c0014bd1603b",
+    "6e99a1ad-07d2-4b66-a1ce-ece6d99c20a5"
+  ],
+  "libreoffice_impress": [
+    "08aced46-45a2-48d7-993b-ed3fb5b32302",
+    "21760ecb-8f62-40d2-8d85-0cee5725cb72",
+    "2b94c692-6abb-48ae-ab0b-b3e8a19cb340",
+    "2cd43775-7085-45d8-89fa-9e35c0a915cf",
+    "455d3c66-7dc6-4537-a39a-36d3e9119df7",
+    "5c1a6c3d-c1b3-47cb-9b01-8d1b7544ffa1",
+    "73c99fb9-f828-43ce-b87a-01dc07faa224",
+    "9cf05d24-6bd9-4dae-8967-f67d88f5d38a",
+    "a097acff-6266-4291-9fbd-137af7ecd439",
+    "ac1b39ff-ee4d-4483-abce-c117e98942f0",
+    "af2d657a-e6b3-4c6a-9f67-9e3ed015974c",
+    "c59742c0-4323-4b9d-8a02-723c251deaa0",
+    "f23acfd2-c485-4b7c-a1e7-d4303ddfe864"
+  ],
+  "libreoffice_writer": [
+    "0810415c-bde4-4443-9047-d5f70165a697",
+    "0e763496-b6bb-4508-a427-fad0b6c3e195",
+    "3ef2b351-8a84-4ff2-8724-d86eae9b842e",
+    "4bcb1253-a636-4df4-8cb0-a35c04dfef31",
+    "6a33f9b9-0a56-4844-9c3f-96ec3ffb3ba2",
+    "72b810ef-4156-4d09-8f08-a0cf57e7cefe",
+    "d53ff5ee-3b1a-431e-b2be-30ed2673079b",
+    "e528b65e-1107-4b8c-8988-490e4fece599",
+    "ecc2413d-8a48-416e-a3a2-d30106ca36cb"
+  ],
+  "multi_apps": [
+    "2b9493d7-49b8-493a-a71b-56cd1f4d6908",
+    "2c9fc0de-3ee7-45e1-a5df-c86206ad78b5",
+    "3a93cae4-ad3e-403e-8c12-65303b271818",
+    "510f64c8-9bcc-4be1-8d30-638705850618",
+    "9219480b-3aed-47fc-8bac-d2cffc5849f7",
+    "ee9a3c83-f437-4879-8918-be5efbb9fac7"
+  ],
+  "os": [
+    "37887e8c-da15-4192-923c-08fa390a176d",
+    "4783cc41-c03c-4e1b-89b4-50658f642bd5",
+    "5ea617a3-0e86-4ba6-aab2-dac9aa2e8d57",
+    "6f56bf42-85b8-4fbb-8e06-6c44960184ba",
+    "a462a795-fdc7-4b23-b689-e8b6df786b78",
+    "a4d98375-215b-4a4d-aee9-3d4370fccc41",
+    "b3d4a89c-53f2-4d6b-8b6a-541fb5d205fa",
+    "e0df059f-28a6-4169-924f-b9623e7184cc",
+    "f9be0997-4b7c-45c5-b05c-4612b44a6118"
+  ],
+  "thunderbird": [
+    "10a730d5-d414-4b40-b479-684bed1ae522",
+    "3f28fe4f-5d9d-4994-a456-efd78cfae1a3",
+    "9bc3cc16-074a-45ac-9bdc-b2a362e1daf3",
+    "a10b69e1-6034-4a2b-93e1-571d45194f75",
+    "dd84e895-72fd-4023-a336-97689ded257c",
+    "dfac9ee8-9bc4-4cdc-b465-4a4bfcd2f397",
+    "f201fbc3-44e6-46fc-bcaa-432f9815454c"
+  ],
+  "vlc": [
+    "8ba5ae7a-5ae5-4eab-9fcc-5dd4fe3abf89",
+    "8d9fd4e2-6fdb-46b0-b9b9-02f06495c62f",
+    "8f080098-ddb1-424c-b438-4e96e5e4786e",
+    "a5bbbcd5-b398-4c91-83d4-55e1e31bbb81",
+    "cb130f0d-d36f-4302-9838-b3baf46139b6"
+  ],
+  "vs_code": [
+    "0512bb38-d531-4acf-9e7e-0add90816068",
+    "0ed39f63-6049-43d4-ba4d-5fa2fe04a951",
+    "276cc624-87ea-4f08-ab93-f770e3790175",
+    "53ad5833-3455-407b-bbc6-45b4c79ab8fb",
+    "57242fad-77ca-454f-b71b-f187181a9f23",
+    "5e2d93d8-8ad0-4435-b150-1692aacaa994",
+    "6ed0a554-cbee-4b44-84ea-fd6c042f4fe1",
+    "70745df8-f2f5-42bd-8074-fbc10334fcc5",
+    "9439a27b-18ae-42d8-9778-5f68f891805e",
+    "9d425400-e9b2-4424-9a4b-d4c7abac4140",
+    "c6bf789c-ba3a-4209-971d-b63abf0ab733",
+    "ec71221e-ac43-46f9-89b8-ee7d80f7e1c5"
+  ]
+}

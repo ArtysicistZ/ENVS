@@ -1,0 +1,34 @@
+{
+  "chrome": [
+    "ae78f875-5b98-4907-bbb5-9c737fc68c03"
+  ],
+  "gimp": [
+    "58d3eeeb-e9d0-499f-962e-fd0db2a744d8",
+    "dbbf4b99-2253-4b10-9274-45f246af2466",
+    "e2dd0213-26db-4349-abe5-d5667bfd725c"
+  ],
+  "libreoffice_calc": [
+    "2bd59342-0664-4ccb-ba87-79379096cc08",
+    "4172ea6e-6b77-4edb-a9cc-c0014bd1603b"
+  ],
+  "libreoffice_impress": [
+    "08aced46-45a2-48d7-993b-ed3fb5b32302",
+    "2cd43775-7085-45d8-89fa-9e35c0a915cf",
+    "5c1a6c3d-c1b3-47cb-9b01-8d1b7544ffa1",
+    "9cf05d24-6bd9-4dae-8967-f67d88f5d38a",
+    "a097acff-6266-4291-9fbd-137af7ecd439",
+    "ac1b39ff-ee4d-4483-abce-c117e98942f0",
+    "af2d657a-e6b3-4c6a-9f67-9e3ed015974c",
+    "c59742c0-4323-4b9d-8a02-723c251deaa0",
+    "f23acfd2-c485-4b7c-a1e7-d4303ddfe864"
+  ],
+  "os": [
+    "37887e8c-da15-4192-923c-08fa390a176d",
+    "4783cc41-c03c-4e1b-89b4-50658f642bd5",
+    "a462a795-fdc7-4b23-b689-e8b6df786b78",
+    "b3d4a89c-53f2-4d6b-8b6a-541fb5d205fa"
+  ],
+  "vlc": [
+    "cb130f0d-d36f-4302-9838-b3baf46139b6"
+  ]
+}
