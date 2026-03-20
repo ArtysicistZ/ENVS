@@ -655,10 +655,6 @@ class RayPPOTrainer:
                                            fallback_fn=lambda idx: 0.0)
             eval_results_total.extend(eval_results)
 
-            history_futures = [worker.get_history_messages.remote() for worker in self.env_workers[:num_tasks]]
-            history_messages = _ray_get_robust(history_futures, timeout=60, label="val_history",
-                                               fallback_fn=lambda idx: [])
-
             # --- Trajectory saving (if enabled) — only successful episodes ---
             if getattr(self.config.trainer, 'save_trajectories', False):
                 from verl.utils.trajectory_io import TrajectoryWriter
@@ -690,19 +686,33 @@ class RayPPOTrainer:
             scores = eval_results
             reward_tensor = torch.tensor(scores, dtype=torch.float32).unsqueeze(-1)
 
-            sample_inputs.extend([task_config.get('instruction', '') for task_config in task_configs])
-            prompts = []
-            for history_message in history_messages:
-                if not history_message or (isinstance(history_message, list) and len(history_message) == 0):
-                    prompts.append("")  # Remote env timeout/failure or no steps
-                else:
-                    try:
-                        prompts.append(self.processor.apply_chat_template(history_message))
-                    except (IndexError, KeyError, TypeError):
-                        prompts.append("")  # Malformed history (e.g. after timeout)
-            sample_outputs.extend(prompts)
-            sample_labels.extend(['none']*len(prompts))
-            sample_scores.extend(scores)
+            # Only fetch history messages (which contain huge base64 screenshots) if we
+            # actually need them for logging. Skip to avoid accumulating GBs of RAM in
+            # the Runner process, which causes OOM on large evals (300+ tasks × n=8).
+            _n_to_log = getattr(self.config.trainer, 'val_generations_to_log', 0)
+            if _n_to_log > 0 and len(sample_inputs) < _n_to_log:
+                history_futures = [worker.get_history_messages.remote() for worker in self.env_workers[:num_tasks]]
+                history_messages = _ray_get_robust(history_futures, timeout=60, label="val_history",
+                                                   fallback_fn=lambda idx: [])
+                sample_inputs.extend([task_config.get('instruction', '') for task_config in task_configs])
+                prompts = []
+                for history_message in history_messages:
+                    if not history_message or (isinstance(history_message, list) and len(history_message) == 0):
+                        prompts.append("")
+                    else:
+                        try:
+                            prompts.append(self.processor.apply_chat_template(history_message))
+                        except (IndexError, KeyError, TypeError):
+                            prompts.append("")
+                sample_outputs.extend(prompts)
+                sample_labels.extend(['none']*len(prompts))
+                sample_scores.extend(scores)
+                del history_messages, prompts
+            else:
+                sample_inputs.extend([task_config.get('instruction', '') for task_config in task_configs])
+                sample_outputs.extend([''] * num_tasks)
+                sample_labels.extend(['none'] * num_tasks)
+                sample_scores.extend(scores)
 
             reward_tensor_lst.append(reward_tensor)
 
@@ -768,6 +778,13 @@ class RayPPOTrainer:
 
         self._maybe_log_val_generations(sample_inputs, sample_outputs, sample_labels, sample_scores)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
+
+        # Free accumulated validation data to prevent OOM in Runner process.
+        # With 300+ tasks × n=8, these lists can hold GBs of data.
+        del sample_inputs, sample_outputs, sample_labels, sample_scores
+        del reward_tensor_lst, task_configs_total, eval_results_total
+        import gc; gc.collect()
+
         return {"val/reward_score": reward_score}
 
     def init_workers(self) -> None:
@@ -1619,7 +1636,12 @@ class RayPPOTrainer:
             val_metrics = self._validate()
             self.logger.log(data=val_metrics, step=self.global_step)
             if self.config.trainer.val_only:
+                print("[val_only] Validation complete.")
                 return
+
+        if self.config.trainer.val_only:
+            print("[val_only] val_before_train is False; nothing to do.")
+            return
 
         for _ in tqdm(range(self.config.trainer.total_episodes), desc="Episode", position=0):
             prefetched = None  # (batch_dict, rollout_chunks, reset_futures) or None

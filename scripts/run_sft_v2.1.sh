@@ -1,27 +1,33 @@
 #!/bin/bash
 # =============================================================================
-# SFT Training with Per-Epoch Evaluation on OSWorld (306 tasks, n=1)
+# SFT v2.1: Balanced data + lower LR + batch 32 + 2 epochs + eval n=2
+#
+# Changes from v1 (LR=1e-5, batch=32):
+#   - Data: diversity-selected 715 trajectories (difficulty-balanced)
+#   - LR: 5e-6 (was 1e-5) — halved LR/batch ratio for conservative updates
+#   - Batch: 32 (same as v1)
+#   - Warmup: 0.05 (was 0.03) — gentler start
+#   - 2 epochs (was 5) — evaluate after each
+#   - Eval: 300 clean tasks n=2 (lighter eval per epoch)
 #
 # Pipeline:
-#   1. Baseline evaluation (original model)
+#   1. (Optional) Baseline evaluation
 #   2. For each epoch 1..N: train → cleanup GPU → evaluate → cleanup GPU
 #
-# All results are logged to {OUTPUT_DIR}/training_log.json
-#
 # Usage:
-#   bash scripts/run_sft_with_eval.sh
+#   bash scripts/run_sft_v2.1.sh
 #
 # Environment variables (override defaults):
 #   MODEL_PATH    — base model (default: ByteDance-Seed/UI-TARS-1.5-7B)
-#   DATA_PATH     — trajectory JSONL (default: checkpoints/arpo-inference/sft_86tasks_trajectories.jsonl)
-#   OUTPUT_DIR    — output directory (default: checkpoints/sft_86tasks)
-#   NUM_EPOCHS    — number of epochs (default: 5)
+#   DATA_PATH     — trajectory JSONL (default: selected trajectories)
+#   OUTPUT_DIR    — output directory (default: checkpoints/sft_v2.1)
+#   NUM_EPOCHS    — number of epochs (default: 2)
 #   NUM_GPUS      — GPUs for training (default: 8)
-#   SKIP_BASELINE — set to 1 to skip baseline eval (default: 0)
-#   SKIP_TRAINING — set to 1 to skip training, only eval existing checkpoints (default: 0)
-#   LR            — learning rate (default: 1e-5)
+#   SKIP_BASELINE — set to 1 to skip baseline eval (default: 1)
+#   SKIP_TRAINING — set to 1 to skip training, only eval existing checkpoints
+#   LR            — learning rate (default: 5e-6)
 #   LR_SCHEDULER  — lr schedule type (default: cosine)
-#   WARMUP_RATIO  — warmup ratio (default: 0.03)
+#   WARMUP_RATIO  — warmup ratio (default: 0.05)
 #   MAX_GRAD_NORM — gradient clipping (default: 1.0)
 #   BATCH_SIZE    — per-device batch size (default: 1)
 #   GRAD_ACCUM    — gradient accumulation steps (default: 4)
@@ -31,29 +37,34 @@
 
 set -euo pipefail
 
+# Load .env if present (for WANDB_API_KEY etc.)
+if [ -f .env ]; then
+    set -a; source .env; set +a
+fi
+
 # --- Configuration ---
 MODEL_PATH="${MODEL_PATH:-ByteDance-Seed/UI-TARS-1.5-7B}"
-DATA_PATH="${DATA_PATH:-checkpoints/arpo-inference/sft_86tasks_trajectories.jsonl}"
-OUTPUT_DIR="${OUTPUT_DIR:-checkpoints/sft_86tasks}"
-NUM_EPOCHS="${NUM_EPOCHS:-5}"
+DATA_PATH="${DATA_PATH:-checkpoints/arpo-inference/sft_trajectories_selected.jsonl}"
+OUTPUT_DIR="${OUTPUT_DIR:-checkpoints/sft_v2.1}"
+NUM_EPOCHS="${NUM_EPOCHS:-2}"
 NUM_GPUS="${NUM_GPUS:-8}"
-SKIP_BASELINE="${SKIP_BASELINE:-0}"
+SKIP_BASELINE="${SKIP_BASELINE:-1}"
 SKIP_TRAINING="${SKIP_TRAINING:-0}"
-LR="${LR:-1e-5}"
+LR="${LR:-5e-6}"
 LR_SCHEDULER="${LR_SCHEDULER:-cosine}"
-WARMUP_RATIO="${WARMUP_RATIO:-0.03}"
+WARMUP_RATIO="${WARMUP_RATIO:-0.05}"
 MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
 BATCH_SIZE="${BATCH_SIZE:-1}"
 GRAD_ACCUM="${GRAD_ACCUM:-4}"
 MAX_LENGTH="${MAX_LENGTH:-12000}"
 LIMIT_IMAGES="${LIMIT_IMAGES:-3}"
 
-EVAL_CONFIG="configs/sft_eval_306tasks_n1.yaml"
+EVAL_CONFIG="configs/sft_eval_300tasks_clean_n1.yaml"
 LOG_FILE="${OUTPUT_DIR}/training_log.json"
 PYTHON_BIN="${PYTHON_BIN:-$(which python3)}"
 
 echo "============================================================"
-echo "SFT Training with Per-Epoch Evaluation"
+echo "SFT v2.1 Training with Per-Epoch Evaluation"
 echo "============================================================"
 echo "Model:         ${MODEL_PATH}"
 echo "Data:          ${DATA_PATH}"
@@ -71,26 +82,18 @@ echo "============================================================"
 mkdir -p "${OUTPUT_DIR}"
 
 # --- Helper: kill lingering Ray/vLLM processes and free GPU memory ---
-# verl.trainer.main uses os._exit(0) which bypasses ray.shutdown(), leaving
-# orphaned Ray workers holding GPU memory. This function forces cleanup.
 cleanup_gpu() {
     echo ""
     echo ">>> Cleaning up GPU processes..."
 
-    # Stop the Ray cluster (kills all Ray workers including vLLM engines)
     sudo -E env "PATH=${PATH}" ray stop --force 2>/dev/null || true
-
-    # Kill any remaining python processes holding GPU memory (safety net)
-    # Only kill processes with "ray::" or "vllm" in their cmdline
     sudo pkill -9 -f "ray::" 2>/dev/null || true
     sudo pkill -9 -f "from vllm" 2>/dev/null || true
     sudo pkill -9 -f "raylet" 2>/dev/null || true
     sudo pkill -9 -f "gcs_server" 2>/dev/null || true
 
-    # Wait for GPU memory to be fully released
     sleep 5
 
-    # Verify GPUs are free
     local gpu_procs
     gpu_procs=$(sudo nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null | wc -l) || gpu_procs=0
     if [ "${gpu_procs}" -gt 0 ]; then
@@ -116,10 +119,9 @@ run_eval() {
     sudo -E env "PATH=${PATH}" "PYTHONPATH=${PYTHONPATH:-}" "${PYTHON_BIN}" -m verl.trainer.main \
         config="${EVAL_CONFIG}" \
         worker.actor.model.model_path="${model_path}" \
-        trainer.experiment_name="sft_eval_${eval_name}" \
+        trainer.experiment_name="sft_v2.1_eval_${eval_name}" \
         trainer.save_checkpoint_path="${save_path}"
 
-    # Parse eval results and update training_log.json
     local eval_results_file="${save_path}/eval_results_at_0.json"
     if [ -f "${eval_results_file}" ]; then
         sudo -E env "PATH=${PATH}" "PYTHONPATH=${PYTHONPATH:-}" "${PYTHON_BIN}" << PYEOF
@@ -132,7 +134,6 @@ eval_name = "${eval_name}"
 with open(eval_results_file) as f:
     eval_results = json.load(f)
 
-# Compute summary
 n_tasks = len(eval_results)
 n_doable = sum(1 for v in eval_results.values() if v.get("n_success", 0) > 0)
 total_attempts = sum(v.get("n_attempts", 0) for v in eval_results.values())
@@ -145,21 +146,13 @@ summary = {
     "total_attempts": total_attempts,
     "total_successes": total_successes,
     "overall_success_rate": round(total_successes / total_attempts, 4) if total_attempts > 0 else 0,
-    "per_domain": {},
 }
 
-# Per-domain breakdown
-domain_stats = {}
-for tid, v in eval_results.items():
-    # Domain is not stored in eval_results; just aggregate overall
-    pass
-
-# Load and update log
 try:
     with open(log_file) as f:
         log = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError):
-    log = {"experiment": "sft_86tasks", "epochs": []}
+    log = {"experiment": "sft_v2.1", "epochs": []}
 
 eval_entry = {
     "eval_results_file": eval_results_file,
@@ -171,7 +164,6 @@ if eval_name == "baseline":
     log["baseline_eval"] = eval_entry
     log["baseline_eval"]["model_path"] = "${model_path}"
 else:
-    # Find the epoch entry and update it
     epoch_num = eval_name.replace("epoch_", "")
     try:
         epoch_num = int(epoch_num)
@@ -184,10 +176,8 @@ else:
             ep["eval_results_file"] = eval_results_file
             break
     else:
-        # Epoch entry not found (training log not written yet), add standalone
         log.setdefault("standalone_evals", {})[eval_name] = eval_entry
 
-import tempfile
 tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(log_file) or ".")
 with os.fdopen(tmp_fd, "w") as f:
     json.dump(log, f, indent=2)
@@ -214,20 +204,33 @@ else
     echo ">>> Skipping baseline evaluation (SKIP_BASELINE=1)"
 fi
 
-# --- Steps 1-N: Train one epoch at a time, evaluate after each ---
+# --- Train one epoch at a time, evaluate after each, then delete model to free SSD ---
+# Each epoch uses the previous epoch's saved model as starting point.
+# LR schedule is cosine over 1 epoch each time.
 if [ "${SKIP_TRAINING}" != "1" ]; then
+    CURRENT_MODEL="${MODEL_PATH}"
     for epoch in $(seq 1 "${NUM_EPOCHS}"); do
         EPOCH_MODEL="${OUTPUT_DIR}/epoch_${epoch}"
         EVAL_DIR="${OUTPUT_DIR}/eval_epoch_${epoch}"
+        PREV_EPOCH_MODEL="${OUTPUT_DIR}/epoch_$((epoch - 1))"
+
+        # Use previous epoch's model if available
+        if [ "${epoch}" -gt 1 ] && [ -d "${PREV_EPOCH_MODEL}" ]; then
+            CURRENT_MODEL="${PREV_EPOCH_MODEL}"
+        fi
 
         # --- Skip already-completed epochs (safe restart) ---
-        if [ -d "${EPOCH_MODEL}" ] && [ -f "${EVAL_DIR}/eval_results_at_0.json" ]; then
+        if [ -f "${EVAL_DIR}/eval_results_at_0.json" ]; then
             echo ""
             echo ">>> Epoch ${epoch} already trained + evaluated, skipping"
+            # Use this epoch's model for next epoch if it exists
+            if [ -d "${EPOCH_MODEL}" ]; then
+                CURRENT_MODEL="${EPOCH_MODEL}"
+            fi
             continue
         fi
 
-        # --- Train (skip if model already exists from a previous run) ---
+        # --- Train (skip if model already exists) ---
         if [ -d "${EPOCH_MODEL}" ]; then
             echo ""
             echo ">>> Epoch ${epoch} model exists at ${EPOCH_MODEL}, skipping training"
@@ -236,22 +239,20 @@ if [ "${SKIP_TRAINING}" != "1" ]; then
             echo "============================================================"
             echo "Step ${epoch}a: Training Epoch ${epoch}/${NUM_EPOCHS}"
             echo "============================================================"
+            echo ">>> Loading model from: ${CURRENT_MODEL}"
 
-            # Resume from latest checkpoint (works for ALL epochs, including epoch 1 on restart)
-            RESUME_ARG=""
-            PREV_CKPT=$(ls -td "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | head -1 || true)
-            if [ -n "${PREV_CKPT}" ]; then
-                RESUME_ARG="--resume_from_checkpoint ${PREV_CKPT}"
-                echo ">>> Resuming from: ${PREV_CKPT}"
-            fi
+            EPOCH_OFFSET=$((epoch - 1))
 
             sudo -E env "PATH=${PATH}" "PYTHONPATH=${PYTHONPATH:-}" \
+                "WANDB_API_KEY=${WANDB_API_KEY:-}" \
+                "WANDB_PROJECT=ARPO" "WANDB_ENTITY=artysicistz-university-of-pennsylvania" \
+                "WANDB_RUN_NAME=sft_v2.1_epoch_${epoch}" \
             torchrun --nproc_per_node="${NUM_GPUS}" scripts/train_sft.py \
-                --model_path "${MODEL_PATH}" \
+                --model_path "${CURRENT_MODEL}" \
                 --data_path "${DATA_PATH}" \
                 --output_dir "${OUTPUT_DIR}" \
-                --num_epochs "${NUM_EPOCHS}" \
-                --stop_after_epoch "${epoch}" \
+                --num_epochs 1 \
+                --epoch_offset "${EPOCH_OFFSET}" \
                 --per_device_batch_size "${BATCH_SIZE}" \
                 --gradient_accumulation_steps "${GRAD_ACCUM}" \
                 --learning_rate "${LR}" \
@@ -261,10 +262,8 @@ if [ "${SKIP_TRAINING}" != "1" ]; then
                 --max_length "${MAX_LENGTH}" \
                 --limit_images "${LIMIT_IMAGES}" \
                 --logging_steps 1 \
-                --fsdp_offload \
-                ${RESUME_ARG}
+                --fsdp_offload
 
-            # Free GPU memory from training before starting eval
             cleanup_gpu
         fi
 
@@ -277,11 +276,18 @@ if [ "${SKIP_TRAINING}" != "1" ]; then
         if [ -d "${EPOCH_MODEL}" ]; then
             run_eval "${EPOCH_MODEL}" "epoch_${epoch}"
             cleanup_gpu
+
+            # Keep all models — user will delete manually if needed
+
+            CURRENT_MODEL="${EPOCH_MODEL}"
         else
             echo "[ERROR] Epoch ${epoch} model not found at ${EPOCH_MODEL}"
             echo "  Available dirs: $(ls -d ${OUTPUT_DIR}/epoch_* 2>/dev/null || echo 'none')"
         fi
     done
+
+    # Keep the last epoch's model (final trained artifact)
+    echo ">>> Keeping final model: ${OUTPUT_DIR}/epoch_${NUM_EPOCHS}"
 else
     echo ""
     echo ">>> Skipping training (SKIP_TRAINING=1)"

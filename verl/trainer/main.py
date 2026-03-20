@@ -123,11 +123,12 @@ class Runner:
             reward_fn=reward_fn,
             val_reward_fn=val_reward_fn,
         )
+        # Keep trainer on the actor instance so Python GC doesn't trigger
+        # vLLM/CUDA __del__ cleanup (which can segfault) when run() returns.
+        self._trainer = trainer
         trainer.init_workers()
         trainer.fit()
-        # Exit immediately without Python/vLLM teardown to avoid segmentation fault
-        # (vLLM/CUDA cleanup during normal exit can segfault). Main will get RayActorError.
-        os._exit(0)
+        return "completed"
 
 
 def main():
@@ -168,31 +169,27 @@ def main():
     print(ray.cluster_resources().keys())
 
     runner = Runner.remote()
+    _exit_code = 0
     try:
         ray.get(runner.run.remote(ppo_config))
+        print("Training/evaluation completed successfully.")
     except (RayActorError, RayTaskError) as e:
-        # Runner died: (1) normal exit via os._exit(0) after fit() completes, or
-        # (2) unexpected death (OOM, SIGSEGV). Exit immediately without
-        # ray.shutdown() to avoid segmentation fault during cleanup.
+        # Runner crashed unexpectedly (OOM, SIGSEGV, etc.)
+        _exit_code = 1
         err_str = str(e).lower()
         if "owner" in err_str and ("died" in err_str or "crashed" in err_str):
-            print("Runner exited because the owner (driver/head) died — often OOM or node crash.")
-            print("Check the driver log for the root cause:")
+            print("Runner died because the driver/head node crashed (likely OOM).")
+            print("Check logs:")
             print("  /tmp/ray/session_latest/logs/python-core-driver-*.log")
-            print("  and worker logs: python-core-worker-*.log in the same directory.")
+            print("  /tmp/ray/session_latest/logs/python-core-worker-*.log")
         else:
-            print("Runner exited (worker crash or normal exit).")
+            print(f"Runner crashed: {type(e).__name__}: {e}")
         if isinstance(e, RayTaskError) and e.cause is not None:
-            print(f"Task error cause:\n{e.cause}")
-        else:
-            print(f"Exception: {type(e).__name__}: {e}")
-        print("Tip: run scripts/utils/clear_ray_logs.sh before training to remove previous logs and get a fresh session.")
-        os._exit(0)
-    finally:
-        try:
-            ray.shutdown()
-        except Exception:
-            pass
+            print(f"Cause:\n{e.cause}")
+    # Exit immediately from the driver to avoid vLLM/CUDA segfault during
+    # Python cleanup. os._exit() from the driver kills the entire Ray process
+    # tree cleanly (no SYSTEM_ERROR messages, unlike os._exit from an actor).
+    os._exit(_exit_code)
 
 
 if __name__ == "__main__":

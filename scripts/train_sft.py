@@ -324,10 +324,12 @@ class EpochSaveCallback(TrainerCallback):
     Also records per-epoch training metrics to {output_dir}/training_log.json.
     """
 
-    def __init__(self, output_dir, processor, args_dict, dataset_stats):
+    def __init__(self, output_dir, processor, args_dict, dataset_stats, no_save_model=False, epoch_offset=0):
         self.output_dir = output_dir
         self.processor = processor
         self.trainer = None  # Set after Trainer construction
+        self.no_save_model = no_save_model
+        self.epoch_offset = epoch_offset
         self.epoch_metrics = []
         self.epoch_start_time = None
         # Accumulated loss between logging steps
@@ -345,7 +347,7 @@ class EpochSaveCallback(TrainerCallback):
 
         if not hasattr(self, 'training_log') or self.training_log is None:
             self.training_log = {
-                "experiment": "sft_86tasks",
+                "experiment": os.path.basename(self.output_dir),
                 "start_time": datetime.datetime.now().isoformat(),
                 "config": args_dict,
                 "dataset": dataset_stats,
@@ -361,19 +363,24 @@ class EpochSaveCallback(TrainerCallback):
             self._step_losses.append(logs["loss"])
 
     def on_epoch_end(self, args, state, control, **kwargs):
-        epoch = int(state.epoch)
+        epoch = int(state.epoch) + self.epoch_offset
         epoch_wall_time = time.time() - self.epoch_start_time if self.epoch_start_time else 0
 
         # Save clean model copy using Trainer's save_model() which handles
         # FSDP/DeepSpeed state dict gathering across all ranks correctly.
         epoch_dir = os.path.join(self.output_dir, f"epoch_{epoch}")
-        if self.trainer is not None:
-            self.trainer.save_model(epoch_dir)
-        if state.is_world_process_zero:
-            self.processor.save_pretrained(epoch_dir)
-            print(f"\n[EpochSaveCallback] Saved model to {epoch_dir}")
+        if self.no_save_model:
+            if state.is_world_process_zero:
+                print(f"\n[EpochSaveCallback] Skipping model save (--no_save_model)")
+        else:
+            if self.trainer is not None:
+                self.trainer.save_model(epoch_dir)
+            if state.is_world_process_zero:
+                self.processor.save_pretrained(epoch_dir)
+                print(f"\n[EpochSaveCallback] Saved model to {epoch_dir}")
 
-            # Record epoch metrics
+        # Record epoch metrics (rank 0 only)
+        if state.is_world_process_zero:
             avg_loss = sum(self._step_losses) / len(self._step_losses) if self._step_losses else None
             epoch_data = {
                 "epoch": epoch,
@@ -407,7 +414,7 @@ class EpochSaveCallback(TrainerCallback):
             os.replace(tmp_path, self.log_path)
             loss_str = f"avg_loss={avg_loss:.4f}" if avg_loss is not None else "avg_loss=N/A"
             print(f"[EpochSaveCallback] Epoch {epoch} — {loss_str}, "
-                  f"wall_time={epoch_wall_time:.0f}s, saved to {epoch_dir}")
+                  f"wall_time={epoch_wall_time:.0f}s")
 
     def on_train_end(self, args, state, control, **kwargs):
         if state.is_world_process_zero:
@@ -469,10 +476,20 @@ def main():
     parser.add_argument("--stop_after_epoch", type=int, default=None,
                         help="Stop training after this epoch (for per-epoch eval). "
                              "Use with --num_epochs=TOTAL to keep LR schedule consistent.")
+    parser.add_argument("--fsdp_offload", action="store_true", default=False,
+                        help="Enable FSDP CPU offload (slower but uses less GPU memory)")
+    parser.add_argument("--no_save_model", action="store_true", default=False,
+                        help="Skip saving model checkpoints (still logs metrics)")
+    parser.add_argument("--epoch_offset", type=int, default=0,
+                        help="Offset added to epoch number for naming (e.g. 1 means epoch_1 becomes epoch_2)")
     args = parser.parse_args()
 
     if args.no_freeze_vision_tower:
         args.freeze_vision_tower = False
+
+    if args.no_save_model and args.epoch_offset > 0:
+        raise ValueError("--no_save_model is incompatible with multi-epoch training (epoch_offset > 0). "
+                         "Each epoch needs the previous epoch's saved model.")
 
     # Load model, tokenizer, processor
     print(f"Loading model from {args.model_path}...")
@@ -557,7 +574,7 @@ def main():
         "total_params": total_params,
         "trainable_params": trainable_params,
         "frozen_params": frozen_params,
-        "fsdp": "full_shard auto_wrap",
+        "fsdp": "full_shard auto_wrap offload" if args.fsdp_offload else "full_shard auto_wrap",
     }
     dataset_stats = {
         "num_trajectories": dataset.num_trajectories,
@@ -583,16 +600,14 @@ def main():
         max_grad_norm=args.max_grad_norm,
         bf16=args.bf16,
         logging_steps=args.logging_steps,
-        save_strategy="steps",
-        save_steps=50,
-        save_total_limit=3,
+        save_strategy="no",
         remove_unused_columns=False,
         dataloader_num_workers=2,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
-        report_to="none",
-        # FSDP config matching RL pipeline (full_shard + auto_wrap)
-        fsdp="full_shard auto_wrap offload",
+        report_to="wandb",
+        # FSDP config (full_shard + auto_wrap, optional CPU offload)
+        fsdp="full_shard auto_wrap offload" if args.fsdp_offload else "full_shard auto_wrap",
         fsdp_config={
             "transformer_layer_cls_to_wrap": ["Qwen2_5_VLDecoderLayer"],
             "backward_prefetch": "backward_pre",
@@ -606,6 +621,8 @@ def main():
         processor=processor,
         args_dict=args_dict,
         dataset_stats=dataset_stats,
+        no_save_model=args.no_save_model,
+        epoch_offset=args.epoch_offset,
     )
 
     callbacks = [epoch_callback]

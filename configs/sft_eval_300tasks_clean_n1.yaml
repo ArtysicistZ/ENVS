@@ -1,4 +1,4 @@
-# SFT Evaluation: 300 tasks × 1 rollout (6 false-positive tasks removed)
+# SFT Evaluation: 300 tasks x 1 rollout (6 false-positive tasks removed)
 # Used after each SFT epoch to measure model performance.
 #
 # Removed tasks (wrong evaluator / init-state already passes):
@@ -11,7 +11,7 @@
 data:
   train_files: OSWorld/evaluation_examples/test_all_300tasks_noproxy_softreset_clean.json
   val_files: OSWorld/evaluation_examples/test_all_300tasks_noproxy_softreset_clean.json
-  val_n_repeats: 1  # 300 tasks × 1 = 300 rollouts
+  val_n_repeats: 1  # 300 tasks x 1 = 300 rollouts
   prompt_key: instruction
   answer_key: ""
   image_key: images
@@ -19,7 +19,7 @@ data:
   max_response_length: 1024
   rollout_batch_size: 8
   val_batch_size: -1
-  shuffle: false
+  shuffle: true
   seed: 42
   max_pixels: 2116800
   min_pixels: 256
@@ -63,7 +63,7 @@ worker:
 
   rollout:
     temperature: 1.0
-    n: 2  # Must be >1 to pass GRPO init check; val_override_config.n=1 is used for actual eval
+    n: 2
     gpu_memory_utilization: 0.6
     enforce_eager: false
     enable_chunked_prefill: false
@@ -89,13 +89,13 @@ worker:
     skip_special_tokens: true
 
 env:
-  num_envs: 64
+  num_envs: 96
   max_steps: 15
   remote_server_urls:
     - "http://10.100.4.7:15001"
     - "http://10.100.4.6:15001"
     - "http://10.100.4.8:15001"
-  remote_server_env_counts: [24, 16, 24]
+  remote_server_env_counts: [32, 32, 32]
 
 trainer:
   total_episodes: 1
@@ -106,5 +106,5 @@ trainer:
   nnodes: 1
   val_before_train: true
   val_only: true
-  save_checkpoint_path: checkpoints/sft_eval
+  save_checkpoint_path: checkpoints/sft_v2.1/eval
   save_trajectories: false
