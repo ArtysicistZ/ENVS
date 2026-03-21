@@ -39,6 +39,10 @@ class TreeNode:
     # Actions replayed on this VM at spawn time (the physical prefix)
     # For root nodes: empty. For children: the parent's physical sequence at branch time.
     replay_prefix: List[str] = field(default_factory=list)
+    # Snapshot of parent's logical action/screenshot history at branch time.
+    # Frozen at spawn — does NOT grow when the parent continues stepping.
+    parent_action_snapshot: List[str] = field(default_factory=list)
+    parent_screenshot_snapshot: List[str] = field(default_factory=list)
     # Action history: actions executed by THIS node's VM (after replay)
     action_history: List[str] = field(default_factory=list)
     # Screenshots: base64 JPEG for each step (parallel to action_history)
@@ -80,11 +84,11 @@ class TreeNode:
     def get_action_history(self) -> List[str]:
         """Get the full LOGICAL action history (for prompt building).
 
-        Walks the parent chain. Used for building model input messages.
+        Returns the path from root to this node: parent snapshot (frozen at
+        branch time) + this node's own actions. Does NOT walk the live parent
+        chain — the parent may have continued stepping after spawning us.
         """
-        if self.parent is None:
-            return list(self.action_history)
-        return self.parent.get_action_history() + self.action_history
+        return list(self.parent_action_snapshot) + list(self.action_history)
 
     def get_physical_action_sequence(self) -> List[str]:
         """Get the PHYSICAL action sequence that was executed on this VM.
@@ -96,9 +100,7 @@ class TreeNode:
 
     def get_full_screenshot_history(self) -> List[str]:
         """Get the full screenshot history from root to this node."""
-        if self.parent is None:
-            return list(self.screenshot_history)
-        return self.parent.get_full_screenshot_history() + self.screenshot_history
+        return list(self.parent_screenshot_snapshot) + list(self.screenshot_history)
 
     def get_majority_action(self) -> Optional[str]:
         """Get the most common action from candidates (plurality vote)."""

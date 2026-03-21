@@ -107,7 +107,9 @@ def main():
     parser = argparse.ArgumentParser(description="MCTS VM-usage profiling across 86 doable tasks")
     parser.add_argument("--max-steps", type=int, default=15)
     parser.add_argument("--vms-per-task", type=int, default=80,
-                        help="Max VMs per task (default 80 = all)")
+                        help="Total VMs per task (default 80 = all)")
+    parser.add_argument("--max-active", type=int, default=40,
+                        help="Hard cap on active VMs (default 40)")
     parser.add_argument("--tp", type=int, default=8, help="Number of GPUs (1 vLLM engine each)")
     parser.add_argument("--model-path", type=str, default="ByteDance-Seed/UI-TARS-1.5-7B")
     parser.add_argument("--task-file", type=str,
@@ -201,7 +203,7 @@ def main():
 
     config = MCTSConfig(
         vms_per_task=args.vms_per_task,
-        max_active_vms=args.vms_per_task,  # unlimit — use all
+        max_active_vms=args.max_active,
         max_steps=args.max_steps,
         tensor_parallel_size=args.tp,
         model_path=args.model_path,

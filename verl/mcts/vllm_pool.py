@@ -24,7 +24,8 @@ class VLLMWorker:
     """A single vLLM engine on one GPU."""
 
     def __init__(self, gpu_id: int, model_path: str, gpu_memory_utilization: float = 0.85,
-                 max_model_len: int = 32768, limit_images: int = 3):
+                 max_model_len: int = 32768, limit_images: int = 3,
+                 max_pixels: int = 2116800, min_pixels: int = 256):
         # Don't set CUDA_VISIBLE_DEVICES — Ray's num_gpus=1 handles GPU assignment
         from vllm import LLM
         self.llm = LLM(
@@ -33,6 +34,7 @@ class VLLMWorker:
             gpu_memory_utilization=gpu_memory_utilization,
             max_model_len=max_model_len,
             limit_mm_per_prompt={"image": limit_images},
+            mm_processor_kwargs={"max_pixels": max_pixels, "min_pixels": min_pixels},
             trust_remote_code=True,
             dtype="bfloat16",
         )
@@ -76,7 +78,8 @@ class VLLMPool:
     """
 
     def __init__(self, n_gpus: int, model_path: str, gpu_memory_utilization: float = 0.85,
-                 max_model_len: int = 32768, limit_images: int = 3):
+                 max_model_len: int = 32768, limit_images: int = 3,
+                 max_pixels: int = 2116800, min_pixels: int = 256):
         self.n_gpus = n_gpus
         self.workers: List[Any] = []
 
@@ -88,6 +91,8 @@ class VLLMPool:
                 gpu_memory_utilization=gpu_memory_utilization,
                 max_model_len=max_model_len,
                 limit_images=limit_images,
+                max_pixels=max_pixels,
+                min_pixels=min_pixels,
             )
             self.workers.append(w)
 

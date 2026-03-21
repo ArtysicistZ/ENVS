@@ -15,21 +15,21 @@ class MCTSConfig:
     """
 
     # ---- VMs ----
-    vms_per_task: int = 40
-    max_active_vms: int = 40           # HARD CAP — never exceed this many active VMs
-    tasks_per_batch: int = 2           # 80 VMs / 40 per task
+    vms_per_task: int = 80
+    max_active_vms: int = 80           # HARD CAP — 1 task uses all 80 VMs
+    tasks_per_batch: int = 1           # 1 task at a time, all 80 VMs
 
     # ---- Probing ----
-    probe_temperature: float = 1.0
-    k_per_node: int = 8                # K candidates per node per step (NOT shared)
-    k_step0: int = 16                  # K at step 0 (higher investment, only 1 node)
+    probe_temperature: float = 1.0     # Standard temperature — no garbage
+    total_probe_budget: int = 32       # Hard cap on total prompts per step (~4/GPU)
+    k_max: int = 32                    # Ceiling K per node (1 active → full budget)
 
     # ---- Branching ----
     spatial_grid_size: int = 50        # px grid for action fingerprinting
     min_cluster_size: int = 1          # singletons count as clusters
-    max_branch_per_explorer: int = 5   # root VM branch budget
-    child_branch_budget: int = 2       # spawned VMs get reduced budget
-    max_branches_per_step: int = 3     # max minority actions per node per step
+    max_branch_per_explorer: int = 5   # root: 5 branching opportunities
+    child_branch_budget: int = 2       # children: 2 sub-explorations
+    max_branches_per_step: int = 2     # top 2 minorities per node per step
     never_branch_after: int = 15       # effectively disabled — probe at all steps
     late_step_threshold: int = 10      # deferred branching (require 2 consecutive)
 

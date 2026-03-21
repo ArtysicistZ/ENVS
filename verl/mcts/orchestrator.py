@@ -32,6 +32,7 @@ from verl.mcts.clustering import (
     should_branch,
 )
 from verl.mcts.trajectory_io import make_mcts_trajectory
+from verl.trainer.gui_agent import add_box_token
 
 
 SYSTEM_PROMPT = """You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
@@ -140,31 +141,70 @@ class MCTSOrchestrator:
             logger.info("Step %d: %d active, %d waiting, cap=%d",
                         step, len(alive), len(waiting), self.config.max_active_vms)
 
-            # ---- Phase 1: Get screenshots for all active nodes ----
-            # Step 0: screenshot already set from init
+            # ---- Phase 1: Get screenshots (PARALLEL — fire all, then collect) ----
             if step > 0:
-                for node in alive:
-                    obs = ray.get(env_workers[node.vm_slot_id].get_obs_screenshot.remote())
-                    if obs:
-                        node.current_screenshot_b64 = obs
-                    else:
-                        logger.warning("  %s: no screenshot at step %d", node.node_id, step)
+                ss_futures = [
+                    (node, env_workers[node.vm_slot_id].get_obs_screenshot.remote())
+                    for node in alive
+                ]
+                for node, future in ss_futures:
+                    try:
+                        obs = ray.get(future, timeout=30)
+                        if obs:
+                            node.current_screenshot_b64 = obs
+                        else:
+                            logger.warning("  %s: no screenshot at step %d", node.node_id, step)
+                    except Exception as e:
+                        logger.warning("  %s: screenshot failed: %s", node.node_id, e)
 
-            # ---- Phase 2: Generate K candidates per node ----
-            k = self.config.k_step0 if step == 0 else self.config.k_per_node
+            # ---- Phase 2: Generate K candidates (BATCHED — one generate_batch call) ----
+            n_alive = len(alive)
+            n_remaining = len(waiting)
+
+            can_branch = n_remaining > 0 and _n_active() < self.config.max_active_vms
+            if not can_branch:
+                k = 1
+                logger.info("  K=1 (cap reached or no VMs remaining)")
+            else:
+                k = max(1, min(self.config.k_max,
+                               -(-self.config.total_probe_budget // n_alive)))
+                logger.info("  K=%d (%d active, %d remaining, cap=%d)",
+                            k, n_alive, n_remaining, self.config.max_active_vms)
+
+            # Prepare all vllm_inputs on CPU, then generate in ONE batch
+            all_vllm_inputs = []
+            node_ranges = []  # (node, start_idx, end_idx)
             for node in alive:
                 if not node.current_screenshot_b64:
                     node.candidates = []
                     continue
                 messages = self._build_messages_for_node(node)
-                node.candidates = self._generate_candidates(messages, k)
-                if not node.candidates:
-                    logger.warning("  %s: empty candidates at step %d", node.node_id, step)
+                vllm_input = self._prepare_vllm_input(messages)
+                if vllm_input is None:
+                    node.candidates = []
+                    continue
+                start = len(all_vllm_inputs)
+                # Shallow copy: share multi_modal_data refs (vLLM doesn't mutate inputs)
+                for _ in range(k):
+                    all_vllm_inputs.append({
+                        "prompt_token_ids": vllm_input["prompt_token_ids"],
+                        "multi_modal_data": vllm_input.get("multi_modal_data"),
+                    })
+                node_ranges.append((node, start, start + k))
 
-            # ---- Phase 3: Branch decisions ----
+            if all_vllm_inputs:
+                logger.info("  Generating %d prompts (%d nodes × K=%d)",
+                            len(all_vllm_inputs), len(node_ranges), k)
+                all_results = self._generate_batch_raw(all_vllm_inputs)
+                for node, start, end in node_ranges:
+                    node.candidates = all_results[start:end]
+                    if not node.candidates:
+                        logger.warning("  %s: empty candidates at step %d", node.node_id, step)
+
+            # ---- Phase 3: Branch decisions (sequential) + replay (PARALLEL) ----
+            replay_tasks = []  # (child, future, timeout)
             for node in alive:
                 if len(node.candidates) < 2:
-                    # Not enough candidates to branch — use majority vote
                     node.action = node.get_majority_action() or (node.candidates[0] if node.candidates else None)
                     continue
 
@@ -174,10 +214,8 @@ class MCTSOrchestrator:
                         grid_size=self.config.spatial_grid_size,
                         min_cluster_size=self.config.min_cluster_size,
                     )
-                    # Node takes majority action
                     node.action = representative(node.candidates, clusters[0])
 
-                    # Spawn VMs for minority clusters (up to max_branches_per_step)
                     for minority_cluster in clusters[1:self.config.max_branches_per_step + 1]:
                         if not _can_spawn():
                             logger.info("  VM cap reached (%d active), skipping branch",
@@ -199,36 +237,42 @@ class MCTSOrchestrator:
                         tree.add_child(node, child)
                         active_nodes.append(child)
 
-                        # Replay the parent's PHYSICAL action sequence on the new VM
-                        # (not the logical tree path — only what was actually on the parent's VM)
-                        parent_physical = node.get_physical_action_sequence()
-                        child.replay_prefix = list(parent_physical)  # store for grandchildren
-                        if parent_physical:
-                            replay_timeout = max(60, len(parent_physical) * 5 + 30)
-                            logger.info("  Spawning %s: replay %d physical actions on VM %d",
-                                        child.node_id, len(parent_physical), vm_idx)
-                            try:
-                                ray.get(env_workers[vm_idx].replay.remote(
-                                    parent_physical,
-                                    replay_pause_sec=self.config.replay_pause_sec,
-                                ), timeout=replay_timeout)
-                            except Exception as e:
-                                logger.error("  Replay failed for %s: %s", child.node_id, e)
-                                child.done = True
-                        # else: step 0, no replay needed (VM already at initial state)
+                        # Snapshot parent's logical history at branch time (frozen)
+                        child.parent_action_snapshot = list(node.get_action_history())
+                        child.parent_screenshot_snapshot = list(node.get_full_screenshot_history())
 
-                        # Child inherits parent's current screenshot
+                        parent_physical = node.get_physical_action_sequence()
+                        child.replay_prefix = list(parent_physical)
                         child.screenshot_history = []
                         child.current_screenshot_b64 = node.current_screenshot_b64
 
-                    # Only consume budget if we actually spawned at least 1 child
+                        # Fire replay async — collect later
+                        if parent_physical:
+                            replay_timeout = max(60, len(parent_physical) * 5 + 30)
+                            logger.info("  Spawning %s: replay %d actions on VM %d (async)",
+                                        child.node_id, len(parent_physical), vm_idx)
+                            future = env_workers[vm_idx].replay.remote(
+                                parent_physical,
+                                replay_pause_sec=self.config.replay_pause_sec,
+                            )
+                            replay_tasks.append((child, future, replay_timeout))
+
                     if any(c.parent == node and c.depth == step for c in active_nodes if c != node):
                         node.budget.use()
                 else:
-                    # No branching — use majority vote
                     node.action = node.get_majority_action() or (node.candidates[0] if node.candidates else None)
 
-            # Handle just-spawned nodes (they use branch_action)
+            # Collect ALL replays in parallel (must finish before Phase 4)
+            if replay_tasks:
+                logger.info("  Waiting for %d replays in parallel...", len(replay_tasks))
+                for child, future, timeout in replay_tasks:
+                    try:
+                        ray.get(future, timeout=timeout)
+                    except Exception as e:
+                        logger.error("  Replay failed for %s: %s", child.node_id, e)
+                        child.done = True
+
+            # Handle just-spawned nodes
             for node in active_nodes:
                 if node.just_spawned and not node.done:
                     node.action = node.branch_action
@@ -313,12 +357,9 @@ class MCTSOrchestrator:
     # Generation
     # ================================================================
 
-    def _generate_candidates(self, messages: List[Dict], k: int) -> List[str]:
-        """Generate K candidate responses using the vLLM pool."""
+    def _prepare_vllm_input(self, messages: List[Dict]) -> Optional[Dict]:
+        """Prepare a single vllm_input dict from messages (CPU work only)."""
         from qwen_vl_utils import process_vision_info
-
-        if k <= 0:
-            return []
 
         messages_copy = copy.deepcopy(messages)
         messages_copy = _truncate_to_last_n_images(messages_copy, LIMIT_IMAGES)
@@ -328,25 +369,42 @@ class MCTSOrchestrator:
             if isinstance(content, list):
                 for c in content:
                     if isinstance(c, dict) and c.get("type") == "image":
-                        c.pop("min_pixels", None)
-                        c.pop("max_pixels", None)
+                        c["max_pixels"] = 2116800
+                        c["min_pixels"] = 256
 
-        prompt = self.processor.apply_chat_template(
-            messages_copy, tokenize=False, add_generation_prompt=True,
-        )
-        image_inputs, _, _ = process_vision_info(messages_copy, return_video_kwargs=True)
-        raw_prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
+        try:
+            prompt = self.processor.apply_chat_template(
+                messages_copy, tokenize=False, add_generation_prompt=True,
+            )
+            image_inputs, _, _ = process_vision_info(messages_copy, return_video_kwargs=True)
+            raw_prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
+        except Exception as e:
+            logger.error("Prompt preparation failed: %s", e)
+            return None
+
+        n_images = len(image_inputs) if image_inputs else 0
+        img_sizes = [f"{img.size}" for img in image_inputs] if image_inputs else []
+        est_img_tokens = sum((img.size[0]//14)*(img.size[1]//14)//4 for img in image_inputs) if image_inputs else 0
+        logger.info("  Prompt: %d text_ids + %d images %s ≈ %d img_tokens → total ≈ %d",
+                    len(raw_prompt_ids), n_images, img_sizes,
+                    est_img_tokens, len(raw_prompt_ids) + est_img_tokens)
+        # DEBUG: dump first prompt with >2000 text tokens
+        if len(raw_prompt_ids) > 2000:
+            logger.warning("  LARGE PROMPT DUMP (%d text tokens):\n%s", len(raw_prompt_ids), prompt[:3000])
 
         vllm_input = {"prompt_token_ids": raw_prompt_ids}
         if image_inputs:
             vllm_input["multi_modal_data"] = {"image": image_inputs}
+        return vllm_input
 
-        batch = [copy.deepcopy(vllm_input) for _ in range(k)]
-
+    def _generate_batch_raw(self, vllm_inputs: List[Dict]) -> List[str]:
+        """Generate responses for a flat list of vllm_inputs in one batch."""
+        if not vllm_inputs:
+            return []
         try:
             if hasattr(self.vllm_pool, 'generate_batch'):
-                candidates = self.vllm_pool.generate_batch(
-                    batch,
+                return self.vllm_pool.generate_batch(
+                    vllm_inputs,
                     temperature=self.config.probe_temperature,
                     max_tokens=self.config.generation_max_tokens,
                 )
@@ -355,13 +413,11 @@ class MCTSOrchestrator:
                 sp = SamplingParams(
                     n=1, temperature=self.config.probe_temperature,
                     max_tokens=self.config.generation_max_tokens)
-                outputs = self.vllm_pool.generate(batch, sampling_params=sp)
-                candidates = [out.outputs[0].text for out in outputs]
+                outputs = self.vllm_pool.generate(vllm_inputs, sampling_params=sp)
+                return [out.outputs[0].text for out in outputs]
         except Exception as e:
-            logger.error("Generation failed: %s", e)
-            candidates = []
-
-        return candidates
+            logger.error("Batch generation failed: %s", e)
+            return [""] * len(vllm_inputs)
 
     # ================================================================
     # Execution
@@ -373,7 +429,7 @@ class MCTSOrchestrator:
         for node in nodes:
             if node.action is None:
                 continue
-            node.record_action(node.action, node.current_screenshot_b64)
+            node.record_action(add_box_token(node.action), node.current_screenshot_b64)
             futures[node.node_id] = (
                 node,
                 env_workers[node.vm_slot_id].step.remote(node.action),
