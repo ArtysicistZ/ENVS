@@ -204,7 +204,7 @@ class MCTSOrchestrator:
                         parent_physical = node.get_physical_action_sequence()
                         child.replay_prefix = list(parent_physical)  # store for grandchildren
                         if parent_physical:
-                            replay_timeout = max(60, len(parent_history) * 5 + 30)
+                            replay_timeout = max(60, len(parent_physical) * 5 + 30)
                             logger.info("  Spawning %s: replay %d physical actions on VM %d",
                                         child.node_id, len(parent_physical), vm_idx)
                             try:

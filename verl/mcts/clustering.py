@@ -182,6 +182,12 @@ def should_branch(
                 node_id, step, len(candidates), dict(type_counts),
                 len(fp_counts), [len(c) for c in clusters])
 
+    # DEBUG: log all fingerprints and first candidate per fingerprint
+    for fp, count in fp_counts.most_common():
+        sample_idx = fps.index(fp)
+        action_line = candidates[sample_idx].split("Action:")[-1].strip().split("\n")[0][:120] if "Action:" in candidates[sample_idx] else candidates[sample_idx][:120]
+        logger.info("  FP '%s' x%d  e.g. %s", fp, count, action_line)
+
     # Gate 1: >= 2 distinct clusters
     if len(clusters) < 2:
         logger.info("should_branch [%s step=%d]: REJECTED Gate 1 (need >=2 clusters, got %d)",

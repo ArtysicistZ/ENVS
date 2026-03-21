@@ -52,6 +52,8 @@ wandb/
 **.csv
 .claude/
 **test_64_screenshots/
+**replay_fidelity/
+**research/
 
 # OS files
 .DS_Store
