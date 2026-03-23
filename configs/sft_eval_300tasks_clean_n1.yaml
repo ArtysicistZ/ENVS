@@ -89,13 +89,13 @@ worker:
     skip_special_tokens: true
 
 env:
-  num_envs: 96
+  num_envs: 80
   max_steps: 15
   remote_server_urls:
-    - "http://10.100.4.7:15001"
+    - "http://10.100.4.4:15001"
     - "http://10.100.4.6:15001"
     - "http://10.100.4.8:15001"
-  remote_server_env_counts: [32, 32, 32]
+  remote_server_env_counts: [32, 16, 32]
 
 trainer:
   total_episodes: 1

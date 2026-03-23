@@ -1,9 +1,8 @@
-# MCTS Trajectory Collection — 86 doable tasks, 80 VMs, 8 GPUs
+# MCTS Trajectory Re-collection — 23 low-success tasks (<=5 successes), 80 VMs, 8 GPUs
 #
 # Usage:
-#   python scripts/mcts/run_mcts_collection.py --config configs/mcts_collection_86tasks.yaml
-#   python scripts/mcts/run_mcts_collection.py --config configs/mcts_collection_86tasks.yaml --resume
-#   sudo -E /home/kevinzyz/yincheng/arpo/.venv/bin/python scripts/mcts/run_mcts_collection.py --config configs/mcts_collection_86tasks.yaml --resume
+#   sudo -E /home/kevinzyz/yincheng/arpo/.venv/bin/python scripts/mcts/run_mcts_collection.py --config configs/mcts_rerun_low23.yaml
+#   sudo -E /home/kevinzyz/yincheng/arpo/.venv/bin/python scripts/mcts/run_mcts_collection.py --config configs/mcts_rerun_low23.yaml --resume
 
 # ---- VMs ----
 vms_per_task: 80
@@ -49,8 +48,8 @@ max_model_len: 12000
 limit_images: 3
 generation_max_tokens: 512
 
-# ---- Task file ----
-task_file: "OSWorld/evaluation_examples/test_all_300tasks_noproxy_softreset_clean.json"
+# ---- Task file (23 low-success tasks) ----
+task_file: "OSWorld/evaluation_examples/mcts_rerun_low23.json"
 
 # ---- Output ----
-output_dir: "checkpoints/mcts_trajectories"
+output_dir: "checkpoints/mcts_trajectories/rerun_low23"
