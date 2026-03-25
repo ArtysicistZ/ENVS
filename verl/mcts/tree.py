@@ -63,7 +63,13 @@ class TreeNode:
     # State
     done: bool = False
     eval_score: Optional[float] = None
+    q_value: Optional[float] = None   # back-propagated success rate from descendants
     prev_high: bool = False   # for late-step deferral gate
+
+    # Number of steps the parent had in action_history when this child was spawned.
+    # Used by tree_io to reconstruct the correct prefix from the parent's own_steps.
+    # For root nodes: 0 (no parent).
+    parent_steps_at_branch: int = 0
 
     # Metadata
     instruction: str = ""

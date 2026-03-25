@@ -28,25 +28,50 @@ logger = logging.getLogger("mcts_collection")
 
 
 def load_doable_task_ids():
-    path = os.path.join(PROJ_ROOT, "checkpoints/arpo-inference/all_trajectories_combined.jsonl")
+    """Load doable task IDs from available sources."""
     doable = set()
-    with open(path) as f:
-        for line in f:
-            d = json.loads(line)
-            if d.get("eval_result", 0) > 0:
-                doable.add(d["task_id"])
+
+    # Source 1: MCTS v1 successful trajectories (84 tasks)
+    mcts_path = os.path.join(PROJ_ROOT, "checkpoints/mcts_trajectories/combined/mcts_success.jsonl")
+    if os.path.exists(mcts_path):
+        with open(mcts_path) as f:
+            for line in f:
+                if line.strip():
+                    doable.add(json.loads(line)["task_id"])
+
+    # Source 2: base model n=8 eval (tasks with at least 1 success)
+    eval_path = os.path.join(PROJ_ROOT, "checkpoints/arpo-inference/base_model_306tasks_n8/eval_results_at_0.json")
+    if os.path.exists(eval_path):
+        with open(eval_path) as f:
+            eval_results = json.load(f)
+        for tid, v in eval_results.items():
+            if isinstance(v, dict) and v.get("n_success", 0) > 0:
+                doable.add(tid)
+
+    # Fallback: legacy file
+    legacy_path = os.path.join(PROJ_ROOT, "checkpoints/arpo-inference/all_trajectories_combined.jsonl")
+    if os.path.exists(legacy_path):
+        with open(legacy_path) as f:
+            for line in f:
+                d = json.loads(line)
+                if d.get("eval_result", 0) > 0:
+                    doable.add(d["task_id"])
+
     return doable
 
 
-def load_task_configs(task_file, doable_ids):
+def load_task_configs(task_file):
+    """Load task configs from a task list JSON file.
+
+    The file maps domain -> [task_id, ...]. Each task's full config
+    is loaded from OSWorld/evaluation_examples/examples/{domain}/{tid}.json.
+    """
     with open(task_file) as f:
         raw = json.load(f)
     base_path = os.path.dirname(task_file)
     tasks = []
     for domain, task_ids in raw.items():
         for tid in task_ids:
-            if tid not in doable_ids:
-                continue
             cfg_path = os.path.join(base_path, "examples", domain, tid + ".json")
             if os.path.exists(cfg_path):
                 with open(cfg_path) as f2:
@@ -55,6 +80,8 @@ def load_task_configs(task_file, doable_ids):
                 tc["id"] = tid
                 tc["task_id"] = tid
                 tasks.append(tc)
+            else:
+                logger.warning("Task config not found: %s", cfg_path)
     return tasks
 
 
@@ -85,10 +112,9 @@ def main():
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
-    # Load tasks
+    # Load tasks (task file already contains only the target tasks)
     task_file = os.path.join(PROJ_ROOT, cfg["task_file"])
-    doable_ids = load_doable_task_ids()
-    all_tasks = load_task_configs(task_file, doable_ids)
+    all_tasks = load_task_configs(task_file)
     logger.info("Loaded %d doable tasks", len(all_tasks))
 
     # Output & resume
@@ -161,6 +187,8 @@ def main():
         limit_images=cfg["limit_images"],
         generation_max_tokens=cfg["generation_max_tokens"],
         remote_server_urls=cfg["remote_server_urls"],
+        output_dir=cfg["output_dir"],
+        save_full_tree=cfg.get("save_full_tree", False),
     )
     orchestrator = MCTSOrchestrator(config, vllm_pool, processor, tokenizer)
 
@@ -219,7 +247,17 @@ def main():
         # Save incrementally
         _save(results_path, results, cfg)
 
-        # Append successful trajectories
+        # Save full tree (v2)
+        if cfg.get("save_full_tree", False):
+            from verl.mcts.tree_io import save_mcts_tree
+            trees_dir = os.path.join(output_dir, "trees")
+            os.makedirs(trees_dir, exist_ok=True)
+            tree_path = os.path.join(trees_dir, f"{tid}.json")
+            save_mcts_tree(tree, task_config, tree_path, limit_images=cfg["limit_images"])
+            logger.info("  Saved full tree to %s (%d nodes, %d successful)",
+                        tree_path, n_activated, n_success)
+
+        # Append successful trajectories (always — backwards compatible)
         successful = [t for t in trajectories if t.get("eval_result", 0) > 0]
         if successful:
             success_path = os.path.join(output_dir, "mcts_success.jsonl")

@@ -240,6 +240,7 @@ class MCTSOrchestrator:
                         # Snapshot parent's logical history at branch time (frozen)
                         child.parent_action_snapshot = list(node.get_action_history())
                         child.parent_screenshot_snapshot = list(node.get_full_screenshot_history())
+                        child.parent_steps_at_branch = len(node.action_history)
 
                         parent_physical = node.get_physical_action_sequence()
                         child.replay_prefix = list(parent_physical)

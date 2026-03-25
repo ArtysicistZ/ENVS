@@ -23,7 +23,7 @@ fi
 
 # --- Configuration ---
 MODEL_PATH="${MODEL_PATH:-ByteDance-Seed/UI-TARS-1.5-7B}"
-OUTPUT_DIR="${OUTPUT_DIR:-checkpoints/mcts_sft/v1}"
+OUTPUT_DIR="${OUTPUT_DIR:-checkpoints/mcts_sft/v1_2e-6}"
 CONFIG="${CONFIG:-configs/mcts_sft.yaml}"
 EVAL_CONFIG="configs/sft_eval_300tasks_clean_n1.yaml"
 NUM_GPUS="${NUM_GPUS:-8}"
@@ -92,7 +92,7 @@ if [ "${SKIP_TRAINING}" != "1" ]; then
         sudo -E env "PATH=${PATH}" "PYTHONPATH=${PYTHONPATH:-}" \
             "WANDB_API_KEY=${WANDB_API_KEY:-}" \
             "WANDB_PROJECT=ARPO" "WANDB_ENTITY=artysicistz-university-of-pennsylvania" \
-            "WANDB_RUN_NAME=mcts_sft_v1" \
+            "WANDB_RUN_NAME=mcts_sft_v1_2e-6" \
         torchrun --nproc_per_node="${NUM_GPUS}" scripts/train_mcts_sft.py \
             --config "${CONFIG}" \
             --output_dir "${OUTPUT_DIR}"

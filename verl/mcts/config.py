@@ -63,3 +63,4 @@ class MCTSConfig:
 
     # ---- Output ----
     output_dir: str = "checkpoints/mcts_trajectories"
+    save_full_tree: bool = False      # v2: save full tree JSON (all nodes + Q-values)
