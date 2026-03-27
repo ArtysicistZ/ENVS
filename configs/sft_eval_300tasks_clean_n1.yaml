@@ -89,13 +89,14 @@ worker:
     skip_special_tokens: true
 
 env:
-  num_envs: 80
+  num_envs: 112
   max_steps: 15
   remote_server_urls:
     - "http://10.100.4.4:15001"
     - "http://10.100.4.6:15001"
+    - "http://10.100.4.7:15001"
     - "http://10.100.4.8:15001"
-  remote_server_env_counts: [32, 16, 32]
+  remote_server_env_counts: [32, 16, 32, 32]
 
 trainer:
   total_episodes: 1
@@ -106,5 +107,5 @@ trainer:
   nnodes: 1
   val_before_train: true
   val_only: true
-  save_checkpoint_path: checkpoints/sft_v2.1/eval
+  save_checkpoint_path: checkpoints/mcts_sft_v2/beta05_5e-6/eval_n1
   save_trajectories: false

@@ -522,7 +522,9 @@ class MCTSTrainer(Trainer):
         per_sample_loss = (per_token_loss * mask).sum(dim=1) / tokens_per_sample
 
         sample_weights = sample_weights.to(per_sample_loss.device)
-        loss = (per_sample_loss * sample_weights).sum() / sample_weights.sum()
+        # .mean() so weights actually scale gradients (weights are pre-normalized to mean=1).
+        # The old formula (.sum() / weights.sum()) cancels weights when batch_size=1.
+        loss = (per_sample_loss * sample_weights).mean()
 
         return (loss, outputs) if return_outputs else loss
 

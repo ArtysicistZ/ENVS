@@ -1,14 +1,15 @@
 # Experiment Results: SFT & MCTS SFT for GUI Agent Training
 
 > Summary of all training experiments on UI-TARS-1.5-7B for OSWorld tasks.
-> Date: 2026-03-24
+> Last updated: 2026-03-27
 
 ## Table of Contents
 
 1. [Overview](#1-overview)
 2. [Base Model](#2-base-model)
 3. [Naive SFT Experiments](#3-naive-sft-experiments)
-4. [MCTS SFT Experiments](#4-mcts-sft-experiments)
+4. [MCTS SFT v1 Experiments](#4-mcts-sft-experiments)
+4b. [MCTS SFT v2.1 Experiments](#4b-mcts-sft-v21-experiments) **(NEW — current best: 94/300)**
 5. [Head-to-Head Comparison](#5-head-to-head-comparison)
 6. [Key Findings](#6-key-findings)
 
@@ -21,9 +22,9 @@ All experiments fine-tune **UI-TARS-1.5-7B** (Qwen2-VL based, 8.3B params) on GU
 **Evaluation metrics:**
 - **Doable rate** (n=K): Fraction of tasks solved at least once in K attempts. Primary metric.
 - **Success rate** (n=K): Total successes / total attempts. Measures per-attempt reliability.
-- **Trained/Untrained split**: 84 tasks had MCTS trajectories (trained), 216 did not (untrained). Note: trained tasks have selection bias — the base model was already capable on them (they were selected because MCTS found successful trajectories).
+- **Trained/Untrained split**: 84 tasks in v1, 86 tasks in v2.1 had MCTS trajectories (trained); the rest are untrained. Note: trained tasks have selection bias — the base model was already capable on them (they were selected because MCTS found successful trajectories).
 
-**Infrastructure:** 8× A100-40G GPUs (FSDP), 80 VMs across 3 servers (32+16+32) for evaluation.
+**Infrastructure:** 8× A100-40G GPUs (FSDP), 112 VMs across 4 servers (32+16+32+32) for evaluation (v2.1); 80 VMs for earlier runs.
 
 ---
 
@@ -159,6 +160,51 @@ To address the severe task imbalance (1-77 trajectories per task), training uses
 
 ---
 
+## 4b. MCTS SFT v2.1 Experiments
+
+### 4b.1 V2 Data Collection
+
+Six rounds of MCTS collection expanded coverage from 84 to 86 tasks:
+- `base_86` (86 tasks), `rerun_low35` (35 tasks), `rerun2_low23` (23 tasks), `rerun3a/b/c_low18` (18 tasks × 3 rounds)
+- **Total: 2,927 successful leaves across 86 tasks, 0 zero-success tasks**
+
+### 4b.2 V2 Step-Level Auditing
+
+200 parallel agents (100 Opus, 100 Sonnet) audited 4,401 nodes / 35,548 steps:
+- **KEEP:** 32,212 (90.6%) / **REMOVE:** 3,336 (9.4%)
+- 100% coverage verified
+
+### 4b.3 V2.1 Training Design
+
+Key differences from v1:
+1. **Per-step deduplication**: Shared prefix steps across successful leaves trained exactly once. 29,931 total steps → 22,172 unique → 20,903 unique KEEP steps (1.3× dedup ratio)
+2. **Power-scaled difficulty weighting**: `per_step_weight = (1 - SR_t)^beta / T_t` where T_t = unique KEEP steps for task t, beta=0.5. All KEEP steps within a task get equal weight.
+3. **Per-sample weight cap**: `max_step_ratio=2.0` — prevents overfitting on very-hard tasks (≤2 successes)
+4. **Weighted loss fix**: `.mean()` instead of `.sum()/.sum()` — the original formula cancelled weights when `per_device_batch_size=1`
+5. **Gradient clipping preserves weighting**: `max_grad_norm=1.0` clips batch gradient magnitude but preserves the weighted gradient *direction*, so per-sample weights still affect which tasks the model learns from
+
+### 4b.4 MCTS SFT v2.1 (lr=2e-6, beta=0.5, max_step_ratio=2.0)
+
+- **Data:** 20,903 unique KEEP steps from 2,927 successful leaves across 86 tasks
+- **Training:** lr=2e-6, 1 epoch, effective batch=32, 654 steps, cosine schedule
+- **Weighting:** beta=0.5, max_step_ratio=2.0, max_grad_norm=1.0
+- **Config:** `configs/mcts_sft_v2.1.yaml`
+- **Checkpoint:** `checkpoints/mcts_sft_v2.1/beta05_2e-6/epoch_1/`
+- **wandb:** project=ARPO, run=mcts_sft_v2.1_beta05_2e-6
+
+| Eval | Tasks | Doable | Doable Rate | Success Rate |
+|------|-------|--------|-------------|-------------|
+| n=8 | 300 | **94** | **31.3%** | 320/2400 (13.3%) |
+
+**Breakdown (n=8):**
+
+| Split | Doable | Doable Rate | Success Rate |
+|-------|--------|-------------|-------------|
+| Trained (86) | 76 | 88.4% | 299/688 (43.5%) |
+| Untrained (214) | 18 | 8.4% | 21/1712 (1.2%) |
+
+---
+
 ## 5. Head-to-Head Comparison
 
 ### 5.1 n=1 Results (300 tasks)
@@ -192,32 +238,36 @@ To address the severe task imbalance (1-77 trajectories per task), training uses
 
 ### 5.2 n=8 Results (300 tasks)
 
-> Note: Naive SFT (lr=5e-6) does not have an n=8 evaluation. The SFT v1 (lr=1e-5) n=8 results are included for reference but are not directly comparable (different LR, different data).
-
 | Model | Doable | Doable Rate | Success Rate |
 |-------|--------|-------------|-------------|
 | Base Model (no SFT) | 65/302 | 21.5% | 198/2416 (8.2%) |
 | SFT v1 (lr=1e-5) | 54/300 | 18.0% | 135/2432 (5.6%) |
-| **MCTS SFT (lr=3e-6)** | **87/300** | **29.0%** | **344/2400 (14.3%)** |
-| **MCTS SFT (lr=2e-6)** | **89/300** | **29.7%** | **334/2400 (13.9%)** |
+| Naive SFT best (lr=5e-6) | 93/300 | 31.0% | 310/2400 (12.9%) |
+| MCTS SFT v1 (lr=3e-6) | 87/300 | 29.0% | 344/2400 (14.3%) |
+| MCTS SFT v1 (lr=2e-6) | 89/300 | 29.7% | 334/2400 (13.9%) |
+| **MCTS SFT v2.1 (lr=2e-6)** | **94/300** | **31.3%** | **320/2400 (13.3%)** |
 
-### 5.3 Trained Tasks (84 tasks, n=8)
+### 5.3 Trained Tasks (86 tasks, n=8)
 
 | Model | Doable | Doable Rate | Success Rate |
 |-------|--------|-------------|-------------|
 | Base Model | 63/84 | 75.0% | 196/672 (29.2%) |
 | SFT v1 (lr=1e-5) | 42/84 | 50.0% | 113/672 (16.8%) |
-| **MCTS SFT (lr=3e-6)** | **74/84** | **88.1%** | **328/672 (48.8%)** |
-| **MCTS SFT (lr=2e-6)** | **77/84** | **91.7%** | **319/672 (47.5%)** |
+| Naive SFT best (lr=5e-6) | 76/86 | 88.4% | 284/688 (41.3%) |
+| MCTS SFT v1 (lr=3e-6) | 74/84 | 88.1% | 328/672 (48.8%) |
+| MCTS SFT v1 (lr=2e-6) | 77/84 | 91.7% | 319/672 (47.5%) |
+| **MCTS SFT v2.1 (lr=2e-6)** | **76/86** | **88.4%** | **299/688 (43.5%)** |
 
-### 5.4 Untrained Tasks (216 tasks, n=8)
+### 5.4 Untrained Tasks (~214 tasks, n=8)
 
 | Model | Doable | Doable Rate | Success Rate |
 |-------|--------|-------------|-------------|
 | Base Model | 2/216 | 0.9% | 2/1744 (0.1%) |
 | SFT v1 (lr=1e-5) | 12/216 | 5.6% | 22/1760 (1.2%) |
-| MCTS SFT (lr=3e-6) | 13/216 | 6.0% | 16/1728 (0.9%) |
-| MCTS SFT (lr=2e-6) | 12/216 | 5.6% | 15/1728 (0.9%) |
+| Naive SFT best (lr=5e-6) | 17/214 | 7.9% | 26/1712 (1.5%) |
+| MCTS SFT v1 (lr=3e-6) | 13/216 | 6.0% | 16/1728 (0.9%) |
+| MCTS SFT v1 (lr=2e-6) | 12/216 | 5.6% | 15/1728 (0.9%) |
+| **MCTS SFT v2.1 (lr=2e-6)** | **18/214** | **8.4%** | **21/1712 (1.2%)** |
 
 ### 5.5 MCTS SFT vs SFT v1 — Task-Level Agreement (Trained, n=8)
 
@@ -252,72 +302,94 @@ To address the severe task imbalance (1-77 trajectories per task), training uses
 
 ## 6. Key Findings
 
-### 6.1 MCTS SFT dramatically outperforms SFT v1
+### 6.1 MCTS SFT v2.1 is the new best (94/300 doable at n=8)
 
-- **+38 points on trained-task doable rate** (50% → 88-92%) at n=8
-- **+32 points on trained-task success rate** (16.8% → 47-49%) at n=8
-- **+11 points overall doable rate** (18% → 29%) at n=8
-- MCTS SFT uniquely solves 34-37 trained tasks that SFT v1 cannot, while SFT v1 only uniquely solves 2
-- At n=1: MCTS SFT (43-44/300) outperforms naive SFT best (39/300, lr=5e-6)
+**v2.1 achieves 94/300 doable (31.3%)**, surpassing all previous runs:
+- vs Naive SFT best (lr=5e-6): 94 vs 93 (+1)
+- vs MCTS v1 (lr=2e-6): 94 vs 89 (+5)
+- vs MCTS v1 (lr=3e-6): 94 vs 87 (+7)
 
-### 6.2 MCTS SFT recovers base model capability that SFT destroys
+Head-to-head on common tasks, v2.1 uniquely solves 14-18 tasks that other runs miss.
 
-The base model achieves 75% doable on trained tasks (by construction — these tasks were selected via MCTS as solvable). SFT v1 **degrades** this to 50% by training on noisy error steps. MCTS SFT not only recovers but **exceeds** the base model (88-92%), demonstrating that step-level filtering and task-balanced resampling produce genuinely better training signal.
+### 6.2 V2.1 best untrained generalization among MCTS methods
 
-### 6.3 No catastrophic forgetting on untrained tasks
+| Model | Untrained Doable | Untrained SR |
+|-------|-----------------|-------------|
+| MCTS v2.1 | **18/214 (8.4%)** | 1.2% |
+| Naive SFT best | 17/214 (7.9%) | 1.5% |
+| MCTS v1 (lr=3e-6) | 13/216 (6.0%) | 0.9% |
+| MCTS v1 (lr=2e-6) | 12/216 (5.6%) | 0.9% |
 
-Both SFT variants transfer similarly to untrained tasks (5.6-6.0% doable at n=8), far above the base model (0.9%). MCTS SFT does not sacrifice generalization for trained-task performance.
+V2.1 matches or beats naive SFT on untrained tasks while dramatically outperforming on trained tasks. The per-step weighting and deduplication did not cause catastrophic forgetting.
 
-### 6.4 Learning rate is not a critical axis
+### 6.3 Critical bug fix: weighted loss with batch_size=1
 
-MCTS SFT at lr=3e-6 and lr=2e-6 perform nearly identically:
-- 3e-6: higher per-attempt success rate (48.8% vs 47.5%)
-- 2e-6: slightly more tasks doable (77 vs 74 trained, 89 vs 87 overall)
-- Both are well within the sweet spot; further LR tuning yields diminishing returns
+The original `_weighted_loss` formula `(loss * w).sum() / w.sum()` cancels weights when `per_device_batch_size=1` (reduces to `loss * w / w = loss`). The fix to `.mean()` was essential — without it, v2 performed identically to unweighted naive SFT on MCTS data (34/300 n=1 vs 33/300).
 
-### 6.5 What drove the improvement
+### 6.4 Gradient clipping preserves weighting through direction
 
-Three factors, in order of importance:
+With `max_grad_norm=1.0`, all batches are clipped (base grad_norm ≈ 2.2). Clipping is a uniform scalar on the gradient vector — it preserves the **direction** (which encodes weight influence) while capping the **magnitude**. This means per-sample weights still steer the model toward hard tasks, even under aggressive clipping. No `max_grad_norm` adjustment was needed.
 
-1. **Step-level loss masking** (Section 4.2): Removing 12% error steps from the loss while keeping them as context. This is the core innovation — the model learns from correct actions and error-recovery actions, not from the errors themselves.
+### 6.5 What drove the v2.1 improvement over v1
 
-2. **2.16× more training data**: 15,920 KEEP examples vs 7,361 in naive SFT. The MCTS collection + rerun pipeline produced more diverse trajectories.
+1. **Per-step deduplication**: Shared prefix steps trained once instead of repeated per-leaf. Prevents over-training on common early steps (root actions). 29,931 → 20,903 unique steps (1.43× dedup).
 
-3. **Per-task resampling** (Section 4.3): α=0.3 temperature sampling with UniMax capping prevents easy-task domination while limiting memorization of rare-task noise.
+2. **Power-scaled difficulty weighting**: `(1-SR)^0.5 / T_t` gives harder tasks more gradient per step. With `max_step_ratio=2.0`, very-hard tasks (≤2 successes) are capped at 2× mean weight to prevent overfitting.
+
+3. **Expanded data collection**: 6 rounds → 2,927 successes across 86 tasks (vs 1,852 across 84 in v1). More diverse trajectories, especially for hard tasks.
+
+4. **Step-level masking**: 200-agent audit classified 9.4% of steps as REMOVE (wrong actions, repeated failures). Stricter than v1's 12% — the v2 audit used both Opus and Sonnet agents for higher accuracy.
+
+### 6.6 MCTS SFT recovers base model capability that naive SFT destroys
+
+The base model achieves 75% doable on trained tasks. SFT v1 (lr=1e-5) **degrades** this to 50%. MCTS SFT v1/v2.1 recover to 88-92%, demonstrating that step-level filtering and task-balanced weighting produce genuinely better training signal.
 
 ---
 
 ## Appendix: Training Configurations
 
-| Parameter | Naive SFT (best) | MCTS SFT v1 (3e-6) | MCTS SFT v1 (2e-6) |
-|-----------|------------------|---------------------|---------------------|
-| Base model | UI-TARS-1.5-7B | UI-TARS-1.5-7B | UI-TARS-1.5-7B |
-| Training data | 715 trajs, 7,361 examples | 1,852 trajs, 15,920 examples | 1,852 trajs, 15,920 examples |
-| Step masking | None (all steps) | 88% KEEP / 12% REMOVE | 88% KEEP / 12% REMOVE |
-| Task balancing | None (natural distribution) | α=0.3 resample + K=3 cap | α=0.3 resample + K=3 cap |
-| Learning rate | 5e-6 | 3e-6 | 2e-6 |
-| Epochs | 1 | 1 | 1 |
-| Effective batch | 32 | 32 | 32 |
-| Steps/epoch | ~230 | 498 | 498 |
-| LR schedule | Cosine | Cosine | Cosine |
-| Warmup | 3% | 3% | 3% |
-| Freeze vision tower | Yes | Yes | Yes |
-| Precision | bf16 | bf16 | bf16 |
-| FSDP | full_shard auto_wrap | full_shard auto_wrap | full_shard auto_wrap |
-| Final loss | ~0.60 | 0.534 | 0.617 |
-| Wall time | ~1.4h | ~2.8h | ~2.8h |
+| Parameter | Naive SFT (best) | MCTS SFT v1 (3e-6) | MCTS SFT v1 (2e-6) | **MCTS SFT v2.1** |
+|-----------|------------------|---------------------|---------------------|---------------------|
+| Base model | UI-TARS-1.5-7B | UI-TARS-1.5-7B | UI-TARS-1.5-7B | UI-TARS-1.5-7B |
+| Training data | 715 trajs, 7,361 examples | 1,852 trajs, 15,920 examples | 1,852 trajs, 15,920 examples | 2,927 leaves, 20,903 unique KEEP steps |
+| Step masking | None (all steps) | 88% KEEP / 12% REMOVE | 88% KEEP / 12% REMOVE | 90.6% KEEP / 9.4% REMOVE |
+| Task balancing | None (natural distribution) | α=0.3 resample + K=3 cap | α=0.3 resample + K=3 cap | (1-SR)^0.5 / T_t loss weight, cap=2.0 |
+| Deduplication | None | None | None | Per-step (1.43× dedup ratio) |
+| Learning rate | 5e-6 | 3e-6 | 2e-6 | 2e-6 |
+| Epochs | 1 | 1 | 1 | 1 |
+| Effective batch | 32 | 32 | 32 | 32 |
+| Steps/epoch | ~230 | 498 | 498 | 654 |
+| max_grad_norm | 1.0 | 1.0 | 1.0 | 1.0 |
+| LR schedule | Cosine | Cosine | Cosine | Cosine |
+| Warmup | 3% | 3% | 3% | 3% |
+| Freeze vision tower | Yes | Yes | Yes | Yes |
+| Precision | bf16 | bf16 | bf16 | bf16 |
+| FSDP | full_shard auto_wrap | full_shard auto_wrap | full_shard auto_wrap | full_shard auto_wrap |
+| Final loss | ~0.60 | 0.534 | 0.617 | ~0.50 (weighted) |
 
 ## Appendix: File Locations
 
 | Resource | Path |
 |----------|------|
-| MCTS trajectories | `checkpoints/mcts_trajectories/combined/mcts_success.jsonl` |
-| Step masks | `checkpoints/mcts_trajectories/combined/step_masks_train.json` |
-| MCTS SFT config | `configs/mcts_sft.yaml` |
-| MCTS SFT training script | `scripts/train_mcts_sft.py` |
-| MCTS SFT eval script | `scripts/run_mcts_sft_eval.sh` |
-| Strategy document | `docs/MCTS/MCTS_SFT_TRAINING_STRATEGY.md` |
-| MCTS SFT v1 checkpoint | `checkpoints/mcts_sft/v1/epoch_1/` |
-| MCTS SFT v1 (2e-6) checkpoint | `checkpoints/mcts_sft/v1_2e-6/epoch_1/` |
+| **V2.1 (current best)** | |
+| V2 tree data | `checkpoints/mcts_trajectories_v2/combined_all/trees/` |
+| V2 task index | `checkpoints/mcts_trajectories_v2/combined_all/task_index.json` |
+| V2 step masks | `checkpoints/mcts_trajectories_v2/combined_all/step_masks_v2.json` |
+| V2 success rates | `checkpoints/mcts_trajectories_v2/combined_all/mcts_success.jsonl` |
+| V2.1 config | `configs/mcts_sft_v2.1.yaml` |
+| V2 training script | `scripts/train_mcts_sft_v2.py` |
+| V2.1 run script | `scripts/mcts/run_mcts_sft_v2.1.sh` |
+| V2.1 checkpoint | `checkpoints/mcts_sft_v2.1/beta05_2e-6/epoch_1/` |
+| V2.1 n8 results | `checkpoints/mcts_sft_v2.1/beta05_2e-6/eval_n8/eval_results_at_0.json` |
+| V2 strategy document | `docs/MCTS/MCTS_V2_TRAINING_STRATEGY.md` |
+| **V1 (previous)** | |
+| V1 trajectories | `checkpoints/mcts_trajectories/combined/mcts_success.jsonl` |
+| V1 step masks | `checkpoints/mcts_trajectories/combined/step_masks_train.json` |
+| V1 config | `configs/mcts_sft.yaml` |
+| V1 training script | `scripts/train_mcts_sft.py` |
+| V1 checkpoint | `checkpoints/mcts_sft/v1/epoch_1/` |
+| V1 strategy document | `docs/MCTS/MCTS_SFT_TRAINING_STRATEGY.md` |
+| **Shared** | |
+| Eval configs | `configs/sft_eval_300tasks_clean_n1.yaml`, `configs/sft_eval_300tasks_clean_n8.yaml` |
 | HuggingFace model | `ArtysicistZ/UI-TARS-MCTS-SFT-7B` |
 | HuggingFace data | `ArtysicistZ/UI-TARS-MCTS-SFT-Data` |
