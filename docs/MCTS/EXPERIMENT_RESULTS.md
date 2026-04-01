@@ -236,6 +236,17 @@ Key differences from v1:
 
 > Note: n=1 has high variance on untrained tasks (~1% success rate, expected std ~1.5 tasks). The 1 vs 3 difference is within noise.
 
+### 5.1b Greedy n=1 Results (temp=0, 300 tasks)
+
+Deterministic evaluation — no sampling randomness.
+
+| Model | Doable | Doable Rate | Trained | Untrained |
+|-------|--------|-------------|---------|-----------|
+| Base Model (greedy) | 37/300 | 12.3% | 37/86 | 0/214 |
+| **MCTS SFT v2.1 (greedy)** | **47/300** | **15.7%** | **46/86** | **1/214** |
+
+> Greedy decoding significantly boosts the base model (21 → 37 at temp=0 vs temp=1), but v2.1 still beats it by +10 tasks. The v2.1 improvement is robust and not due to sampling luck.
+
 ### 5.2 n=8 Results (300 tasks)
 
 | Model | Doable | Doable Rate | Success Rate |

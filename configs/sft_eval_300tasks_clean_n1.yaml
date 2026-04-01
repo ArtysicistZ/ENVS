@@ -73,7 +73,7 @@ worker:
     max_num_seqs: 8
     old_logprob_source: "recompute"
     val_override_config:
-      temperature: 1.0
+      temperature: 0.0
       n: 1
 
   ref:

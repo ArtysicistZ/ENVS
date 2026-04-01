@@ -437,7 +437,9 @@ def mcts_collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
     batch_pixel_values = []
     batch_image_grid_thw = []
     batch_weights = []
+    batch_is_negative = []
     has_weights = "sample_weight" in features[0]
+    has_negative = "is_negative" in features[0]
 
     for f in features:
         seq_len = f["input_ids"].size(0)
@@ -464,6 +466,8 @@ def mcts_collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
             batch_image_grid_thw.append(f["image_grid_thw"])
         if has_weights:
             batch_weights.append(f["sample_weight"])
+        if has_negative:
+            batch_is_negative.append(f["is_negative"])
 
     result = {
         "input_ids": torch.stack(batch_input_ids),
@@ -477,6 +481,8 @@ def mcts_collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
         result["image_grid_thw"] = torch.cat(batch_image_grid_thw, dim=0)
     if has_weights:
         result["sample_weight"] = torch.stack(batch_weights)
+    if has_negative:
+        result["is_negative"] = torch.stack(batch_is_negative)
 
     return result
 
@@ -499,8 +505,9 @@ class MCTSTrainer(Trainer):
         return super().compute_loss(model, inputs, return_outputs=return_outputs, **kwargs)
 
     def _weighted_loss(self, model, inputs, return_outputs=False):
-        """Per-sample weighted cross-entropy for loss_weight mode."""
+        """Per-sample weighted loss: NLL for positives, unlikelihood for negatives."""
         sample_weights = inputs.pop("sample_weight")
+        is_negative = inputs.pop("is_negative", None)  # [B] or None if no negatives in dataset
 
         outputs = model(**inputs)
         logits = outputs.logits
@@ -510,20 +517,36 @@ class MCTSTrainer(Trainer):
         shift_labels = labels[..., 1:].contiguous()
 
         batch_size, seq_len, vocab_size = shift_logits.shape
-        per_token_loss = F.cross_entropy(
+        mask = (shift_labels != -100).float()
+        tokens_per_sample = mask.sum(dim=1).clamp(min=1)
+
+        # Standard NLL per token
+        per_token_nll = F.cross_entropy(
             shift_logits.view(-1, vocab_size),
             shift_labels.view(-1),
             ignore_index=-100,
             reduction="none",
         ).view(batch_size, seq_len)
 
-        mask = (shift_labels != -100).float()
-        tokens_per_sample = mask.sum(dim=1).clamp(min=1)
-        per_sample_loss = (per_token_loss * mask).sum(dim=1) / tokens_per_sample
+        if is_negative is not None and is_negative.any():
+            # Unlikelihood per token: -log(1 - p(target_token))
+            # Bounded, self-attenuating: gradient → 0 as p(bad_token) → 0
+            log_probs = F.log_softmax(shift_logits, dim=-1)
+            target_log_probs = log_probs.gather(
+                -1, shift_labels.clamp(min=0).unsqueeze(-1)
+            ).squeeze(-1)
+            # -log(1 - exp(log_p)) using log1p for numerical stability
+            per_token_ul = -torch.log1p(-target_log_probs.exp().clamp(max=1 - 1e-7)) * mask
+
+            # Mix: NLL for positives, unlikelihood for negatives
+            is_neg = is_negative.to(shift_logits.device).unsqueeze(1)  # [B, 1]
+            per_token_loss = (1 - is_neg) * per_token_nll * mask + is_neg * per_token_ul
+        else:
+            per_token_loss = per_token_nll * mask
+
+        per_sample_loss = per_token_loss.sum(dim=1) / tokens_per_sample
 
         sample_weights = sample_weights.to(per_sample_loss.device)
-        # .mean() so weights actually scale gradients (weights are pre-normalized to mean=1).
-        # The old formula (.sum() / weights.sum()) cancels weights when batch_size=1.
         loss = (per_sample_loss * sample_weights).mean()
 
         return (loss, outputs) if return_outputs else loss
