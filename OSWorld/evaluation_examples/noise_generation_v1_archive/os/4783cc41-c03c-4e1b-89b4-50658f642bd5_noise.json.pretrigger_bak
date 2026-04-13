@@ -1,0 +1,74 @@
+{
+  "id": "4783cc41-c03c-4e1b-89b4-50658f642bd5",
+  "snapshot": "os",
+  "instruction": "Copy directory hierarchy from \"$sourceDir\" to \"$targetDir\"",
+  "source": "NL2Bash",
+  "config": [
+    {
+      "type": "execute",
+      "parameters": {
+        "command": "sourceDir=\"/home/user/Desktop/\"\nmkdir -p \"$sourceDir\"/dir1/dir2\nmkdir -p \"$sourceDir\"/dir3/dir4",
+        "shell": true
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "python",
+          "-c",
+          "import pyautogui; import time; pyautogui.click({SCREEN_WIDTH_HALF}, {SCREEN_HEIGHT_HALF}); time.sleep(0.5);"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "python",
+          "-c",
+          "import pyautogui; import time; time.sleep(0.5); pyautogui.click(960, 540); time.sleep(0.5); pyautogui.hotkey('ctrl', 'alt', 't'); time.sleep(0.5)"
+        ]
+      }
+    },
+    {
+      "type": "activate_window",
+      "parameters": {
+        "window_name": "Terminal"
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 120 + 15)) && notify-send 'System' 'Software updates are available for your computer') >/dev/null 2>&1 &"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "os"
+  ],
+  "evaluator": {
+    "func": "infeasible"
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "very_hard",
+    "success_rate_used": 0.0357,
+    "categories_applied": [
+      "random_notifications"
+    ],
+    "noise_element_count": 1,
+    "added_step_indices": [
+      4
+    ]
+  }
+}

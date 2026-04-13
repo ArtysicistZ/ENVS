@@ -1,0 +1,238 @@
+{
+  "id": "4bcb1253-a636-4df4-8cb0-a35c04dfef31",
+  "snapshot": "libreoffice_writer",
+  "instruction": "Export the current document into PDF, keep the file name",
+  "source": "https://www.libreofficehelp.com/save-export-writer-documents-in-pdf-epub-format/",
+  "config": [
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_writer/4bcb1253-a636-4df4-8cb0-a35c04dfef31/View_Person_Organizational_Summary.docx",
+            "path": "/home/user/Desktop/View_Person_Organizational_Summary.docx"
+          }
+        ]
+      }
+    },
+    {
+      "type": "open",
+      "parameters": {
+        "path": "/home/user/Desktop/View_Person_Organizational_Summary.docx"
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "gedit /home/user/Desktop/meeting_notes.txt >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "mkdir -p /home/user/Desktop /home/user/Downloads && touch /home/user/Desktop/report_draft.txt /home/user/Desktop/budget_q3.ods /home/user/Downloads/invoice_2024.pdf /home/user/Downloads/notes_backup.txt"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 80 + 15)) && notify-send 'Email' 'New message from Alex: please review the report' && sleep $((RANDOM % 12 + 8)) && notify-send 'Calendar' 'Team stand-up starts in 5 minutes') >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(while true; do sleep $((RANDOM % 55 + 35)); touch /home/user/Downloads/download_$RANDOM.tmp; done) >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 18 + 6)) && wmctrl -r 'LibreOffice Writer' -e 0,100,50,1440,900) >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 25 + 10)) && wmctrl -r 'LibreOffice Writer' -e 0,-180,80,1920,1000) >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 30 + 12)) && wmctrl -a 'LibreOffice Writer' && DISPLAY=:0 python3 -c \"import pyautogui; pyautogui.press('f5')\") >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 35 + 15)) && wmctrl -a 'LibreOffice Writer' && DISPLAY=:0 python3 -c \"import pyautogui; pyautogui.hotkey('ctrl', 'shift', 'c')\") >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 40 + 18)) && wmctrl -a 'LibreOffice Writer' && DISPLAY=:0 python3 -c \"import pyautogui; pyautogui.hotkey('ctrl', 'End')\") >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 50 + 20)) && nautilus /home/user/Downloads 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 45 + 20)) && wmctrl -a 'LibreOffice Writer' && DISPLAY=:0 python3 -c \"import pyautogui; pyautogui.hotkey('ctrl', 'h')\") >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 90 + 50)) && wmctrl -a 'gedit') >/dev/null 2>&1 &"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "libreoffice_writer"
+  ],
+  "evaluator": {
+    "func": [
+      "compare_pdfs",
+      "compare_pdfs",
+      "compare_pdfs",
+      "compare_pdfs"
+    ],
+    "conj": "or",
+    "expected": [
+      {
+        "type": "cloud_file",
+        "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_writer/4bcb1253-a636-4df4-8cb0-a35c04dfef31/View_Person_Organizational_Summary.pdf",
+        "dest": "Constitution_Template_With_Guidelines_Gold_1.pdf"
+      },
+      {
+        "type": "cloud_file",
+        "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_writer/4bcb1253-a636-4df4-8cb0-a35c04dfef31/View_Person_Organizational_Summary.pdf",
+        "dest": "Constitution_Template_With_Guidelines_Gold_2.pdf"
+      },
+      {
+        "type": "cloud_file",
+        "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_writer/4bcb1253-a636-4df4-8cb0-a35c04dfef31/View_Person_Organizational_Summary.pdf",
+        "dest": "Constitution_Template_With_Guidelines_Gold_3.pdf"
+      },
+      {
+        "type": "cloud_file",
+        "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_writer/4bcb1253-a636-4df4-8cb0-a35c04dfef31/View_Person_Organizational_Summary.pdf",
+        "dest": "Constitution_Template_With_Guidelines_Gold_4.pdf"
+      }
+    ],
+    "result": [
+      {
+        "type": "vm_file",
+        "path": "/home/user/Desktop/View_Person_Organizational_Summary.pdf",
+        "dest": "Constitution_Template_With_Guidelines_1.pdf"
+      },
+      {
+        "type": "vm_file",
+        "path": "/home/user/Documents/View_Person_Organizational_Summary.pdf",
+        "dest": "Constitution_Template_With_Guidelines_2.pdf"
+      },
+      {
+        "type": "vm_file",
+        "path": "/home/user/Downloads/View_Person_Organizational_Summary.pdf",
+        "dest": "Constitution_Template_With_Guidelines_3.pdf"
+      },
+      {
+        "type": "vm_file",
+        "path": "/home/user/View_Person_Organizational_Summary.pdf",
+        "dest": "Constitution_Template_With_Guidelines_4.pdf"
+      }
+    ]
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "very_easy",
+    "success_rate_used": 0.9018,
+    "categories_applied": [
+      "background_apps",
+      "filesystem_clutter",
+      "random_notifications",
+      "window_geometry",
+      "panel_toggle",
+      "view_mode_change",
+      "scroll_displacement",
+      "window_occlusion",
+      "dialog_popup",
+      "focus_stealing"
+    ],
+    "noise_element_count": 12,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13
+    ]
+  }
+}

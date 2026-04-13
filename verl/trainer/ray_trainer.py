@@ -599,7 +599,11 @@ class RayPPOTrainer:
                     print(f"Step {step_idx} of {self.config.env.max_steps}: {is_done_results}")
                     world_size = self.actor_rollout_wg.world_size
 
-                    vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(env_outputs)
+                    vllm_batch, valid_env_idx, overlong_env_idx = self.prepare_vllm_inputs_full(env_outputs)
+
+                    # Mark overlong-prompt envs as done so they don't break generation
+                    for eidx in overlong_env_idx:
+                        env_outputs = [x for x in env_outputs if x['env_idx'] != eidx]
 
                     if vllm_batch is None:
                         # No envs produced valid observations (e.g. all failed to start).
@@ -1037,7 +1041,7 @@ class RayPPOTrainer:
         valid_env_idx = [x['env_idx'] for x in env_outputs if x['obs_messages'] is not None and not x.get('is_done', False)]
 
         if not valid_obs_messages:
-            return None, []
+            return None, [], []
 
         dataset = OSWorldDataset(
             valid_obs_messages,
@@ -1061,10 +1065,31 @@ class RayPPOTrainer:
 
         # batch_dict = ray.get([get_dataset_item.remote(i) for i in range(len(dataset))])
 
+        # Filter out items whose prompt exceeds max_prompt_length
+        max_len = self.config.data.max_prompt_length
+        keep_indices = []
+        overlong_env_idx = []
+        for i, item in enumerate(batch_dict):
+            prompt_len = len(item["raw_prompt_ids"])
+            if prompt_len > max_len:
+                print(
+                    f"[prepare_vllm] Skipping env {valid_env_idx[i]}: "
+                    f"prompt length {prompt_len} > max {max_len}, marking as failed"
+                )
+                overlong_env_idx.append(valid_env_idx[i])
+            else:
+                keep_indices.append(i)
+
+        if not keep_indices:
+            return None, [], overlong_env_idx
+
+        batch_dict = [batch_dict[i] for i in keep_indices]
+        valid_env_idx = [valid_env_idx[i] for i in keep_indices]
+
         batch_dict = collate_fn_dataproto(batch_dict)
         batch = DataProto.from_single_dict(batch_dict)
-        
-        return batch, valid_env_idx
+
+        return batch, valid_env_idx, overlong_env_idx
 
 
     def prepare_grpo_inputs(self, messages, eval_results, task_configs):
@@ -1251,7 +1276,15 @@ class RayPPOTrainer:
                     self._last_remote_fail_log = time.time()
 
             with _timer("prepare_vllm_inputs", local_timing):
-                vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(env_outputs)
+                vllm_batch, valid_env_idx, overlong_env_idx = self.prepare_vllm_inputs_full(env_outputs)
+
+            # Mark overlong-prompt slots as done with score 0
+            for eidx in overlong_env_idx:
+                slot = slot_by_env_idx.get(eidx)
+                if slot is not None and slot not in done_slots:
+                    format_rewards[slot] = 0.0
+                    done_slots.add(slot)
+                    eval_results_objects[slot] = active_workers[slot].evaluate.remote()
 
             if vllm_batch is None or not isinstance(vllm_batch, DataProto):
                 # All reset outputs failed — no valid obs to generate from
@@ -1403,7 +1436,16 @@ class RayPPOTrainer:
                     )
 
                     with _timer("prepare_vllm_inputs", local_timing):
-                        vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(all_ready_obs)
+                        vllm_batch, valid_env_idx, overlong_env_idx = self.prepare_vllm_inputs_full(all_ready_obs)
+
+                    # Mark overlong-prompt slots as done with score 0
+                    for eidx in overlong_env_idx:
+                        slot = slot_by_env_idx.get(eidx)
+                        if slot is not None and slot not in done_slots:
+                            format_rewards[slot] = 0.0
+                            done_slots.add(slot)
+                            if eval_results_objects[slot] is None:
+                                eval_results_objects[slot] = active_workers[slot].evaluate.remote()
 
                     if vllm_batch is not None and isinstance(vllm_batch, DataProto):
                         had_successful_generate = True

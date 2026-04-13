@@ -1,0 +1,139 @@
+{
+  "id": "f9be0997-4b7c-45c5-b05c-4612b44a6118",
+  "snapshot": "os",
+  "instruction": "I am currently working on a ubuntu system but I do not want the notifications to bother me. Can you help me to switch to 'Do not disturb mode'?",
+  "source": "https://help.ubuntu.com/lts/ubuntu-help/shell-notifications.html.en",
+  "config": [
+    {
+      "type": "execute",
+      "parameters": {
+        "command": "gsettings set org.gnome.desktop.notifications show-banners true",
+        "shell": true
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "python",
+          "-c",
+          "import pyautogui; import time; pyautogui.click({SCREEN_WIDTH_HALF}, {SCREEN_HEIGHT_HALF}); time.sleep(0.5);"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "gedit /home/user/Desktop/notes_draft.txt >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "mkdir -p /home/user/Desktop && touch /home/user/Desktop/report_draft.txt /home/user/Desktop/meeting_notes.txt /home/user/Desktop/todo_list.txt"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 60 + 10)) && notify-send 'Slack' 'New message from Alex: are you free?' && sleep $((RANDOM % 15 + 5)) && notify-send 'Calendar' 'Team stand-up starting in 5 minutes') >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(while true; do sleep $((RANDOM % 60 + 20)); notify-send 'Update Manager' 'Software updates are available. Install now?'; done) >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 30 + 15)) && gnome-system-monitor) >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 40 + 25)) && nautilus /home/user/Desktop 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 60 + 30)) && wmctrl -a 'gedit' 2>/dev/null) &"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "os"
+  ],
+  "evaluator": {
+    "func": "exact_match",
+    "result": {
+      "type": "vm_command_line",
+      "command": "gsettings get org.gnome.desktop.notifications show-banners",
+      "shell": true
+    },
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "expected": "false\n"
+      }
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "easy",
+    "success_rate_used": 0.6696,
+    "categories_applied": [
+      "background_apps",
+      "filesystem_clutter",
+      "random_notifications",
+      "window_occlusion",
+      "focus_stealing"
+    ],
+    "noise_element_count": 7,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  }
+}

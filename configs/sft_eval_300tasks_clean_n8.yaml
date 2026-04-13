@@ -81,7 +81,7 @@ worker:
     max_num_seqs: 8
     old_logprob_source: "recompute"
     val_override_config:
-      temperature: 1.0
+      temperature: 0.0
       n: 1
 
   ref:
@@ -97,14 +97,13 @@ worker:
     skip_special_tokens: true
 
 env:
-  num_envs: 112
+  num_envs: 96
   max_steps: 15
   remote_server_urls:
     - "http://10.100.4.4:15001"
-    - "http://10.100.4.6:15001"
     - "http://10.100.4.7:15001"
     - "http://10.100.4.8:15001"
-  remote_server_env_counts: [32, 16, 32, 32]
+  remote_server_env_counts: [32, 32, 32]
 
 trainer:
   total_episodes: 1

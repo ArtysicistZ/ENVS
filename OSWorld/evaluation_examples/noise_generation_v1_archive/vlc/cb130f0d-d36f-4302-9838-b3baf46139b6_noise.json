@@ -1,0 +1,86 @@
+{
+  "id": "cb130f0d-d36f-4302-9838-b3baf46139b6",
+  "snapshot": "base_setup",
+  "instruction": "Automatically adjust the brightness and contrast of this video to match my room's lighting.",
+  "source": "https://www.vlchelp.com/increase-brightness-contrast-videos/",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": "VLC_VERBOSE=-1 vlc --no-audio --no-video-title-show",
+        "shell": true
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "vlc"
+  ],
+  "evaluator": {
+    "func": "infeasible"
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "hard",
+    "success_rate_used": 0.0595,
+    "categories_applied": [
+      "random_notifications",
+      "background_apps",
+      "window_geometry"
+    ],
+    "noise_element_count": 3,
+    "added_step_indices": [
+      1,
+      2,
+      3
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Email' 'FWD: Q2 budget review spreadsheet attached'"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Team sync starting in 10 minutes'"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "gedit"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'VLC' -e 0,80,60,1200,750"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 3; elements produced: 4."
+  }
+}

@@ -1,0 +1,143 @@
+{
+  "id": "21760ecb-8f62-40d2-8d85-0cee5725cb72",
+  "snapshot": "libreoffice_impress",
+  "instruction": "Could you help me add slide transition \"dissolve\" to my first page?",
+  "source": "https://www.libreofficehelp.com/add-animations-transitions-libreoffice-impress-slides/",
+  "config": [
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_impress/21760ecb-8f62-40d2-8d85-0cee5725cb72/Ch4%20Video%20Effect.pptx",
+            "path": "/home/user/Desktop/Ch4 Video Effect.pptx"
+          }
+        ]
+      }
+    },
+    {
+      "type": "open",
+      "parameters": {
+        "path": "/home/user/Desktop/Ch4 Video Effect.pptx"
+      }
+    },
+    {
+      "type": "sleep",
+      "parameters": {
+        "seconds": 0.5
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "python",
+          "-c",
+          "import pyautogui; import time;  time.sleep(4); pyautogui.doubleClick(x={SCREEN_WIDTH_HALF}, y={SCREEN_HEIGHT_HALF}); time.sleep(0.5);pyautogui.mouseDown(); pyautogui.mouseUp(); time.sleep(0.5);"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "libreoffice_impress"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "activate_window",
+        "parameters": {
+          "window_name": "Ch4 Video Effect.pptx - LibreOffice Impress",
+          "strict": true
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 0.5
+        }
+      },
+      {
+        "type": "execute",
+        "parameters": {
+          "command": [
+            "python",
+            "-c",
+            "import pyautogui; import time; pyautogui.hotkey('ctrl', 's'); time.sleep(4.5);"
+          ]
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 4.5
+        }
+      }
+    ],
+    "func": "check_transition",
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "slide_idx": 0,
+        "transition_type": "dissolve"
+      }
+    },
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/Desktop/Ch4 Video Effect.pptx",
+      "dest": "Ch4 Video Effect.pptx"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "hard",
+    "success_rate_used": 0.0982,
+    "categories_applied": [
+      "random_notifications",
+      "window_geometry"
+    ],
+    "noise_element_count": 2,
+    "added_step_indices": [
+      4,
+      5
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Outlook' 'New message: Q2 review slides attached'"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Team stand-up in 10 minutes'"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'LibreOffice Impress' -e 0,80,60,1400,880"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 2; elements produced: 3."
+  }
+}

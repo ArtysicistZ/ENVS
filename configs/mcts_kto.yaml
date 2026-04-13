@@ -1,9 +1,10 @@
-# MCTS KTO — Step-Level APO-zero-unpaired (no KL baseline)
+# MCTS KTO — Full KTO (Paper Eq. 7) with z_ref EMA baseline
 #
-# Uses the apo_zero_unpaired variant from TRL which sets KL=0.
-# This avoids the KL baseline feedback loop with batch_size=1.
-# Desirable: 1 - sigmoid(beta * log_ratio) — push policy prob UP
-# Undesirable: sigmoid(beta * log_ratio) — push policy prob DOWN
+# Uses the full KTO loss with reference model anchoring and KL baseline.
+# z_ref estimated via running EMA across batches (needed for batch_size=1).
+# Desirable: 1 - sigmoid(beta * (log_ratio - z_ref)) — push policy prob UP
+# Undesirable: 1 - sigmoid(beta * (z_ref - log_ratio)) — push policy prob DOWN
+# Difficulty weighting: (1-SR)^β / T_t with separate pos/neg pools.
 #
 # Usage:
 #   torchrun --nproc_per_node=8 scripts/train_mcts_kto.py \
@@ -25,8 +26,9 @@ max_length: 12000
 limit_images: 3
 
 # ---- KTO ----
-kto_beta: 0.1             # KTO temperature (STEVE paper used 0.1)
-auto_balance: false        # TRL default: both lambda=1.0, paper handles imbalance via formula
+kto_beta: 3.0             # Calibrated for AVERAGE log-probs to match SFT grad_norm (~2.0)
+neg_gradient_ratio: 0.15   # Fraction of total gradient from negatives (0.15 = 15% neg, 85% pos)
+z_ref_momentum: 0.99       # EMA momentum for KL baseline (z_ref in paper Eq. 7)
 
 # ---- Weighting ----
 difficulty_beta: 0.5       # Power exponent for positive difficulty weighting
@@ -37,7 +39,7 @@ output_dir: "checkpoints/mcts_kto/v3_fixed_beta01_1e-6"
 num_epochs: 1
 per_device_batch_size: 1
 gradient_accumulation_steps: 4    # effective_batch = 32
-learning_rate: 1e-6
+learning_rate: 2e-6
 lr_scheduler_type: "cosine"
 warmup_ratio: 0.05
 weight_decay: 0.01

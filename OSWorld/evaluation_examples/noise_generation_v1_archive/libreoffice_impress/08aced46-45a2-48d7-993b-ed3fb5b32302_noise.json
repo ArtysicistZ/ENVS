@@ -1,0 +1,189 @@
+{
+  "id": "08aced46-45a2-48d7-993b-ed3fb5b32302",
+  "snapshot": "libreoffice_impress",
+  "instruction": "Give the slide 2 the right aligned title, \"Note\".",
+  "source": "https://arxiv.org/pdf/2311.01767.pdf",
+  "config": [
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_impress/08aced46-45a2-48d7-993b-ed3fb5b32302/22_6.pptx",
+            "path": "/home/user/Desktop/22_6.pptx"
+          }
+        ]
+      }
+    },
+    {
+      "type": "open",
+      "parameters": {
+        "path": "/home/user/Desktop/22_6.pptx"
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "libreoffice_impress"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "activate_window",
+        "parameters": {
+          "window_name": "22_6.pptx - LibreOffice Impress",
+          "strict": true
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 0.5
+        }
+      },
+      {
+        "type": "execute",
+        "parameters": {
+          "command": [
+            "python",
+            "-c",
+            "import pyautogui; import time; pyautogui.hotkey('ctrl', 's'); time.sleep(0.5);"
+          ]
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 0.5
+        }
+      }
+    ],
+    "func": [
+      "compare_pptx_files",
+      "compare_pptx_files"
+    ],
+    "conj": "or",
+    "expected": [
+      {
+        "type": "cloud_file",
+        "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_impress/08aced46-45a2-48d7-993b-ed3fb5b32302/22_6_Gold.pptx",
+        "dest": "22_6_Gold.pptx"
+      },
+      {
+        "type": "cloud_file",
+        "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_impress/08aced46-45a2-48d7-993b-ed3fb5b32302/22_6_Gold2.pptx",
+        "dest": "22_6_Gold2.pptx"
+      }
+    ],
+    "result": [
+      {
+        "type": "vm_file",
+        "path": "/home/user/Desktop/22_6.pptx",
+        "dest": "22_6.pptx"
+      },
+      {
+        "type": "vm_file",
+        "path": "/home/user/Desktop/22_6.pptx",
+        "dest": "22_6.pptx"
+      }
+    ]
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.1696,
+    "categories_applied": [
+      "filesystem_clutter",
+      "background_apps",
+      "random_notifications",
+      "panel_toggle",
+      "window_geometry"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "filesystem_clutter",
+        "once": false,
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Desktop/meeting_notes.txt /home/user/Desktop/report_draft.docx /home/user/Desktop/todo_list.txt"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "filesystem_clutter",
+        "once": false,
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Downloads/download_$RANDOM.tmp"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "gedit --new-window /home/user/Desktop/meeting_notes.txt"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Email' 'New message from Alex: please review slides'"
+        ]
+      },
+      {
+        "id": "n4",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Team sync in 10 minutes'"
+        ]
+      },
+      {
+        "id": "n5",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'LibreOffice Impress' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui, time; time.sleep(0.5); pyautogui.hotkey('alt', 'v'); time.sleep(0.4); pyautogui.press('p')\""
+        ]
+      },
+      {
+        "id": "n6",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'LibreOffice Impress' -e 0,80,60,1400,880"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 5; elements produced: 7."
+  }
+}

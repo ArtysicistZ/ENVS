@@ -1,0 +1,169 @@
+{
+  "id": "0ed39f63-6049-43d4-ba4d-5fa2fe04a951",
+  "snapshot": "vscode",
+  "instruction": "Please help me change all the places in this document that say \"text\" to \"test\".",
+  "source": "https://www.quora.com/How-do-you-find-and-replace-text-in-Visual-Studio-Code",
+  "config": [
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/vs_code/0ed39f63-6049-43d4-ba4d-5fa2fe04a951/vscode_replace_text.txt",
+            "path": "/home/user/Desktop/vscode_replace_text.txt"
+          }
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "code",
+          "/home/user/Desktop/vscode_replace_text.txt"
+        ]
+      }
+    },
+    {
+      "type": "activate_window",
+      "parameters": {
+        "window_name": "Visual Studio Code"
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "vscode"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "activate_window",
+        "parameters": {
+          "window_name": "Visual Studio Code"
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 0.5
+        }
+      },
+      {
+        "type": "execute",
+        "parameters": {
+          "command": [
+            "python",
+            "-c",
+            "import pyautogui; pyautogui.hotkey('ctrl', 's');"
+          ]
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 0.5
+        }
+      }
+    ],
+    "func": "compare_text_file",
+    "expected": {
+      "type": "cloud_file",
+      "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/vs_code/0ed39f63-6049-43d4-ba4d-5fa2fe04a951/vscode_replace_text_gold.txt",
+      "dest": "vscode_replace_text_gold.txt"
+    },
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/Desktop/vscode_replace_text.txt",
+      "dest": "vscode_replace_text.txt"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.183,
+    "categories_applied": [
+      "background_apps",
+      "filesystem_clutter",
+      "random_notifications",
+      "panel_toggle",
+      "view_mode_change"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "gedit"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "filesystem_clutter",
+        "once": false,
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Downloads/download_$RANDOM.tmp"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Email' 'New message: Re: quarterly report'"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Team stand-up starting in 5 minutes'"
+        ]
+      },
+      {
+        "id": "n4",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'Visual Studio Code' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui; pyautogui.hotkey('ctrl', 'b')\""
+        ]
+      },
+      {
+        "id": "n5",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'Visual Studio Code' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui; pyautogui.hotkey('ctrl', '\\\\\\\\')\""
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 5; elements produced: 6."
+  }
+}

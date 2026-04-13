@@ -103,7 +103,8 @@ class MCTSKTODataset(Dataset):
         limit_images: int = 3,
         beta: float = 0.5,
         max_step_ratio: float = 2.0,
-        auto_balance: bool = True,
+        neg_gradient_ratio: float = 0.15,
+        negatives_only: bool = False,
     ):
         self.tokenizer = tokenizer
         self.processor = processor
@@ -122,60 +123,63 @@ class MCTSKTODataset(Dataset):
         with open(mask_path) as f:
             masks = json.load(f)
 
-        # ---- Load positives (same as MCTSSFTDatasetV2) ----
-        print("Loading positive examples (KEEP steps from successful trajectories)...")
+        # ---- Load positives (skip if negatives_only) ----
         seen_steps = set()
         self.examples = []
         self.is_desirable = []
         task_keep_counts = Counter()
         n_pos = 0
 
-        for task_id, tree_files in task_index.items():
-            for tree_filename in tree_files:
-                tree_path = os.path.join(tree_dir, tree_filename)
-                real_path = os.path.realpath(tree_path)
-                if not os.path.exists(real_path):
-                    continue
-                tree_data = load_mcts_tree(real_path)
-                round_label = tree_filename.replace(task_id + "_", "").replace(".json", "")
-                nodes = tree_data["nodes"]
-                instruction = tree_data.get("instruction", "")
-
-                for leaf_id, leaf in nodes.items():
-                    if not (leaf.get("eval_score") and leaf["eval_score"] > 0):
+        if negatives_only:
+            print("Negatives-only mode: skipping positive examples")
+        else:
+            print("Loading positive examples (KEEP steps from successful trajectories)...")
+            for task_id, tree_files in task_index.items():
+                for tree_filename in tree_files:
+                    tree_path = os.path.join(tree_dir, tree_filename)
+                    real_path = os.path.realpath(tree_path)
+                    if not os.path.exists(real_path):
                         continue
+                    tree_data = load_mcts_tree(real_path)
+                    round_label = tree_filename.replace(task_id + "_", "").replace(".json", "")
+                    nodes = tree_data["nodes"]
+                    instruction = tree_data.get("instruction", "")
 
-                    traj_steps = reconstruct_steps(tree_data, leaf_id)
-                    step_sources = map_steps_to_nodes(tree_data, leaf_id)
-
-                    episode = {
-                        "task_id": task_id,
-                        "instruction": instruction,
-                        "eval_result": 1.0,
-                        "limit_images": limit_images,
-                        "steps": traj_steps,
-                    }
-                    all_step_examples = expand_episode(episode, train_all_steps=True)
-
-                    for k, (node_id, node_step_idx) in enumerate(step_sources):
-                        step_id = (tree_filename, node_id, node_step_idx)
-                        if step_id in seen_steps:
+                    for leaf_id, leaf in nodes.items():
+                        if not (leaf.get("eval_score") and leaf["eval_score"] > 0):
                             continue
-                        seen_steps.add(step_id)
 
-                        mask_key = f"{task_id}:{round_label}:{node_id}"
-                        node_mask = masks.get(mask_key)
-                        if node_mask is not None and node_step_idx < len(node_mask):
-                            if node_mask[node_step_idx] == 0:
+                        traj_steps = reconstruct_steps(tree_data, leaf_id)
+                        step_sources = map_steps_to_nodes(tree_data, leaf_id)
+
+                        episode = {
+                            "task_id": task_id,
+                            "instruction": instruction,
+                            "eval_result": 1.0,
+                            "limit_images": limit_images,
+                            "steps": traj_steps,
+                        }
+                        all_step_examples = expand_episode(episode, train_all_steps=True)
+
+                        for k, (node_id, node_step_idx) in enumerate(step_sources):
+                            step_id = (tree_filename, node_id, node_step_idx)
+                            if step_id in seen_steps:
                                 continue
+                            seen_steps.add(step_id)
 
-                        if k < len(all_step_examples):
-                            example = all_step_examples[k]
-                            example["task_id"] = task_id
-                            self.examples.append(example)
-                            self.is_desirable.append(1.0)
-                            task_keep_counts[task_id] += 1
-                            n_pos += 1
+                            mask_key = f"{task_id}:{round_label}:{node_id}"
+                            node_mask = masks.get(mask_key)
+                            if node_mask is not None and node_step_idx < len(node_mask):
+                                if node_mask[node_step_idx] == 0:
+                                    continue
+
+                            if k < len(all_step_examples):
+                                example = all_step_examples[k]
+                                example["task_id"] = task_id
+                                self.examples.append(example)
+                                self.is_desirable.append(1.0)
+                                task_keep_counts[task_id] += 1
+                                n_pos += 1
 
         print(f"  Positive examples: {n_pos}")
 
@@ -218,44 +222,80 @@ class MCTSKTODataset(Dataset):
         print(f"  Tasks with positives: {len(task_keep_counts)}")
         print(f"  Tasks with negatives: {len(neg_task_counts)}")
 
-        # ---- Compute weights: ALL steps (pos+neg) within a task share the same weight ----
-        # Weight = (1-SR_t)^beta / T_t_total, where T_t_total = pos + neg steps for task t
-        # Same design as SFT v2.1 but T_t now includes negatives
-        task_total_counts = Counter()
-        for ex in self.examples:
-            task_total_counts[ex["task_id"]] += 1
+        # ---- Compute weights: separate pools for positives and negatives ----
+        # Positives: w = (1-SR_t)^β / T_pos_t  (same as SFT v2.1 — difficulty-weighted)
+        # Negatives: w = (1-SR_t)^β / T_neg_t  (independent budget, not diluting positives)
+        # Each pool normalized to mean=1 independently; lambda_d/lambda_u handle global balance.
+        task_pos_counts = Counter()
+        task_neg_counts = Counter()
+        for i, ex in enumerate(self.examples):
+            tid = ex["task_id"]
+            if self.is_desirable[i] > 0.5:
+                task_pos_counts[tid] += 1
+            else:
+                task_neg_counts[tid] += 1
 
         raw_weights = []
-        for ex in self.examples:
+        for i, ex in enumerate(self.examples):
             tid = ex["task_id"]
             sr = task_sr.get(tid, 0.0)
-            T_t = task_total_counts[tid]
-            w = ((1 - sr) ** beta) / T_t
-            raw_weights.append(w)
+            difficulty = (1 - sr) ** beta
+            if self.is_desirable[i] > 0.5:
+                T_t = task_pos_counts[tid]
+            else:
+                T_t = max(task_neg_counts[tid], 1)
+            raw_weights.append(difficulty / T_t)
 
-        # Normalize to mean=1
-        mean_w = sum(raw_weights) / len(raw_weights)
-        raw_weights = [w / mean_w for w in raw_weights]
+        # Normalize pos and neg weights SEPARATELY to mean=1
+        pos_indices = [i for i in range(len(raw_weights)) if self.is_desirable[i] > 0.5]
+        neg_indices = [i for i in range(len(raw_weights)) if self.is_desirable[i] <= 0.5]
 
-        # Cap at max_step_ratio
-        n_capped = sum(1 for w in raw_weights if w > max_step_ratio)
+        if pos_indices:
+            pos_mean = sum(raw_weights[i] for i in pos_indices) / len(pos_indices)
+            for i in pos_indices:
+                raw_weights[i] /= pos_mean
+        if neg_indices:
+            neg_mean = sum(raw_weights[i] for i in neg_indices) / len(neg_indices)
+            for i in neg_indices:
+                raw_weights[i] /= neg_mean
+
+        # Cap at max_step_ratio (within each pool)
+        n_capped = 0
+        for pool_indices in [pos_indices, neg_indices]:
+            if not pool_indices:
+                continue
+            capped = [(i, min(raw_weights[i], max_step_ratio)) for i in pool_indices]
+            n_over = sum(1 for i, w in capped if raw_weights[i] > max_step_ratio)
+            n_capped += n_over
+            if n_over > 0:
+                for i, w in capped:
+                    raw_weights[i] = w
+                pool_mean = sum(raw_weights[i] for i in pool_indices) / len(pool_indices)
+                for i in pool_indices:
+                    raw_weights[i] /= pool_mean
         if n_capped > 0:
-            raw_weights = [min(w, max_step_ratio) for w in raw_weights]
-            mean_w2 = sum(raw_weights) / len(raw_weights)
-            raw_weights = [w / mean_w2 for w in raw_weights]
-            print(f"  Capped {n_capped} steps at {max_step_ratio}x (re-normalized)")
+            print(f"  Capped {n_capped} steps at {max_step_ratio}x (re-normalized per pool)")
 
         self.weights = raw_weights
 
-        print(f"  Tasks with steps: {len(task_total_counts)}")
-        ws = sorted(self.weights, reverse=True)
-        print(f"  Weight stats: max={ws[0]:.2f}, p50={ws[len(ws)//2]:.2f}, min={ws[-1]:.2f}")
+        print(f"  Tasks with positives: {len(task_pos_counts)}, with negatives: {len(task_neg_counts)}")
+        if pos_indices:
+            ws_pos = sorted([raw_weights[i] for i in pos_indices], reverse=True)
+            print(f"  Pos weight stats: max={ws_pos[0]:.2f}, p50={ws_pos[len(ws_pos)//2]:.2f}, min={ws_pos[-1]:.2f}")
+        if neg_indices:
+            ws_neg = sorted([raw_weights[i] for i in neg_indices], reverse=True)
+            print(f"  Neg weight stats: max={ws_neg[0]:.2f}, p50={ws_neg[len(ws_neg)//2]:.2f}, min={ws_neg[-1]:.2f}")
 
-        # Auto-balance: scale for the pos/neg ratio imbalance
-        # KTO paper recommends: lambda_u proportional to n_pos/n_neg
-        self.lambda_d = 1.0
-        self.lambda_u = float(n_pos) / max(float(n_neg), 1.0) if auto_balance else 1.0
-        print(f"  Auto-balance: lambda_d={self.lambda_d:.1f}, lambda_u={self.lambda_u:.1f}")
+        # Lambda scaling
+        if negatives_only:
+            self.lambda_d = 0.0
+            self.lambda_u = 1.0
+        else:
+            # neg_gradient_ratio controls what fraction of total gradient is negative.
+            self.lambda_d = 1.0
+            self.lambda_u = neg_gradient_ratio * float(n_pos) / max(float(n_neg), 1.0)
+        neg_frac = self.lambda_u * n_neg / (self.lambda_d * n_pos + self.lambda_u * n_neg) * 100
+        print(f"  neg_gradient_ratio={neg_gradient_ratio:.2f}: lambda_d={self.lambda_d:.1f}, lambda_u={self.lambda_u:.2f}, neg_gradient_fraction={neg_frac:.1f}%")
 
         # Precomputed ref log-probs (loaded later via load_ref_logps)
         self.ref_logps = None
@@ -430,15 +470,18 @@ def _gather_log_probs(logits, labels):
 
 
 class KTOTrainer(Trainer):
-    """KTO Trainer with ref model on GPU. Sequential forward: ref (no_grad) then policy."""
+    """Full KTO Trainer (Paper Eq. 7) with z_ref EMA baseline and ref model anchoring."""
 
     def __init__(self, *args, ref_model=None, kto_beta=0.1,
-                 lambda_d=1.0, lambda_u=1.0, **kwargs):
+                 lambda_d=1.0, lambda_u=1.0, z_ref_momentum=0.99, **kwargs):
         super().__init__(*args, **kwargs)
         self.ref_model = ref_model
         self.kto_beta = kto_beta
         self.lambda_d = lambda_d
         self.lambda_u = lambda_u
+        # Running EMA of KL baseline (z_ref) — critical anchor missing in APO-zero
+        self._z_ref_ema = 0.0
+        self._z_ref_momentum = z_ref_momentum
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         is_desirable = inputs.pop("is_desirable")
@@ -453,23 +496,32 @@ class KTOTrainer(Trainer):
             shift_ref = ref_logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
             mask = (shift_labels != -100).float()
-            # SUM of log-probs (matches TRL)
-            ref_logps = (_gather_log_probs(shift_ref, shift_labels) * mask).sum(dim=1)
+            tokens_per_sample = mask.sum(dim=1).clamp(min=1)
+            # AVERAGE log-probs (normalized by response length to keep gradients stable)
+            # Without this, grad_norm ∝ T (response length) → 200x blowup vs SFT
+            ref_logps = (_gather_log_probs(shift_ref, shift_labels) * mask).sum(dim=1) / tokens_per_sample
             del ref_outputs, ref_logits, shift_ref
 
         # ---- Policy forward ----
         outputs = model(**inputs)
         policy_logits = outputs.logits
         shift_policy = policy_logits[..., :-1, :].contiguous()
-        policy_logps = (_gather_log_probs(shift_policy, shift_labels) * mask).sum(dim=1)
+        policy_logps = (_gather_log_probs(shift_policy, shift_labels) * mask).sum(dim=1) / tokens_per_sample
 
-        # Log ratio = sum of per-token log(pi/ref)
+        # Log ratio = mean per-token log(π_θ / π_ref)
         log_ratio = policy_logps - ref_logps  # [B]
 
-        # ---- APO-zero-unpaired loss (TRL variant, no KL baseline needed) ----
-        # Works correctly with batch_size=1. No feedback loop risk.
-        # Desirable: push log_ratio UP (increase policy prob vs ref)
-        # Undesirable: push log_ratio DOWN (decrease policy prob vs ref)
+        # ---- Update z_ref: running EMA of KL(π_θ || π_ref) ----
+        # Paper: z_ref = E[β * KL(π_θ || π_ref)] estimated across the dataset.
+        # With batch_size=1, we use EMA across batches instead of within-batch estimation.
+        batch_kl = log_ratio.mean().detach()
+        if torch.distributed.is_initialized():
+            torch.distributed.all_reduce(batch_kl, op=torch.distributed.ReduceOp.AVG)
+        self._z_ref_ema = (self._z_ref_momentum * self._z_ref_ema +
+                           (1 - self._z_ref_momentum) * batch_kl.item())
+        z_ref = max(self._z_ref_ema, 0.0)
+
+        # ---- Full KTO loss (Paper Eq. 7, TRL loss_type="kto") ----
         desirable_mask = is_desirable.to(policy_logps.device) > 0.5
         undesirable_mask = ~desirable_mask
         sample_weights = sample_weights.to(policy_logps.device)
@@ -479,22 +531,76 @@ class KTOTrainer(Trainer):
         if desirable_mask.any():
             chosen_logratios = log_ratio[desirable_mask]
             w_d = sample_weights[desirable_mask]
-            # 1 - sigmoid(beta * log_ratio) → loss decreases as policy improves on good actions
-            chosen_losses = self.lambda_d * w_d * (1 - F.sigmoid(self.kto_beta * chosen_logratios))
+            # Desirable: 1 - σ(β * (log_ratio - z_ref))
+            chosen_losses = self.lambda_d * w_d * (
+                1 - F.sigmoid(self.kto_beta * (chosen_logratios - z_ref))
+            )
             all_losses.append(chosen_losses)
 
         if undesirable_mask.any():
             rejected_logratios = log_ratio[undesirable_mask]
             w_u = sample_weights[undesirable_mask]
-            # sigmoid(beta * log_ratio) → loss decreases as policy reduces prob on bad actions
-            rejected_losses = self.lambda_u * w_u * F.sigmoid(self.kto_beta * rejected_logratios)
+            # Undesirable: 1 - σ(β * (z_ref - log_ratio))
+            rejected_losses = self.lambda_u * w_u * (
+                1 - F.sigmoid(self.kto_beta * (z_ref - rejected_logratios))
+            )
             all_losses.append(rejected_losses)
 
         if all_losses:
-            # TRL-style: concatenate all losses, then nanmean over the combined tensor
             loss = torch.cat(all_losses, dim=0).nanmean()
         else:
             loss = torch.tensor(0.0, device=policy_logps.device, requires_grad=True)
+
+        return (loss, outputs) if return_outputs else loss
+
+
+class NPOTrainer(Trainer):
+    """NPO (Negative Preference Optimization) Trainer.
+
+    Loss: L = (2/β) × softplus(β × log_ratio)  (Paper Eq. 3, arxiv:2404.05868)
+    = (2/β) × log(1 + exp(β × avg_per_token_log(π_θ/π_ref)))
+
+    Gradient: ∇L = -W_θ × ∇log π_θ, where W_θ = 2σ(β × log_ratio).
+    - At init (log_ratio=0): W=1.0 (matches SFT gradient)
+    - Model unlearned (log_ratio→-∞): W→0 (self-limiting, stops pushing)
+    - Model still wrong (log_ratio>0): W→2.0 (strong correction)
+    """
+
+    def __init__(self, *args, ref_model=None, npo_beta=1.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.ref_model = ref_model
+        self.npo_beta = npo_beta
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        sample_weights = inputs.pop("sample_weight")
+        inputs.pop("is_desirable", None)  # not used in NPO
+        labels = inputs["labels"]
+
+        # ---- Reference forward (no grad) ----
+        with torch.no_grad():
+            ref_outputs = self.ref_model(**inputs)
+            ref_logits = ref_outputs.logits
+            shift_ref = ref_logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            mask = (shift_labels != -100).float()
+            tokens_per_sample = mask.sum(dim=1).clamp(min=1)
+            ref_logps = (_gather_log_probs(shift_ref, shift_labels) * mask).sum(dim=1)
+            del ref_outputs, ref_logits, shift_ref
+
+        # ---- Policy forward ----
+        outputs = model(**inputs)
+        policy_logits = outputs.logits
+        shift_policy = policy_logits[..., :-1, :].contiguous()
+        policy_logps = (_gather_log_probs(shift_policy, shift_labels) * mask).sum(dim=1)
+
+        # SUM of per-token log(π_θ / π_ref) — paper's original design
+        log_ratio = policy_logps - ref_logps  # [B]
+
+        # ---- NPO loss (Paper Eq. 3, using SUM log-probs) ----
+        # L = (2/β) × log(1 + exp(β × log_ratio)) = (2/β) × softplus(β × log_ratio)
+        sample_weights = sample_weights.to(log_ratio.device)
+        per_sample_loss = (2.0 / self.npo_beta) * F.softplus(self.npo_beta * log_ratio)
+        loss = (per_sample_loss * sample_weights).mean()
 
         return (loss, outputs) if return_outputs else loss
 
@@ -532,8 +638,12 @@ def _parse_args():
     parser.add_argument("--logging_steps", type=int, default=None)
     parser.add_argument("--local_rank", type=int, default=-1)
     parser.add_argument("--run_name", type=str, default=None)
-    parser.add_argument("--auto_balance", action="store_true", default=None)
+    parser.add_argument("--neg_gradient_ratio", type=float, default=None)
+    parser.add_argument("--z_ref_momentum", type=float, default=None)
     parser.add_argument("--ref_logps_path", type=str, default=None)
+    parser.add_argument("--negatives_only", action="store_true", default=None)
+    parser.add_argument("--trainer_type", type=str, default=None)
+    parser.add_argument("--npo_beta", type=float, default=None)
     cli_args = parser.parse_args()
 
     defaults = {
@@ -561,7 +671,11 @@ def _parse_args():
         "freeze_vision_tower": True,
         "bf16": True,
         "logging_steps": 1,
-        "auto_balance": True,
+        "neg_gradient_ratio": 0.15,
+        "z_ref_momentum": 0.99,
+        "negatives_only": False,
+        "trainer_type": "kto",
+        "npo_beta": 1.0,
     }
 
     yaml_config = {}
@@ -645,7 +759,8 @@ def main():
         limit_images=args.limit_images,
         beta=args.difficulty_beta,
         max_step_ratio=args.max_step_ratio,
-        auto_balance=args.auto_balance,
+        neg_gradient_ratio=args.neg_gradient_ratio,
+        negatives_only=args.negatives_only,
     )
 
     n_gpus = max(1, torch.cuda.device_count())
@@ -699,18 +814,33 @@ def main():
         dataset_stats=dataset_stats,
     )
 
-    trainer = KTOTrainer(
-        model=model,
-        ref_model=ref_model,
-        kto_beta=args.kto_beta,
-        lambda_d=dataset.lambda_d,
-        lambda_u=dataset.lambda_u,
-        args=training_args,
-        train_dataset=dataset,
-        data_collator=kto_collate_fn,
-        processing_class=tokenizer,
-        callbacks=[epoch_callback],
-    )
+    if args.trainer_type == "npo":
+        print(f"  Using NPOTrainer (npo_beta={args.npo_beta})")
+        trainer = NPOTrainer(
+            model=model,
+            ref_model=ref_model,
+            npo_beta=args.npo_beta,
+            args=training_args,
+            train_dataset=dataset,
+            data_collator=kto_collate_fn,
+            processing_class=tokenizer,
+            callbacks=[epoch_callback],
+        )
+    else:
+        print(f"  Using KTOTrainer (kto_beta={args.kto_beta})")
+        trainer = KTOTrainer(
+            model=model,
+            ref_model=ref_model,
+            kto_beta=args.kto_beta,
+            lambda_d=dataset.lambda_d,
+            lambda_u=dataset.lambda_u,
+            z_ref_momentum=args.z_ref_momentum,
+            args=training_args,
+            train_dataset=dataset,
+            data_collator=kto_collate_fn,
+            processing_class=tokenizer,
+            callbacks=[epoch_callback],
+        )
     epoch_callback.trainer = trainer
 
     # Wrap ref_model in FSDP manually to shard across GPUs (same as policy)

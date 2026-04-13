@@ -1,0 +1,189 @@
+{
+  "id": "3f28fe4f-5d9d-4994-a456-efd78cfae1a3",
+  "snapshot": "thunderbird",
+  "instruction": "Set up a plain text signature for my email account in Thunderbird. The first line is my name \"Anonym\" and the second line is my affiliation \"XYZ Lab\".",
+  "source": "https://www.adsigner.com/user-manual/signatures/setup-email-client-thunderbird/#:~:text=is%20probably%20hidden.-,Right%20click%20on%20the%20empty%20space%20at%20the%20top%20of,signature%20from%20a%20file%20instead.",
+  "config": [
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/thunderbird/dd84e895-72fd-4023-a336-97689ded257c/thunderbird-profile.tar.gz",
+            "path": "/home/user/thunderbird-profile.tar.gz"
+          }
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "tar",
+          "-xzv",
+          "--recursive-unlink",
+          "-f",
+          "/home/user/thunderbird-profile.tar.gz",
+          "-C",
+          "/home/user/"
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "/usr/bin/thunderbird"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "mkdir -p /home/user/Desktop /home/user/Downloads && touch /home/user/Desktop/scratch_notes.txt /home/user/Desktop/email_draft_v2.txt /home/user/Desktop/meeting_notes_apr.txt && (while true; do sleep $((RANDOM % 80 + 25)); touch /home/user/Downloads/attachment_$RANDOM.tmp; done) >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "gedit /home/user/Desktop/scratch_notes.txt 2>/dev/null &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 70 + 20)) && notify-send 'Email' 'New message: Re: Project Update' && sleep $((RANDOM % 10 + 5)) && notify-send 'Calendar' 'Team stand-up in 10 minutes') >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(while true; do sleep $((RANDOM % 50 + 40)); notify-send 'System' 'Software updates are available' 'Check Update Manager for details'; done) >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 30 + 25)) && nautilus /home/user/Desktop 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 25 + 10)) && wmctrl -r 'Thunderbird' -e 0,80,60,1300,850 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 55 + 45)) && wmctrl -a 'gedit') >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 55 + 55)) && wmctrl -a 'Thunderbird' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui, time; time.sleep(0.5); pyautogui.hotkey('ctrl', 'f')\") &"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/6766f2b8-8a72-417f-a9e5-56fcaa735837",
+  "related_apps": [
+    "thunderbird"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "close_window",
+        "parameters": {
+          "window_name": "Mail.thunderbird",
+          "strict": true,
+          "by_class": true
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 0.5
+        }
+      }
+    ],
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/.thunderbird/t5q2a5hp.default-release/prefs.js",
+      "dest": "thunder-prefs.js"
+    },
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "expect": {
+          "mail.identity.id1.htmlSigText": {
+            "method": "re.S",
+            "ref": "Anonym\\nXYZ Lab"
+          }
+        }
+      }
+    },
+    "func": "check_thunderbird_prefs"
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "easy",
+    "success_rate_used": 0.4911,
+    "categories_applied": [
+      "filesystem_clutter",
+      "background_apps",
+      "random_notifications",
+      "window_occlusion",
+      "window_geometry",
+      "focus_stealing",
+      "dialog_popup"
+    ],
+    "noise_element_count": 8,
+    "added_step_indices": [
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ]
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "id": "77b8ab4d-994f-43ac-8930-8ca087d7c4b4",
+  "snapshot": "gimp",
+  "instruction": "Could you assist me in placing my photo on the desktop and renaming it to export.jpg?",
+  "source": "https://superuser.com/questions/1636113/how-to-get-gimp-to-recognize-images-or-pictures-folder-as-the-default-folder-for",
+  "config": [
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/gimp/77b8ab4d-994f-43ac-8930-8ca087d7c4b4/The_Lost_River_Of_Dreams.jpg",
+            "path": "/home/user/Desktop/The_Lost_River_Of_Dreams.jpg"
+          }
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "gimp",
+          "/home/user/Desktop/The_Lost_River_Of_Dreams.jpg"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 15 + 5)) && gedit 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 60 + 15)) && notify-send 'Email' 'New message: Project assets attached' && sleep $((RANDOM % 15 + 5)) && notify-send 'Calendar' 'Design review in 10 minutes') >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Desktop/photo_backup.jpg /home/user/Desktop/vacation_final.jpg 2>/dev/null || true"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 20 + 10)) && wmctrl -r 'GNU Image Manipulation Program' -e 0,80,50,1440,900 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 30 + 15)) && wmctrl -r 'Layers' -e 0,50,600,250,300 2>/dev/null) &"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "gimp"
+  ],
+  "evaluator": {
+    "func": "check_file_exists_and_structure_sim",
+    "expected": {
+      "type": "cloud_file",
+      "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/gimp/77b8ab4d-994f-43ac-8930-8ca087d7c4b4/The_Lost_River_Of_Dreams.jpg",
+      "dest": "The_Lost_River_Of_Dreams.jpg"
+    },
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/Desktop/export.jpg",
+      "dest": "export.jpg"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.375,
+    "categories_applied": [
+      "background_apps",
+      "random_notifications",
+      "filesystem_clutter",
+      "window_geometry",
+      "panel_toggle"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ]
+  }
+}

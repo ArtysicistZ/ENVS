@@ -1,0 +1,182 @@
+{
+  "id": "6ed0a554-cbee-4b44-84ea-fd6c042f4fe1",
+  "snapshot": "vscode",
+  "instruction": "Please help me add folder \"/home/user/data1\" and folder \"/home/user/data2\" to the current workspace.",
+  "source": "https://www.youtube.com/watch?v=B-s71n0dHUk",
+  "config": [
+    {
+      "type": "command",
+      "parameters": {
+        "command": [
+          "mkdir",
+          "-p",
+          "/home/user/project"
+        ]
+      }
+    },
+    {
+      "type": "command",
+      "parameters": {
+        "command": [
+          "mkdir",
+          "-p",
+          "/home/user/data1"
+        ]
+      }
+    },
+    {
+      "type": "command",
+      "parameters": {
+        "command": [
+          "mkdir",
+          "-p",
+          "/home/user/data2"
+        ]
+      }
+    },
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/vs_code/6ed0a554-cbee-4b44-84ea-fd6c042f4fe1/project.code-workspace",
+            "path": "/home/user/project.code-workspace"
+          }
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "code",
+          "/home/user/project.code-workspace"
+        ]
+      }
+    },
+    {
+      "type": "activate_window",
+      "parameters": {
+        "window_name": "Visual Studio Code"
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "vscode"
+  ],
+  "evaluator": {
+    "func": "check_json_settings",
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "expected": {
+          "folders": [
+            {
+              "path": "project"
+            },
+            {
+              "path": "data1"
+            },
+            {
+              "path": "data2"
+            }
+          ]
+        }
+      }
+    },
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/project.code-workspace",
+      "dest": "project.code-workspace"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.1757,
+    "categories_applied": [
+      "background_apps",
+      "random_notifications",
+      "filesystem_clutter",
+      "panel_toggle",
+      "window_geometry"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "gedit"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Email' 'New message: Project sync request'"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Team stand-up in 10 minutes'"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "filesystem_clutter",
+        "once": false,
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Downloads/sync_$RANDOM.tmp"
+        ]
+      },
+      {
+        "id": "n4",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'Visual Studio Code' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui, time; time.sleep(0.5); pyautogui.hotkey('ctrl', 'b')\""
+        ]
+      },
+      {
+        "id": "n5",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'Visual Studio Code' -e 0,80,40,1400,880"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 5; elements produced: 6."
+  }
+}

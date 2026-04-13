@@ -1,0 +1,242 @@
+{
+  "id": "3a93cae4-ad3e-403e-8c12-65303b271818",
+  "snapshot": "libreoffice_calc",
+  "instruction": "Could you please add a two-hour lecture slot to my weekly course timetable, scheduled for every Wednesday at 12 PM? It seems I accidentally omitted that when setting up my schedule. I'd appreciate you taking care of that for me. Thanks!",
+  "source": "authors",
+  "config": [
+    {
+      "type": "command",
+      "parameters": {
+        "command": [
+          "mkdir",
+          "-p",
+          "/home/user/Desktop/students work/",
+          "/home/user/Desktop/Lec powerpoint/",
+          "/home/user/Desktop/Grammar test/",
+          "/home/user/Desktop/Grammar rules PDF/",
+          "/home/user/Desktop/FDI/"
+        ]
+      }
+    },
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "path": "/home/user/Desktop/students work/Zheng He .docx",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/2c1ebcd7-9c6d-4c9a-afad-900e381ecd5e/Zheng%20He%20.docx"
+          },
+          {
+            "path": "/home/user/Desktop/students work/cassie.docx",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/2c1ebcd7-9c6d-4c9a-afad-900e381ecd5e/cassie.docx"
+          },
+          {
+            "path": "/home/user/Desktop/students work/case study.docx",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/2c1ebcd7-9c6d-4c9a-afad-900e381ecd5e/case%20study.docx"
+          },
+          {
+            "path": "/home/user/Desktop/Grammar rules PDF/irregularrules02.pdf",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/2c1ebcd7-9c6d-4c9a-afad-900e381ecd5e/irregularrules02.pdf"
+          },
+          {
+            "path": "/home/user/Desktop/Grammar rules PDF/irregularrules01.pdf",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/2c1ebcd7-9c6d-4c9a-afad-900e381ecd5e/irregularrules01.pdf"
+          },
+          {
+            "path": "/home/user/Desktop/Grammar rules PDF/fragrules.pdf",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/2c1ebcd7-9c6d-4c9a-afad-900e381ecd5e/fragrules.pdf"
+          },
+          {
+            "path": "/home/user/Desktop/Grammar rules PDF/csfsrules.pdf",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/2c1ebcd7-9c6d-4c9a-afad-900e381ecd5e/csfsrules.pdf"
+          },
+          {
+            "path": "/home/user/Desktop/Public Lecture Teaching Plan.docx",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/2c1ebcd7-9c6d-4c9a-afad-900e381ecd5e/Public%20Lecture%20Teaching%20Plan.docx"
+          },
+          {
+            "path": "/home/user/Desktop/Course Timetable.xlsx",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/3a93cae4-ad3e-403e-8c12-65303b271818/Course%20Timetable.xlsx"
+          }
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Desktop/semester_plan_draft.txt /home/user/Desktop/grading_rubric_notes.txt"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 90 + 20)) && notify-send 'Calendar' 'Reminder: Faculty meeting in 15 minutes' && sleep $((RANDOM % 12 + 5)) && notify-send 'Thunderbird' 'New message: RE: Updated Lecture Schedule') >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(while true; do sleep $((RANDOM % 60 + 20)); touch /home/user/Downloads/download_$RANDOM.tmp; done) >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 30 + 15)) && wmctrl -a 'LibreOffice Calc' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui, time; pyautogui.hotkey('alt', 'v'); time.sleep(0.3); pyautogui.press('b')\") &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 30 + 25)) && wmctrl -r 'LibreOffice Calc' -e 0,100,50,1440,900 2>/dev/null) &"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/3a93cae4-ad3e-403e-8c12-65303b271818",
+  "related_apps": [
+    "os",
+    "libreoffice_calc"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "activate_window",
+        "parameters": {
+          "window_name": "Course Timetable.xlsx - LibreOffice Calc",
+          "strict": true
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 0.5
+        }
+      },
+      {
+        "type": "execute",
+        "parameters": {
+          "command": [
+            "python",
+            "-c",
+            "import pyautogui; import time; pyautogui.hotkey('ctrl', 's'); time.sleep(0.5); "
+          ]
+        }
+      }
+    ],
+    "func": [
+      "compare_table",
+      "compare_table",
+      "compare_table"
+    ],
+    "result": [
+      {
+        "type": "vm_file",
+        "path": "/home/user/Desktop/Course Timetable.xlsx",
+        "dest": "Course Timetable.xlsx"
+      },
+      {
+        "type": "vm_file",
+        "path": "/home/user/Desktop/Course Timetable.xlsx",
+        "dest": "Course Timetable.xlsx"
+      },
+      {
+        "type": "vm_file",
+        "path": "/home/user/Desktop/Course Timetable.xlsx",
+        "dest": "Course Timetable.xlsx"
+      }
+    ],
+    "expected": [
+      {
+        "type": "cloud_file",
+        "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/3a93cae4-ad3e-403e-8c12-65303b271818/Course%20Timetable%20Gold.xlsx",
+        "dest": "Course Timetable gold.xlsx"
+      },
+      {
+        "type": "cloud_file",
+        "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/3a93cae4-ad3e-403e-8c12-65303b271818/Course%20Timetable%20Gold%202.xlsx",
+        "dest": "Course Timetable gold 2.xlsx"
+      },
+      {
+        "type": "cloud_file",
+        "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/3a93cae4-ad3e-403e-8c12-65303b271818/Course%20Timetable%20Gold%203.xlsx",
+        "dest": "Course Timetable gold 3.xlsx"
+      }
+    ],
+    "options": [
+      {
+        "rules": [
+          {
+            "type": "sheet_data",
+            "sheet_idx0": "RNSheet1",
+            "sheet_idx1": "ENSheet1",
+            "ignore_case": true
+          }
+        ]
+      },
+      {
+        "rules": [
+          {
+            "type": "sheet_data",
+            "sheet_idx0": "RNSheet1",
+            "sheet_idx1": "ENSheet1",
+            "ignore_case": true
+          }
+        ]
+      },
+      {
+        "rules": [
+          {
+            "type": "sheet_data",
+            "sheet_idx0": "RNSheet1",
+            "sheet_idx1": "ENSheet1",
+            "ignore_case": true
+          }
+        ]
+      }
+    ],
+    "conj": "or"
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.1607,
+    "categories_applied": [
+      "filesystem_clutter",
+      "random_notifications",
+      "view_mode_change",
+      "window_geometry"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ]
+  }
+}

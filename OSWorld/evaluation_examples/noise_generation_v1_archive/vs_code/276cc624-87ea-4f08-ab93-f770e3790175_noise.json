@@ -1,0 +1,106 @@
+{
+  "id": "276cc624-87ea-4f08-ab93-f770e3790175",
+  "snapshot": "vscode",
+  "instruction": "Please help me set the current user's line length for code wrapping to 50 characters in VS Code.",
+  "source": "https://www.quora.com/unanswered/How-do-you-set-the-line-length-in-Visual-Studio-Code",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "code"
+        ]
+      }
+    },
+    {
+      "type": "activate_window",
+      "parameters": {
+        "window_name": "Visual Studio Code"
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "vscode"
+  ],
+  "evaluator": {
+    "func": "check_json_settings",
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "expected": {
+          "editor.wordWrapColumn": 50
+        }
+      }
+    },
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/.config/Code/User/settings.json",
+      "dest": "settings.json"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "hard",
+    "success_rate_used": 0.1295,
+    "categories_applied": [
+      "random_notifications",
+      "background_apps",
+      "window_geometry"
+    ],
+    "noise_element_count": 3,
+    "added_step_indices": [
+      2,
+      3,
+      4
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Slack' 'New message from Alex: can you review my PR?'"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Team stand-up starting in 5 minutes'"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "gedit"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'Visual Studio Code' -e 0,80,50,1440,900"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 3; elements produced: 4."
+  }
+}

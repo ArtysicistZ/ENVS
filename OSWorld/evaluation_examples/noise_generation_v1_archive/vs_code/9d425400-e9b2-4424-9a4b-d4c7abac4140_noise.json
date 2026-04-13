@@ -1,0 +1,106 @@
+{
+  "id": "9d425400-e9b2-4424-9a4b-d4c7abac4140",
+  "snapshot": "vscode",
+  "instruction": "I want to make the tabs wrapped over multiple lines when exceeding available space, please help modify the setting of VS Code.",
+  "source": "https://superuser.com/questions/1466771/is-there-a-way-to-make-editor-tabs-stack-in-vs-code",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "code"
+        ]
+      }
+    },
+    {
+      "type": "activate_window",
+      "parameters": {
+        "window_name": "Visual Studio Code"
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "vscode"
+  ],
+  "evaluator": {
+    "func": "check_json_settings",
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "expected": {
+          "workbench.editor.wrapTabs": true
+        }
+      }
+    },
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/.config/Code/User/settings.json",
+      "dest": "settings.json"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "hard",
+    "success_rate_used": 0.1429,
+    "categories_applied": [
+      "random_notifications",
+      "filesystem_clutter",
+      "window_geometry"
+    ],
+    "noise_element_count": 3,
+    "added_step_indices": [
+      2,
+      3,
+      4
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Slack' 'New message from Alex: can you check the PR?'"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Team stand-up starts in 5 minutes'"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "filesystem_clutter",
+        "once": false,
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Downloads/update_$RANDOM.tmp"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'Visual Studio Code' -e 0,80,60,1400,880"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 3; elements produced: 4."
+  }
+}

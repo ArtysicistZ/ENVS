@@ -259,7 +259,7 @@ class FSDPWorker(Worker):
                 model_config.model_path,
                 config=self.model_config,
                 torch_dtype=torch_dtype,
-                attn_implementation="flash_attention_2",  # flash-attn: O(n) memory vs O(n²) for SDPA at long context
+                attn_implementation="flash_attention_2",
                 device_map="cpu",  # Always load to CPU; FSDP will move to CUDA and shard
                 low_cpu_mem_usage=True,
                 trust_remote_code=model_config.trust_remote_code,
@@ -269,7 +269,7 @@ class FSDPWorker(Worker):
                 model = auto_class.from_config(
                     self.model_config,
                     torch_dtype=torch_dtype,
-                    attn_implementation="flash_attention_2",  # flash-attn: O(n) memory vs O(n²) for SDPA at long context
+                    attn_implementation="flash_attention_2",
                     trust_remote_code=model_config.trust_remote_code,
                 )
 
@@ -515,6 +515,9 @@ class FSDPWorker(Worker):
         import gc
         gc.collect()
         torch.cuda.empty_cache()
+        # Synchronize ranks before any FSDP collective (same rationale as compute_log_probs).
+        if dist.is_initialized() and self.world_size > 1:
+            dist.barrier()
         if self.rank == 0:
             _alloc = torch.cuda.memory_allocated() / 1024**3
             _resv = torch.cuda.memory_reserved() / 1024**3
@@ -665,6 +668,11 @@ class FSDPWorker(Worker):
         import gc
         gc.collect()
         torch.cuda.empty_cache()
+        # Synchronize ranks before any FSDP collective. Per-rank gc.collect() and
+        # post-rollout cleanup can drift enough to cross the NCCL watchdog window,
+        # triggering SIGABRT on whichever rank enters the first all-gather last.
+        if dist.is_initialized() and self.world_size > 1:
+            dist.barrier()
         data = data.to(torch.cuda.current_device())
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)

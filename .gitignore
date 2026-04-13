@@ -63,6 +63,7 @@ Thumbs.db
 .cache/
 *.safetensors
 models--*/
+.pytest_cache/
 
 # Temporary files
 *.tmp

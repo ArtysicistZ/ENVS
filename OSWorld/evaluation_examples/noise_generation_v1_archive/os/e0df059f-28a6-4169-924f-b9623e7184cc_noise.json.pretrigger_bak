@@ -1,0 +1,195 @@
+{
+  "id": "e0df059f-28a6-4169-924f-b9623e7184cc",
+  "snapshot": "os",
+  "instruction": "I have a directory named \"todo_list_Jan_1\". Can you help me change its name into \"todo_list_Jan_2\"?",
+  "source": "https://help.ubuntu.com/lts/ubuntu-help/files-rename.html.en",
+  "trajectory": "trajectories/",
+  "config": [
+    {
+      "type": "execute",
+      "parameters": {
+        "command": "echo {CLIENT_PASSWORD} | sudo -S mkdir ~/Desktop/todo_list_Jan_1",
+        "shell": true
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "touch ~/Desktop/report_draft.txt ~/Desktop/meeting_notes_q4.txt ~/Desktop/budget_2025.xlsx ~/Desktop/README_old.md || true"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(while true; do sleep $((RANDOM % 90 + 30)); touch ~/Downloads/download_$RANDOM.tmp; done) >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 90 + 15)) && notify-send 'Slack' 'New message from Alice: can you check the Jan file?' && sleep $((RANDOM % 10 + 5)) && notify-send 'Calendar' 'Team stand-up starting in 5 minutes') >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(while true; do sleep $((RANDOM % 60 + 20)); notify-send 'System' 'Software updates are ready to install'; done) >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "gedit"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 40 + 10)) && nautilus /home/user/Desktop 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 20 + 8)) && wmctrl -r :ACTIVE: -e 0,100,50,1440,900 2>/dev/null || true) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 30 + 15)) && wmctrl -r :ACTIVE: -e 0,-200,50,1920,1000 2>/dev/null || true) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(gnome-calculator & sleep $((RANDOM % 5 + 2)) && wmctrl -r 'Calculator' -b add,above 2>/dev/null && wmctrl -r 'Calculator' -e 0,400,300,300,200 2>/dev/null || true) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 90 + 30)) && wmctrl -a 'gedit' 2>/dev/null || true) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 50 + 20)) && gnome-terminal --geometry=80x24+100+100 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 60 + 25)) && gnome-system-monitor 2>/dev/null &) || true"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "python",
+          "-c",
+          "import pyautogui; import time; pyautogui.click({SCREEN_WIDTH_HALF}, {SCREEN_HEIGHT_HALF}); time.sleep(0.5);"
+        ]
+      }
+    }
+  ],
+  "related_apps": [
+    "os"
+  ],
+  "evaluator": {
+    "func": "exact_match",
+    "result": {
+      "type": "vm_command_line",
+      "command": "[ -d ~/Desktop/todo_list_Jan_2 ] && echo 'Directory exists.' || echo 'Directory does not exist.'",
+      "shell": true
+    },
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "expected": "Directory exists.\n"
+      }
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "very_easy",
+    "success_rate_used": 0.8125,
+    "categories_applied": [
+      "filesystem_clutter",
+      "random_notifications",
+      "background_apps",
+      "window_occlusion",
+      "window_geometry",
+      "focus_stealing",
+      "scroll_displacement",
+      "dialog_popup"
+    ],
+    "noise_element_count": 12,
+    "added_step_indices": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ]
+  }
+}

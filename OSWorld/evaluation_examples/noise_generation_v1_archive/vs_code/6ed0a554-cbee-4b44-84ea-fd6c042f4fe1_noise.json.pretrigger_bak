@@ -1,0 +1,168 @@
+{
+  "id": "6ed0a554-cbee-4b44-84ea-fd6c042f4fe1",
+  "snapshot": "vscode",
+  "instruction": "Please help me add folder \"/home/user/data1\" and folder \"/home/user/data2\" to the current workspace.",
+  "source": "https://www.youtube.com/watch?v=B-s71n0dHUk",
+  "config": [
+    {
+      "type": "command",
+      "parameters": {
+        "command": [
+          "mkdir",
+          "-p",
+          "/home/user/project"
+        ]
+      }
+    },
+    {
+      "type": "command",
+      "parameters": {
+        "command": [
+          "mkdir",
+          "-p",
+          "/home/user/data1"
+        ]
+      }
+    },
+    {
+      "type": "command",
+      "parameters": {
+        "command": [
+          "mkdir",
+          "-p",
+          "/home/user/data2"
+        ]
+      }
+    },
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/vs_code/6ed0a554-cbee-4b44-84ea-fd6c042f4fe1/project.code-workspace",
+            "path": "/home/user/project.code-workspace"
+          }
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "code",
+          "/home/user/project.code-workspace"
+        ]
+      }
+    },
+    {
+      "type": "activate_window",
+      "parameters": {
+        "window_name": "Visual Studio Code"
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 10 + 3)) && gedit 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 80 + 15)) && notify-send 'Email' 'New message: Project sync request' && sleep $((RANDOM % 10 + 5)) && notify-send 'Calendar' 'Team stand-up in 10 minutes') >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(while true; do sleep $((RANDOM % 60 + 20)); touch /home/user/Downloads/sync_$RANDOM.tmp 2>/dev/null; done) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 25 + 12)) && wmctrl -a 'Visual Studio Code' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui, time; time.sleep(0.5); pyautogui.hotkey('ctrl', 'b')\") &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 20 + 18)) && wmctrl -r 'Visual Studio Code' -e 0,80,40,1400,880 2>/dev/null) &"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "vscode"
+  ],
+  "evaluator": {
+    "func": "check_json_settings",
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "expected": {
+          "folders": [
+            {
+              "path": "project"
+            },
+            {
+              "path": "data1"
+            },
+            {
+              "path": "data2"
+            }
+          ]
+        }
+      }
+    },
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/project.code-workspace",
+      "dest": "project.code-workspace"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.1757,
+    "categories_applied": [
+      "background_apps",
+      "random_notifications",
+      "filesystem_clutter",
+      "panel_toggle",
+      "window_geometry"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      6,
+      7,
+      8,
+      9,
+      10
+    ]
+  }
+}

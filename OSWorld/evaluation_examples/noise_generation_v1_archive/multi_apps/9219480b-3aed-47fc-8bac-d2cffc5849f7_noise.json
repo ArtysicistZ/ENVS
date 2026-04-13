@@ -1,0 +1,168 @@
+{
+  "id": "9219480b-3aed-47fc-8bac-d2cffc5849f7",
+  "snapshot": "vs_code",
+  "instruction": "Hi, I recently playing with developing a small python-based tetris game. While I have finished most of the part, something is wrong under some cases when I press up to rotate, the whole program will crash, please run the code for me and fix the bugs of code.",
+  "source": "authors",
+  "config": [
+    {
+      "type": "command",
+      "parameters": {
+        "command": [
+          "mkdir",
+          "-p",
+          "/home/user/Desktop/tetris"
+        ]
+      }
+    },
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "path": "/home/user/Desktop/tetris/block.py",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/9219480b-3aed-47fc-8bac-d2cffc5849f7/block.py"
+          },
+          {
+            "path": "/home/user/Desktop/tetris/main.py",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/9219480b-3aed-47fc-8bac-d2cffc5849f7/main.py"
+          },
+          {
+            "path": "/home/user/Desktop/tetris/settings.py",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/9219480b-3aed-47fc-8bac-d2cffc5849f7/settings.py"
+          },
+          {
+            "path": "/home/user/Desktop/tetris/tetris.py",
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/9219480b-3aed-47fc-8bac-d2cffc5849f7/tetris.py"
+          }
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "code",
+          "/home/user/Desktop/tetris"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/9219480b-3aed-47fc-8bac-d2cffc5849f7",
+  "related_apps": [
+    "vs_code",
+    "os"
+  ],
+  "evaluator": {
+    "postconfig": [],
+    "func": "check_python_file_by_test_suite",
+    "result": {
+      "type": "vm_file",
+      "path": [
+        "/home/user/Desktop/tetris/block.py",
+        "/home/user/Desktop/tetris/main.py",
+        "/home/user/Desktop/tetris/settings.py",
+        "/home/user/Desktop/tetris/tetris.py"
+      ],
+      "dest": [
+        "block.py",
+        "main.py",
+        "settings.py",
+        "tetris.py"
+      ],
+      "multi": true
+    },
+    "expected": {
+      "type": "cloud_file",
+      "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/9219480b-3aed-47fc-8bac-d2cffc5849f7/test.py",
+      "dest": "test_suite.py"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.1518,
+    "categories_applied": [
+      "background_apps",
+      "random_notifications",
+      "filesystem_clutter",
+      "panel_toggle",
+      "window_geometry"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "gedit /home/user/Documents/scratch_notes.txt"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Email' 'New message: PR review requested'"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Team sync in 10 minutes'"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "filesystem_clutter",
+        "once": false,
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Downloads/build_artifact_$RANDOM.tmp"
+        ]
+      },
+      {
+        "id": "n4",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'Visual Studio Code' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui; pyautogui.hotkey('ctrl', 'b')\""
+        ]
+      },
+      {
+        "id": "n5",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'Visual Studio Code' -e 0,80,40,1440,880"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 5; elements produced: 6."
+  }
+}

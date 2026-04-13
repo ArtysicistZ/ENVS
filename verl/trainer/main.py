@@ -163,7 +163,12 @@ def main():
                     os.environ.pop(key, None)
         ray.init(
             address=ray_address,
-            runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}},
+            runtime_env={"env_vars": {
+                "TOKENIZERS_PARALLELISM": "true",
+                "NCCL_DEBUG": "WARN",
+                "WANDB_MODE": os.environ.get("WANDB_MODE", "online"),
+                "WANDB_API_KEY": os.environ.get("WANDB_API_KEY", ""),
+            }},
         )
     
     print(ray.cluster_resources().keys())
