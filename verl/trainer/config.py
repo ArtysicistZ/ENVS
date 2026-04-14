@@ -64,6 +64,31 @@ class AlgorithmConfig:
     kl_target: float = 0.0
     enable_replay: bool = False
 
+    # Opt-in noise system (see docs/noise_generating/RESEARCH_FRAMING.md).
+    # Inert when enable_noise=False — clean training/eval is byte-identical
+    # to pre-feature behavior. All fields below are only consulted when
+    # enable_noise=True.
+    enable_noise: bool = False
+    noise_mode: str = "none"  # none | task_noise_meta | runtime_library
+    # Static firing probability (used when noise_use_curriculum=False); also
+    # serves as p_init when the curriculum is enabled.
+    noise_probability: float = 0.05
+    noise_probability_min: float = 0.0
+    noise_probability_max: float = 0.30
+    # Capability-adaptive curriculum: EMA-based tier + p drift per task.
+    noise_use_curriculum: bool = False
+    noise_target_sr: float = 0.5
+    noise_tau_up: float = 0.6
+    noise_tau_down: float = 0.15
+    noise_k_up: int = 3
+    noise_ema_alpha: float = 0.3
+    noise_lr: float = 0.05
+    noise_initial_tier: int = 1
+    noise_tier_min: int = 0
+    noise_tier_max: int = 5
+    # Eval-time flag: sampler draws from held-out OOD template catalog.
+    noise_use_heldout: bool = False
+
 
 @dataclass
 class TrainerConfig:

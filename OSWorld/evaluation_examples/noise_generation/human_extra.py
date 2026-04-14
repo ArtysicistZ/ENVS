@@ -12,7 +12,7 @@ from __future__ import annotations
 
 
 def _c(src: str) -> str:
-    return " ".join(src.split())
+    return src.strip()
 
 
 # ---------- Writing sessions with genuinely different content ----------

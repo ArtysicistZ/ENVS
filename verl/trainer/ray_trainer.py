@@ -368,6 +368,118 @@ class RayPPOTrainer:
         self._create_dataloader()
         self._create_envs()
         self._load_replay_data()
+        self._init_noise_state()
+
+    def _init_noise_state(self):
+        """Initialize opt-in noise curriculum (see docs/noise_generating/RESEARCH_FRAMING.md).
+
+        Safe to call even when enable_noise=False — sets self.noise_curriculum=None
+        and self._noise_sr_by_task={} so downstream code can check a single flag.
+        """
+        self.noise_curriculum = None
+        self._noise_sr_by_task: Dict[str, float] = {}
+        algo = self.config.algorithm
+        if not getattr(algo, "enable_noise", False):
+            return
+
+        # Lazy import so non-noise runs never load the curriculum module.
+        from verl.workers.noise_curriculum import NoiseCurriculum
+
+        self.noise_curriculum = NoiseCurriculum(
+            target_success_rate=algo.noise_target_sr,
+            lr=algo.noise_lr,
+            p_min=algo.noise_probability_min,
+            p_max=algo.noise_probability_max,
+            tau_up=algo.noise_tau_up,
+            tau_down=algo.noise_tau_down,
+            k_up=algo.noise_k_up,
+            ema_alpha=algo.noise_ema_alpha,
+            initial_tier=algo.noise_initial_tier,
+            initial_p=algo.noise_probability,
+            tier_min=algo.noise_tier_min,
+            tier_max=algo.noise_tier_max,
+        )
+
+        # Seed initial per-task tier from MCTS success-rate file if available.
+        # This maps hard tasks to low tiers (cost-0 ambient only) so the training
+        # signal is preserved while letting easy tasks get a noisier environment
+        # from the start.
+        mcts_path = os.path.join(
+            os.getcwd(), "checkpoints", "mcts_trajectories_v2",
+            "combined_all", "collection_results.json",
+        )
+        if os.path.exists(mcts_path):
+            try:
+                import json as _json
+                with open(mcts_path, "r", encoding="utf-8") as _f:
+                    _data = _json.load(_f)
+                _results = _data.get("results") if isinstance(_data, dict) else None
+                if isinstance(_results, list):
+                    from OSWorld.evaluation_examples.noise_generation.difficulty import (
+                        rate_to_tier, tier_to_int,
+                    )
+                    n_seeded = 0
+                    for entry in _results:
+                        tid = entry.get("task_id")
+                        sr = float(entry.get("success_rate", 0.0))
+                        if not tid:
+                            continue
+                        self._noise_sr_by_task[tid] = sr
+                        tier_int = tier_to_int(rate_to_tier(sr))
+                        self.noise_curriculum.seed_tier(tid, tier_int)
+                        n_seeded += 1
+                    print(f"[noise] Seeded curriculum tiers for {n_seeded} tasks from MCTS SR")
+            except Exception as _e:
+                print(f"[noise] Failed to seed from MCTS SR file: {_e}")
+        else:
+            print(f"[noise] MCTS SR file not found ({mcts_path}); curriculum starts at initial_tier={algo.noise_initial_tier} for all tasks")
+
+    def _annotate_task_configs_with_noise(self, task_configs: List[dict], is_val: bool = False) -> None:
+        """Decorate each task_config dict in-place with noise_* fields that
+        `desktop_env._build_noise_meta()` will read. No-op when noise is
+        disabled. Tasks that appear multiple times (e.g. rollout.n copies) are
+        annotated consistently from the single curriculum state."""
+        if self.noise_curriculum is None:
+            return
+        algo = self.config.algorithm
+        for tc in task_configs:
+            if not isinstance(tc, dict):
+                continue
+            tid = tc.get("id") or tc.get("task_id")
+            if not tid:
+                continue
+            if algo.noise_use_curriculum:
+                p = float(self.noise_curriculum.get_p(tid))
+                tier = int(self.noise_curriculum.get_tier(tid))
+            else:
+                p = float(algo.noise_probability)
+                tier = int(algo.noise_initial_tier)
+            tc["enable_noise"] = True
+            tc["noise_mode"] = algo.noise_mode if algo.noise_mode != "none" else "runtime_library"
+            tc["noise_probability"] = p
+            tc["noise_tier"] = tier
+            tc["noise_success_rate"] = float(self._noise_sr_by_task.get(tid, 0.0))
+            tc["noise_use_heldout"] = bool(algo.noise_use_heldout or is_val)
+
+    def _update_noise_curriculum(self, task_configs: List[dict], eval_results: List[float]) -> None:
+        """Update per-task curriculum state from this step's observed success.
+        Aggregates duplicate task_ids (rollout.n copies) before updating."""
+        if self.noise_curriculum is None:
+            return
+        from collections import defaultdict as _dd
+        bucket: Dict[str, List[float]] = _dd(list)
+        for tc, er in zip(task_configs, eval_results):
+            if tc is None:
+                continue
+            tid = tc.get("id") or tc.get("task_id")
+            if not tid:
+                continue
+            bucket[tid].append(float(er) if er is not None else 0.0)
+        for tid, vals in bucket.items():
+            if not vals:
+                continue
+            sr = sum(1 for v in vals if v > 0.5) / len(vals)
+            self.noise_curriculum.update(tid, sr)
     
     def _load_replay_data(self):
         self.replay = ReplayBuffer(None, 8)
@@ -1142,6 +1254,9 @@ class RayPPOTrainer:
 
     def _build_rollout_chunks(self, batch_dict: List[dict]) -> List[List[dict]]:
         rollout_jobs = build_rollout_jobs(batch_dict, self.config.worker.rollout.n)
+        # Opt-in: annotate per-task noise fields from current curriculum state
+        # so workers (local or remote via HTTP) read a self-contained task_config.
+        self._annotate_task_configs_with_noise(rollout_jobs, is_val=False)
         return chunk_rollout_jobs(rollout_jobs, len(self.env_workers))
 
     def _launch_prefetch_resets(self, batch_dict: List[dict]):
@@ -1751,6 +1866,14 @@ class RayPPOTrainer:
                             all_task_configs[start:end] = chunk_task_configs
                     finally:
                         self.actor_rollout_wg.finish_generate_sequences()
+
+                    # Opt-in: update per-task noise curriculum from this step's
+                    # observed success rates. Must run before prefetch so the
+                    # next step's annotation reflects updated tier/p.
+                    try:
+                        self._update_noise_curriculum(all_task_configs, all_eval_results)
+                    except Exception as _ne:
+                        print(f"[noise] curriculum update failed (non-fatal): {_ne}")
 
                     # Workers are idle after rollout. Peek at next batch and launch VM resets
                     # concurrently with GPU training (compute logprobs, advantages, updates).

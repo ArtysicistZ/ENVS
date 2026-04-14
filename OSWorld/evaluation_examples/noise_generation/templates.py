@@ -154,8 +154,9 @@ APP_TO_WM_TITLE: Dict[str, str] = {
 
 
 def _c(src: str) -> str:
-    """Collapse multi-line bash into a single line for JSON payload."""
-    return " ".join(src.split())
+    """Strip leading/trailing whitespace; preserve internal newlines so
+    multi-line bash scripts (incl. python3 -c bodies) parse correctly."""
+    return src.strip()
 
 
 # ===========================================================================

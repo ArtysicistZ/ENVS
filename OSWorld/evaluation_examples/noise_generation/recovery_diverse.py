@@ -23,7 +23,7 @@ from __future__ import annotations
 
 
 def _c(src: str) -> str:
-    return " ".join(src.split())
+    return src.strip()
 
 
 def recovery_wait_autodismiss() -> str:

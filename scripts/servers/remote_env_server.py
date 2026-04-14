@@ -177,6 +177,7 @@ class SlotState:
     _last_step_reward_components: dict = field(default_factory=dict)
     _eval_precondition_state: dict | None = None
     _parse_fail_streak: int = 0
+    noise_probability: float = 0.0
 
 
 # Slot pool: slot_id -> SlotState; protected by _slots_lock
@@ -269,6 +270,7 @@ class ResetRequest(BaseModel):
 class StepRequest(BaseModel):
     prediction: str
     slot_id: int = 0
+    noise_probability: float = 0.0
 
 
 class SlotRequest(BaseModel):
@@ -1291,6 +1293,7 @@ def _env_reset_locked(slot_id: int, body: ResetRequest):
     slot._recent_action_signatures.clear()
     slot._eval_precondition_state = None
     slot._parse_fail_streak = 0
+    slot.noise_probability = float(task_config.get("noise_probability", 0.0))
     slot.history_messages = []
 
     _safe_env_pause(env)
@@ -1530,10 +1533,15 @@ def _env_step_locked(slot_id: int, body: StepRequest):
     step_successful = False
     step_stall_penalized = False
     appended_any_step_screenshot = False
+    current_noise_probability = float(body.noise_probability or slot.noise_probability or 0.0)
     for action in actions:
         try:
             obs, reward, step_done, info = _run_with_timeout(
-                lambda a=action: env.step(a, pause=ACTION_PAUSE_SEC),
+                lambda a=action: env.step(
+                    a,
+                    pause=ACTION_PAUSE_SEC,
+                    noise_probability=current_noise_probability,
+                ),
                 timeout=ENV_STEP_TIMEOUT,
                 label=f"step-slot-{slot_id}",
             )
