@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import random
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -18,54 +17,62 @@ class NoiseFireResult:
 
 
 class NoiseScheduler:
-    """Action-triggered noise scheduler.
+    """v4 deterministic-schedule noise scheduler.
 
-    The scheduler is intentionally conservative:
-    - does nothing unless initialized with elements
-    - fires at most one element per step
-    - preserves clean behavior when disabled
-
-    Elements follow the repo's `noise_meta.elements[]` schema.
+    Each element carries a `fire_step` index (set by
+    `RuntimeNoiseSampler.sample_fire_schedule`). On every agent step
+    `on_step()` is called; if the current step index matches any element's
+    `fire_step`, that element fires exactly once. No probability dice — the
+    schedule is pre-determined per `(task_id, training_step)` so all `n`
+    rollouts of a GRPO group see identical firings.
     """
 
     def __init__(
         self,
         setup_controller,
         elements: List[Dict[str, Any]],
-        rng_seed: Optional[int] = None,
         post_fire_pause_sec: float = 0.2,
     ):
         self.setup_controller = setup_controller
         self.elements = [dict(e) for e in elements]
-        self.rng = random.Random(rng_seed)
         self.post_fire_pause_sec = post_fire_pause_sec
+        # Index by fire_step for O(1) lookup. Multiple elements per step are
+        # allowed (rare; sampler usually de-dups bucket spacing).
+        self._by_step: Dict[int, List[Dict[str, Any]]] = {}
+        for el in self.elements:
+            fs = int(el.get("fire_step", -1))
+            if fs >= 0:
+                self._by_step.setdefault(fs, []).append(el)
         self._fired_once: set[str] = set()
+        self._step_counter: int = 0
         self.total_fires = 0
 
-    def on_step(self, probability: float) -> List[NoiseFireResult]:
-        if probability <= 0.0 or not self.elements:
+    def on_step(self, probability: float = 1.0) -> List[NoiseFireResult]:  # noqa: ARG002 — probability kept for API back-compat
+        """Fire any element whose `fire_step` matches this step's index.
+
+        `probability` is accepted for back-compat with v3 callers but ignored
+        — the schedule is deterministic.
+        """
+        idx = self._step_counter
+        self._step_counter += 1
+        due = self._by_step.get(idx, [])
+        if not due:
             return []
-
-        candidates = [e for e in self.elements if not (e.get("once", True) and e.get("id") in self._fired_once)]
-        if not candidates:
-            return []
-
-        if self.rng.random() >= probability:
-            return []
-
-        chosen = self.rng.choice(candidates)
-        self._fire_element(chosen)
-        if chosen.get("once", True):
-            self._fired_once.add(chosen.get("id", "unknown"))
-        self.total_fires += 1
-
-        return [
-            NoiseFireResult(
-                element_id=str(chosen.get("id", f"noise_{self.total_fires}")),
+        results: List[NoiseFireResult] = []
+        for chosen in due:
+            eid = chosen.get("id", f"noise_{self.total_fires}")
+            if chosen.get("once", True) and eid in self._fired_once:
+                continue
+            self._fire_element(chosen)
+            if chosen.get("once", True):
+                self._fired_once.add(eid)
+            self.total_fires += 1
+            results.append(NoiseFireResult(
+                element_id=str(eid),
                 category=str(chosen.get("category", "unknown")),
                 recovery_cost=int(chosen.get("recovery_cost", 0)),
-            )
-        ]
+            ))
+        return results
 
     def _fire_element(self, element: Dict[str, Any]) -> None:
         command = element.get("command")

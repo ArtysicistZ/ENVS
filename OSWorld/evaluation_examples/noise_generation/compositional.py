@@ -112,15 +112,24 @@ N=('prefer-dark' 'prefer-light'); gsettings set org.gnome.desktop.interface colo
 
 
 def comp_cpu_spike_plus_resource_notif() -> str:
-    """Background CPU burn fires while a system notification announces the
-    resource activity. Cost 0."""
+    """Background CPU burn fires while a tkinter corner toast announces the
+    resource activity (zenity --notification is unreliable without a
+    notification daemon). Cost 0."""
     return _c(r"""
 N=$((RANDOM % 2000000 + 800000));
 python3 -c "sum(i*i for i in range($N))" >/dev/null 2>&1 & disown;
-sleep 0.3;
-M=("CPU usage elevated" "Background task started" "Scheduled scan initiated" "Indexing in progress");
-m=${M[$((RANDOM % ${#M[@]}))]};
-zenity --notification --window-icon=info --text "System — $m" 2>/dev/null &
+sleep 0.2;
+DISPLAY=:0 python3 -c "
+import tkinter as tk, random
+M=['CPU usage elevated','Background task started','Scheduled scan initiated','Indexing in progress']
+r=tk.Tk(); r.overrideredirect(True); r.attributes('-topmost', True)
+W,H=320,52
+r.geometry(f'{W}x{H}+{1920-W-12}+{12}')
+r.configure(bg='#1f2937')
+tk.Label(r, text='System — ' + random.choice(M), bg='#1f2937', fg='#f3f4f6',
+         font=('Sans',10,'bold'), anchor='w').pack(fill='both', padx=12, pady=14)
+r.after(12000, r.destroy); r.mainloop()
+" >/dev/null 2>&1 & disown
 """)
 
 
@@ -161,14 +170,23 @@ wait
 
 
 def comp_modal_then_decoy_notif() -> str:
-    """A modal fires, then a notification arrives WITHOUT needing response
-    (decoy). The correct recovery is still just to dismiss the modal — not
-    the notification. Trains the agent to distinguish. Cost 1."""
+    """A modal fires, then a tkinter corner toast arrives WITHOUT needing
+    response (decoy). The correct recovery is to dismiss the modal only —
+    not the toast. Trains the agent to distinguish. Cost 1."""
     return _c(r"""
 TTL=("Session Notice" "Update Info"); t=${TTL[$((RANDOM % ${#TTL[@]}))]};
 zenity --info --title "$t" --text "A routine maintenance notice — no action needed." --width=340 >/dev/null 2>&1 &
 sleep 1.2;
-zenity --notification --window-icon=info --text "System — Backup verification complete" 2>/dev/null &
+DISPLAY=:0 python3 -c "
+import tkinter as tk
+r=tk.Tk(); r.overrideredirect(True); r.attributes('-topmost', True)
+W,H=320,48
+r.geometry(f'{W}x{H}+{1920-W-12}+{1080-H-64}')
+r.configure(bg='#1a365d')
+tk.Label(r, text='System — Backup verification complete', bg='#1a365d', fg='white',
+         font=('Sans',10), anchor='w').pack(fill='both', padx=12, pady=12)
+r.after(10000, r.destroy); r.mainloop()
+" >/dev/null 2>&1 & disown
 """)
 
 

@@ -394,16 +394,17 @@ class RayPPOTrainer:
             tau_down=algo.noise_tau_down,
             k_up=algo.noise_k_up,
             ema_alpha=algo.noise_ema_alpha,
+            recovery_ema_alpha=algo.noise_recovery_ema_alpha,
             initial_tier=algo.noise_initial_tier,
             initial_p=algo.noise_probability,
             tier_min=algo.noise_tier_min,
             tier_max=algo.noise_tier_max,
         )
 
-        # Seed initial per-task tier from MCTS success-rate file if available.
-        # This maps hard tasks to low tiers (cost-0 ambient only) so the training
-        # signal is preserved while letting easy tasks get a noisier environment
-        # from the start.
+        # Load per-task clean/MCTS success rates if available. We deliberately
+        # do NOT seed tiers here from success rate alone; the actual initial
+        # tier is computed later in `_annotate_task_configs_with_noise()` from a
+        # broader static prior (success rate + horizon/domain/UI fragility).
         mcts_path = os.path.join(
             os.getcwd(), "checkpoints", "mcts_trajectories_v2",
             "combined_all", "collection_results.json",
@@ -415,20 +416,15 @@ class RayPPOTrainer:
                     _data = _json.load(_f)
                 _results = _data.get("results") if isinstance(_data, dict) else None
                 if isinstance(_results, list):
-                    from OSWorld.evaluation_examples.noise_generation.difficulty import (
-                        rate_to_tier, tier_to_int,
-                    )
-                    n_seeded = 0
+                    n_loaded = 0
                     for entry in _results:
                         tid = entry.get("task_id")
                         sr = float(entry.get("success_rate", 0.0))
                         if not tid:
                             continue
                         self._noise_sr_by_task[tid] = sr
-                        tier_int = tier_to_int(rate_to_tier(sr))
-                        self.noise_curriculum.seed_tier(tid, tier_int)
-                        n_seeded += 1
-                    print(f"[noise] Seeded curriculum tiers for {n_seeded} tasks from MCTS SR")
+                        n_loaded += 1
+                    print(f"[noise] Loaded success-rate priors for {n_loaded} tasks from MCTS SR file")
             except Exception as _e:
                 print(f"[noise] Failed to seed from MCTS SR file: {_e}")
         else:
@@ -438,9 +434,17 @@ class RayPPOTrainer:
         """Decorate each task_config dict in-place with noise_* fields that
         `desktop_env._build_noise_meta()` will read. No-op when noise is
         disabled. Tasks that appear multiple times (e.g. rollout.n copies) are
-        annotated consistently from the single curriculum state."""
+        annotated consistently from the single curriculum state.
+
+        Also stamps `noise_step_seed = self.global_step` so all `n` rollouts of
+        the same `(task_id, training_step)` see an identical noise sample
+        (Common Random Numbers / PAIRED-style fixed-env-instance baseline).
+        Different training steps draw different schedules — diversity preserved
+        across the curriculum, locked within each GRPO group.
+        """
         if self.noise_curriculum is None:
             return
+        from OSWorld.evaluation_examples.noise_generation.difficulty import compute_static_noise_seed
         algo = self.config.algorithm
         for tc in task_configs:
             if not isinstance(tc, dict):
@@ -448,38 +452,126 @@ class RayPPOTrainer:
             tid = tc.get("id") or tc.get("task_id")
             if not tid:
                 continue
+            success_rate = float(self._noise_sr_by_task.get(tid, 0.0))
+            # When MCTS SR is missing for this task, fall back to the configured
+            # `noise_initial_tier` as the explicit tier — otherwise the seed
+            # collapses to `tier=very_hard=0` (cost cap 0 → sampler returns []
+            # → `_build_noise_meta` returns None → noise NEVER FIRES).
+            explicit_tier = tc.get("noise_tier_override")
+            if explicit_tier is None and tid not in self._noise_sr_by_task:
+                explicit_tier = int(algo.noise_initial_tier)
+            static_seed = compute_static_noise_seed(
+                success_rate=success_rate,
+                task_json=tc,
+                explicit_tier=explicit_tier,
+            )
+            static_seed_tier = int(static_seed["tier"])
+            static_seed_p = max(
+                float(algo.noise_probability_min),
+                min(
+                    float(algo.noise_probability_max),
+                    float(algo.noise_probability) * (0.50 + 0.50 * (static_seed_tier / max(1, int(algo.noise_tier_max)))),
+                ),
+            )
             if algo.noise_use_curriculum:
+                if not self.noise_curriculum.has_task(tid):
+                    # Seed curriculum state with all three priors at once so
+                    # `get_sr` returns the MCTS SR (not 0.0) before any
+                    # rollouts have been observed.
+                    self.noise_curriculum.seed_tier(
+                        tid, static_seed_tier, static_seed_p,
+                        initial_sr=success_rate,
+                    )
                 p = float(self.noise_curriculum.get_p(tid))
                 tier = int(self.noise_curriculum.get_tier(tid))
+                # v4: live EMA SR drives the per-rollout noise budget.
+                observed_sr = float(self.noise_curriculum.get_sr(tid))
             else:
-                p = float(algo.noise_probability)
-                tier = int(algo.noise_initial_tier)
+                p = static_seed_p
+                tier = static_seed_tier
+                observed_sr = success_rate
             tc["enable_noise"] = True
             tc["noise_mode"] = algo.noise_mode if algo.noise_mode != "none" else "runtime_library"
-            tc["noise_probability"] = p
-            tc["noise_tier"] = tier
-            tc["noise_success_rate"] = float(self._noise_sr_by_task.get(tid, 0.0))
+            tc["noise_probability"] = p   # v4: vestigial; scheduler ignores it
+            tc["noise_tier"] = tier       # v4: tier still bounds eligible pool
+            tc["noise_success_rate"] = success_rate
+            tc["noise_observed_sr"] = observed_sr  # v4: live EMA SR → fires count
             tc["noise_use_heldout"] = bool(algo.noise_use_heldout or is_val)
+            # CRN seed: same (task_id, training_step) across all n rollouts of
+            # this group → identical noise sample → clean GRPO advantage.
+            # Reads `self.global_step` (incremented in fit() before this call).
+            tc["noise_step_seed"] = int(getattr(self, "global_step", 0))
+            tc["noise_static_seed_tier"] = static_seed_tier
+            tc["noise_static_seed_probability"] = static_seed_p
+            tc["noise_horizon_proxy"] = float(static_seed.get("horizon_proxy", 0.0))
+            tc["noise_domain_fragility"] = float(static_seed.get("domain_fragility", 0.0))
+            tc["noise_ui_fragility"] = float(static_seed.get("ui_fragility", 0.0))
+            tc["noise_fragility_penalty"] = float(static_seed.get("fragility_penalty", 0.0))
 
-    def _update_noise_curriculum(self, task_configs: List[dict], eval_results: List[float]) -> None:
+    def _update_noise_curriculum(self, task_configs: List[dict], eval_results: List[float], process_results: Optional[List[dict]] = None) -> None:
         """Update per-task curriculum state from this step's observed success.
         Aggregates duplicate task_ids (rollout.n copies) before updating."""
         if self.noise_curriculum is None:
             return
         from collections import defaultdict as _dd
         bucket: Dict[str, List[float]] = _dd(list)
-        for tc, er in zip(task_configs, eval_results):
+        burden_bucket: Dict[str, List[float]] = _dd(list)
+        process_results = process_results or [None] * len(task_configs)
+        for tc, er, pr in zip(task_configs, eval_results, process_results):
             if tc is None:
                 continue
             tid = tc.get("id") or tc.get("task_id")
             if not tid:
                 continue
             bucket[tid].append(float(er) if er is not None else 0.0)
+            step_meta_list = []
+            if isinstance(pr, dict):
+                step_meta_list = pr.get("rollout_step_metadata") or []
+            total_recovery = 0.0
+            total_interruptions = 0.0
+            total_occlusion = 0.0
+            total_focus_loss = 0.0
+            for sm in step_meta_list:
+                if not isinstance(sm, dict):
+                    continue
+                nb = sm.get("noise_burden")
+                if not isinstance(nb, dict):
+                    continue
+                total_recovery += float(nb.get("step_recovery_cost", 0.0))
+                total_interruptions += float(nb.get("events_fired_this_step", 0.0))
+                total_occlusion += float(nb.get("occlusion_events", 0.0))
+                total_focus_loss += float(nb.get("focus_loss_events", 0.0))
+            realized_burden = (
+                0.50 * total_recovery
+                + 0.20 * total_interruptions
+                + 0.20 * total_occlusion
+                + 0.10 * total_focus_loss
+            )
+            burden_bucket[tid].append(realized_burden)
         for tid, vals in bucket.items():
             if not vals:
                 continue
             sr = sum(1 for v in vals if v > 0.5) / len(vals)
-            self.noise_curriculum.update(tid, sr)
+            burden_vals = burden_bucket.get(tid, [])
+            mean_burden = sum(burden_vals) / len(burden_vals) if burden_vals else 0.0
+            self.noise_curriculum.update(tid, sr, mean_burden)
+
+    def _collect_noise_metrics(self) -> Dict[str, float]:
+        if self.noise_curriculum is None:
+            return {}
+        snapshot = self.noise_curriculum.snapshot()
+        if not snapshot:
+            return {}
+        ps = [float(v.get("p_noise", 0.0)) for v in snapshot.values()]
+        tiers = [float(v.get("tier", 0.0)) for v in snapshot.values()]
+        sr_emas = [float(v.get("sr_ema", 0.0)) for v in snapshot.values()]
+        recovery_emas = [float(v.get("recovery_ema", 0.0)) for v in snapshot.values()]
+        return {
+            "noise/p_mean": sum(ps) / len(ps),
+            "noise/tier_mean": sum(tiers) / len(tiers),
+            "noise/sr_ema_mean": sum(sr_emas) / len(sr_emas),
+            "noise/recovery_ema_mean": sum(recovery_emas) / len(recovery_emas),
+        }
     
     def _load_replay_data(self):
         self.replay = ReplayBuffer(None, 8)
@@ -1045,6 +1137,15 @@ class RayPPOTrainer:
             process_result["rollout_step_metadata"] = copy.deepcopy(step_metadata)
         return process_results
 
+    @staticmethod
+    def _attach_env_noise_metadata(step_metadata_by_job: List[List[dict]], slot: int, result: dict) -> None:
+        noise_burden = result.get("noise_burden")
+        if noise_burden is None:
+            return
+        if not step_metadata_by_job[slot]:
+            step_metadata_by_job[slot].append({})
+        step_metadata_by_job[slot][-1]["noise_burden"] = copy.deepcopy(noise_burden)
+
     def _task_family_decoding_overrides(self, task_config: Optional[dict], is_val: bool = False) -> Dict[str, Any]:
         """Minimal task-family-conditioned decoding presets (safe for smoke runs)."""
         if not task_config:
@@ -1507,6 +1608,7 @@ class RayPPOTrainer:
                             "format_reward": 0.0,
                         }
 
+                    self._attach_env_noise_metadata(rollout_step_metadata_by_job, slot, result)
                     format_rewards[slot] += float(result.get("format_reward", 0.0))
                     if result["is_done"] or result.get("obs_messages") is None:
                         done_slots.add(slot)
@@ -1871,7 +1973,7 @@ class RayPPOTrainer:
                     # observed success rates. Must run before prefetch so the
                     # next step's annotation reflects updated tier/p.
                     try:
-                        self._update_noise_curriculum(all_task_configs, all_eval_results)
+                        self._update_noise_curriculum(all_task_configs, all_eval_results, all_process_results)
                     except Exception as _ne:
                         print(f"[noise] curriculum update failed (non-fatal): {_ne}")
 
@@ -2198,6 +2300,7 @@ class RayPPOTrainer:
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
+                metrics.update(self._collect_noise_metrics())
 
                 self.logger.log(data=metrics, step=self.global_step)
 

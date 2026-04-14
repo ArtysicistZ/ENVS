@@ -394,34 +394,51 @@ class DesktopEnv(gym.Env):
             logger.warning("RuntimeNoiseSampler unavailable; noise disabled for task %s", task_config.get("id"))
             return None
 
+        # v4 difficulty knob: deterministic fire count derived from the task's
+        # live observed SR (curriculum EMA, falling back to MCTS prior). The
+        # `noise_success_rate` field is the static prior; `noise_observed_sr`
+        # is the live EMA from the curriculum (added by the trainer).
         success_rate = float(task_config.get("noise_success_rate", 0.0))
-        tier = int(task_config.get("noise_tier", tier_for_success_rate(success_rate)))
+        observed_sr = float(task_config.get("noise_observed_sr", success_rate))
         use_heldout = bool(task_config.get("noise_use_heldout", False))
-        max_recovery_cost = task_config.get("noise_max_recovery_cost")
 
-        sampler = RuntimeNoiseSampler(rng_seed=hash((task_config.get("id"), self._traj_no)) & 0xFFFFFFFF)
-        elements = sampler.sample_for_task(
+        # max_steps controls how the fire-step indices are bucket-spread.
+        # The env's max_steps is exposed via the rollout config; default 15.
+        max_steps = int(task_config.get("noise_max_steps", 15))
+
+        # CRN seed: depends on (task_id, training_step) only — NOT on per-env
+        # `self._traj_no` — so that all `n` rollouts of the same task at the
+        # same training step draw IDENTICAL count, fire-step indices, and
+        # template selection. The trainer stamps `noise_step_seed = global_step`.
+        sampler = RuntimeNoiseSampler(
+            rng_seed=hash((task_config.get("id"), task_config.get("noise_step_seed", 0))) & 0xFFFFFFFF
+        )
+        schedule = sampler.sample_fire_schedule(
             task_json=task_config,
-            tier=tier,
-            max_recovery_cost=max_recovery_cost,
+            sr=observed_sr,
+            max_steps=max_steps,
             use_heldout=use_heldout,
         )
-        if not elements:
+        if not schedule:
             return None
 
-        total_cost = sum(int(e.get("recovery_cost", 0)) for e in elements)
+        total_cost = sum(int(e.get("recovery_cost", 0)) for e in schedule)
         return {
-            "trigger_mode": "action_triggered_probabilistic",
-            "tier": tier,
+            "trigger_mode": "deterministic_schedule_v4",
             "success_rate_used": success_rate,
+            "observed_sr_used": observed_sr,
+            "fires_count": len(schedule),
+            "fire_steps": [int(e["fire_step"]) for e in schedule],
             "total_recovery_cost": total_cost,
-            "elements": elements,
+            "elements": schedule,  # each element has `fire_step`
         }
 
     def _initialize_noise_scheduler(self, task_config: Dict[str, Any]) -> None:
         self.noise_scheduler = None
         self.noise_enabled = False
         self.noise_events_fired = []
+        # v4: probability is vestigial; scheduler ignores it and fires per
+        # the precomputed schedule. Kept here only for log/back-compat.
         self.noise_probability_default = float(task_config.get("noise_probability", 0.0))
 
         noise_meta = self._build_noise_meta(task_config)
@@ -432,17 +449,20 @@ class DesktopEnv(gym.Env):
         if not elements:
             return
 
+        # v4: hand the FULL schedule (each element carries `fire_step`) to
+        # the scheduler. CRN-seeded so all n rollouts share it.
         self.noise_scheduler = NoiseScheduler(
             setup_controller=self.setup_controller,
             elements=elements,
-            rng_seed=hash((task_config.get("id"), self._traj_no, "scheduler")) & 0xFFFFFFFF,
         )
         self.noise_enabled = True
         logger.info(
-            "Initialized noise scheduler for task=%s with %d elements, default_p=%.3f",
+            "Initialized noise scheduler for task=%s: %d fires at steps %s (observed_sr=%.3f, total_cost=%d)",
             task_config.get("id"),
             len(elements),
-            self.noise_probability_default,
+            noise_meta.get("fire_steps"),
+            noise_meta.get("observed_sr_used", 0.0),
+            noise_meta.get("total_recovery_cost", 0),
         )
 
     def _set_evaluator_info(self, task_config: Dict[str, Any]):

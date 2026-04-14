@@ -1,19 +1,26 @@
-# ARPO Smoke Test with fixed runtime noise.
+# ARPO Production Training with adaptive runtime noise curriculum.
 #
-# This is the first-stage noise config:
-# - uses the runtime noise library
-# - fixed firing probability
-# - no adaptive curriculum yet
+# Stage 3 baseline:
+# - ARPO (GRPO + replay)
+# - runtime noise library
+# - per-task static difficulty seed
+# - adaptive p_noise / tier updates
+# - realized burden logging
+#
+# Run:
+#   python -m verl.trainer.main config=configs/arpo_8gpu_noise_curriculum.yaml
+# Or:
+#   bash scripts/training/run_arpo_8gpu.sh config=configs/arpo_8gpu_noise_curriculum.yaml
 
 data:
-  train_files: OSWorld/evaluation_examples/test_smoke_4.json
-  val_files: OSWorld/evaluation_examples/test_smoke_4.json
+  train_files: OSWorld/evaluation_examples/test_86tasks_trainable.json
+  val_files: OSWorld/evaluation_examples/test_86tasks_trainable.json
   prompt_key: instruction
   answer_key: ""
   image_key: images
   max_prompt_length: 12000
   max_response_length: 1024
-  rollout_batch_size: 4
+  rollout_batch_size: 12
   val_batch_size: -1
   shuffle: true
   seed: 42
@@ -28,18 +35,26 @@ algorithm:
   enable_replay: true
   enable_noise: true
   noise_mode: runtime_library
-  noise_probability: 0.10
+  noise_probability: 0.05
   noise_probability_min: 0.0
   noise_probability_max: 0.20
-  noise_initial_tier: 2
   noise_use_curriculum: true
+  noise_target_sr: 0.50
+  noise_tau_up: 0.70
+  noise_tau_down: 0.35
+  noise_k_up: 3
+  noise_ema_alpha: 0.30
+  noise_lr: 0.05
+  noise_initial_tier: 1
+  noise_tier_min: 0
+  noise_tier_max: 5
   noise_use_heldout: false
 
 worker:
   actor:
-    global_batch_size: 4
-    micro_batch_size_per_device_for_update: 4
-    micro_batch_size_per_device_for_experience: 4
+    global_batch_size: 12
+    micro_batch_size_per_device_for_update: 1
+    micro_batch_size_per_device_for_experience: 1
     max_grad_norm: 1.0
     padding_free: true
     ulysses_sequence_parallel_size: 1
@@ -93,21 +108,24 @@ worker:
     skip_special_tokens: true
 
 env:
-  num_envs: 64
+  num_envs: 96
   max_steps: 15
   remote_server_urls:
     - "http://10.100.4.4:15001"
     - "http://10.100.4.6:15001"
-  remote_server_env_counts: [32, 32]
+    - "http://10.100.4.8:15001"
+  remote_server_env_counts: [32, 32, 32]
 
 trainer:
-  total_episodes: 2
-  logger: ["console"]
-  project_name: arpo-smoke
-  experiment_name: arpo_smoke_4tasks_noise_fixed_8xa100
+  total_episodes: 20
+  logger: ["console", "wandb"]
+  project_name: OSWorld-ARPO
+  experiment_name: arpo_86tasks_8xa100_noise_curriculum_v1
+  wandb_entity: artysicistz-university-of-pennsylvania
   n_gpus_per_node: 8
   nnodes: 1
-  val_before_train: false
-  val_freq: -1
-  save_freq: -1
-  save_limit: -1
+  val_before_train: true
+  val_freq: 5
+  save_freq: 5
+  save_limit: 5
+  save_trajectories: true

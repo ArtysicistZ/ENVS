@@ -1534,6 +1534,7 @@ def _env_step_locked(slot_id: int, body: StepRequest):
     step_stall_penalized = False
     appended_any_step_screenshot = False
     current_noise_probability = float(body.noise_probability or slot.noise_probability or 0.0)
+    noise_events_before = list(getattr(env, "noise_events_fired", []) or [])
     for action in actions:
         try:
             obs, reward, step_done, info = _run_with_timeout(
@@ -1636,6 +1637,10 @@ def _env_step_locked(slot_id: int, body: StepRequest):
 
     _safe_env_pause(env)
 
+    noise_events_after = list(getattr(env, "noise_events_fired", []) or [])
+    new_noise_events = noise_events_after[len(noise_events_before):]
+    noise_burden = _summarize_noise_burden(new_noise_events, noise_events_after)
+
     if step_successful and not step_stall_penalized and not parse_failed and not _is_wait_action(actions):
         format_reward += FORMAT_STEP_SUCCESS_BONUS
         reward_components["step_success"] = reward_components.get("step_success", 0.0) + FORMAT_STEP_SUCCESS_BONUS
@@ -1650,7 +1655,13 @@ def _env_step_locked(slot_id: int, body: StepRequest):
         _log_step_reward_final(slot, format_reward, slot.is_done)
         # Return history so the client can see the final observation even on episode end
         final_obs = messages_to_wire(slot.history_messages) if slot.history_messages else None
-        return {"env_idx": slot_id, "obs_messages": final_obs, "is_done": True, "format_reward": format_reward}
+        return {
+            "env_idx": slot_id,
+            "obs_messages": final_obs,
+            "is_done": True,
+            "format_reward": format_reward,
+            "noise_burden": noise_burden,
+        }
 
     if obs is None or obs.get("screenshot") is None:
         slot.is_done = True
@@ -1659,7 +1670,13 @@ def _env_step_locked(slot_id: int, body: StepRequest):
         slot._last_step_reward_components = reward_components
         _log_step_reward_final(slot, format_reward, slot.is_done)
         final_obs = messages_to_wire(slot.history_messages) if slot.history_messages else None
-        return {"env_idx": slot_id, "obs_messages": final_obs, "is_done": True, "format_reward": format_reward}
+        return {
+            "env_idx": slot_id,
+            "obs_messages": final_obs,
+            "is_done": True,
+            "format_reward": format_reward,
+            "noise_burden": noise_burden,
+        }
 
     if not appended_any_step_screenshot:
         _append_screenshot_message(slot.history_messages, obs["screenshot"])
@@ -1671,6 +1688,35 @@ def _env_step_locked(slot_id: int, body: StepRequest):
         "obs_messages": messages_to_wire(slot.history_messages),
         "is_done": False,
         "format_reward": format_reward,
+        "noise_burden": noise_burden,
+    }
+
+
+def _summarize_noise_burden(step_events, cumulative_events):
+    """Summarize realized noise burden for logging/curriculum analysis."""
+    step_events = list(step_events or [])
+    cumulative_events = list(cumulative_events or [])
+
+    def _category_count(substrs):
+        return sum(
+            1
+            for evt in step_events
+            if any(s in str(evt.get("category", "")).lower() for s in substrs)
+        )
+
+    step_recovery_cost = sum(int(evt.get("recovery_cost", 0)) for evt in step_events)
+    total_recovery_cost = sum(int(evt.get("recovery_cost", 0)) for evt in cumulative_events)
+    occlusion_like = _category_count(("modal", "overlay", "banner", "cookie", "dialog"))
+    focus_loss_like = _category_count(("focus", "steal", "switch", "window"))
+
+    return {
+        "events_fired_this_step": len(step_events),
+        "events_fired_total": len(cumulative_events),
+        "step_recovery_cost": step_recovery_cost,
+        "total_recovery_cost": total_recovery_cost,
+        "occlusion_events": occlusion_like,
+        "focus_loss_events": focus_loss_like,
+        "events": step_events,
     }
 
 

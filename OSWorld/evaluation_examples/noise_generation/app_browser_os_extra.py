@@ -216,6 +216,48 @@ N=$((RANDOM % 5 + 2));
 """)
 
 
+def browser_proxy_reconnect_required() -> str:
+    """Temporarily interrupt the localhost proxy and show a browser-style
+    reconnect warning. Real disruption when proxy-backed browsing is enabled;
+    otherwise degrades to a visible warning only. Cost 2."""
+    return _c(r"""
+TITLE="Secure connection interrupted";
+MSG="The network tunnel was interrupted.\nChrome is retrying through the secure proxy.";
+(
+  fuser -k 18888/tcp 2>/dev/null || true;
+  pkill -f '/tmp/mini_proxy.py' 2>/dev/null || true;
+  zenity --warning --title "$TITLE" --text "$MSG" --width=420 >/dev/null 2>&1 &
+  (
+    sleep $((RANDOM % 6 + 10));
+    if [ -f /tmp/mini_proxy.py ]; then
+      nohup python3 /tmp/mini_proxy.py >/tmp/mini_proxy_noise.log 2>&1 &
+    fi
+  ) >/dev/null 2>&1 &
+) >/dev/null 2>&1 &
+""")
+
+
+def os_vpn_tunnel_reconnecting() -> str:
+    """Simulate a VPN/proxy tunnel drop with a short reconnect window.
+    Recoverable by waiting or retrying after the tunnel comes back. Cost 2."""
+    return _c(r"""
+TUNNELS=("Corporate VPN" "Secure Tunnel" "Remote Gateway" "Work Proxy");
+t=${TUNNELS[$((RANDOM % ${#TUNNELS[@]}))]};
+(
+  fuser -k 18888/tcp 2>/dev/null || true;
+  pkill -f '/tmp/mini_proxy.py' 2>/dev/null || true;
+  zenity --error --title "$t" --text "$t disconnected.\nRe-establishing secure route now..." --width=400 >/dev/null 2>&1 &
+  (
+    sleep $((RANDOM % 8 + 8));
+    if [ -f /tmp/mini_proxy.py ]; then
+      nohup python3 /tmp/mini_proxy.py >/tmp/mini_proxy_noise.log 2>&1 &
+    fi
+    zenity --notification --window-icon=info --text "$t reconnected" 2>/dev/null &
+  ) >/dev/null 2>&1 &
+) >/dev/null 2>&1 &
+""")
+
+
 # ============================================================================
 # Additional OS-level prompts
 # ============================================================================

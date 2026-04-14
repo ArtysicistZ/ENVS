@@ -228,30 +228,47 @@ pyautogui.typewrite(random.choice(QS), interval=0.03)
 
 
 def human_file_zoom_view() -> str:
-    """Human zooms the nautilus view with Ctrl+=/Ctrl+-. Cost 1."""
+    """Human opens nautilus and zooms the view with Ctrl+=/Ctrl+-. Nautilus
+    on GNOME 42+ titles its windows by the folder basename (e.g. 'Desktop',
+    'tmp'), not a literal 'Files' — so we focus by PID via xdotool-style
+    wmctrl -l matching rather than a fixed title. Cost 1."""
     return _c(r"""
-nautilus /home/user/Desktop >/dev/null 2>&1 & disown;
-sleep 1.0;
-wmctrl -a 'Desktop' 2>/dev/null || wmctrl -a 'Files' 2>/dev/null;
-sleep 0.3;
+FOLDER=Desktop;
+mkdir -p /home/user/$FOLDER 2>/dev/null;
+nautilus /home/user/$FOLDER >/dev/null 2>&1 & disown;
+# Nautilus startup can take up to 3s on a fresh X session; wait long enough.
+sleep 3.0;
+# Try multiple title variants (folder basename, 'Files', 'Nautilus') then fall
+# back to raising the most recent nautilus window via its class hint.
+wmctrl -x -a org.gnome.Nautilus 2>/dev/null \
+ || wmctrl -a "$FOLDER" 2>/dev/null \
+ || wmctrl -a 'Files' 2>/dev/null \
+ || wmctrl -a 'Nautilus' 2>/dev/null;
+sleep 0.5;
 DISPLAY=:0 python3 -c "
 import pyautogui, random, time
-for _ in range(random.randint(2, 3)):
-    pyautogui.hotkey('ctrl', 'equal' if random.random() < 0.5 else 'minus'); time.sleep(0.3)
+for _ in range(random.randint(3, 5)):
+    pyautogui.hotkey('ctrl', 'equal' if random.random() < 0.5 else 'minus'); time.sleep(0.35)
 " 2>/dev/null || true
 """)
 
 
 def human_file_view_toggle() -> str:
-    """Human toggles between list/grid view in nautilus with Ctrl+1/Ctrl+2. Cost 1."""
+    """Human toggles between list/grid view in nautilus with Ctrl+1/Ctrl+2.
+    Resolves window by WM_CLASS (class hint survives across GNOME versions).
+    Cost 1."""
     return _c(r"""
 nautilus /home/user >/dev/null 2>&1 & disown;
-sleep 1.0;
-wmctrl -a 'Home' 2>/dev/null || wmctrl -a 'Files' 2>/dev/null;
-sleep 0.3;
+sleep 3.0;
+wmctrl -x -a org.gnome.Nautilus 2>/dev/null \
+ || wmctrl -a 'Home' 2>/dev/null \
+ || wmctrl -a 'Files' 2>/dev/null \
+ || wmctrl -a 'Nautilus' 2>/dev/null;
+sleep 0.5;
 DISPLAY=:0 python3 -c "
 import pyautogui, random, time
-pyautogui.hotkey('ctrl', str(random.choice([1, 2]))); time.sleep(0.4)
+pyautogui.hotkey('ctrl', str(random.choice([1, 2]))); time.sleep(0.5)
+pyautogui.hotkey('ctrl', str(random.choice([1, 2]))); time.sleep(0.5)
 pyautogui.hotkey('ctrl', str(random.choice([1, 2])))
 " 2>/dev/null || true
 """)
@@ -359,12 +376,18 @@ eog "${V[$((RANDOM % ${#V[@]}))]}" >/dev/null 2>&1 & disown
 
 
 def human_archive_browse() -> str:
-    """Human opens the archive manager (file-roller) on a tarball if one
-    exists. Graceful no-op if absent. Cost 1."""
+    """Human opens an archive. Prefers file-roller; falls back to a
+    gedit-based 'archive contents' buffer showing `tar tvf` output so the
+    noise is visible even on minimal images. Cost 1."""
     return _c(r"""
-command -v file-roller >/dev/null 2>&1 || exit 0;
 TAG=$RANDOM;
 F=/tmp/arc_$TAG.tar.gz;
 tar -czf "$F" /etc/hostname /etc/os-release 2>/dev/null || exit 0;
-file-roller "$F" >/dev/null 2>&1 & disown
+if command -v file-roller >/dev/null 2>&1; then
+  file-roller "$F" >/dev/null 2>&1 & disown;
+else
+  LISTING=/tmp/arc_listing_$TAG.txt;
+  { echo "Archive: $F"; echo ""; tar -tzvf "$F" 2>/dev/null; } > "$LISTING";
+  gedit --new-window "$LISTING" >/dev/null 2>&1 & disown;
+fi
 """)

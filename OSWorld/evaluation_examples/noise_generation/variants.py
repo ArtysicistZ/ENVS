@@ -191,18 +191,24 @@ r.configure(bg=bg)
 MSGS=['Deploy: staging ok','Git: sync complete','Build #4721 passed','Coverage: 82%%','Lints: 0 errors','DB: query cached','Alerts: 0 active']
 m=random.choice(MSGS)
 lbl=tk.Label(r, text=m, bg=bg, fg='white', font=('Sans',10)); lbl.pack(padx=10, pady=18)
-r.after(3200, r.destroy); r.mainloop()
+r.after(15000, r.destroy); r.mainloop()
 " >/dev/null 2>&1 & disown
 """)
 
 
 def notif_terminal_flash() -> str:
-    """Briefly opens a terminal, prints an important-looking message,
-    auto-closes. Cost 0."""
+    """Briefly opens a terminal, prints an important-looking message, and
+    stays on-screen long enough to be observed by the next step's screenshot.
+    Auto-closes after ~18s. Cost 0."""
     return _c(r"""
 M=("[systemd] Job completed successfully." "[auditd] Policy updated." "[cron] Nightly backup finished." "[net] DHCP lease renewed." "[security] Rules reloaded." "[daemon] Healthcheck OK.");
 m=${M[$((RANDOM % ${#M[@]}))]};
-gnome-terminal --geometry=60x3 -- bash -c "echo '$m'; sleep 2" >/dev/null 2>&1 & disown
+if command -v gnome-terminal >/dev/null 2>&1; then
+  gnome-terminal --geometry=60x3 -- bash -c "echo '$m'; sleep 18" >/dev/null 2>&1 & disown;
+else
+  # Fallback: an xmessage auto-dismissed after 18s.
+  ( xmessage -center -timeout 18 -buttons '' "$m" >/dev/null 2>&1 ) & disown;
+fi
 """)
 
 
@@ -289,18 +295,23 @@ r.mainloop()
 
 
 def overlay_browser_cookie_real() -> str:
-    """Launches Chrome with a real HTML page containing a live cookie-consent
-    banner (CSS + JS). Most realistic browser-noise possible. Cost 1."""
+    """Cookie-consent banner rendered as a tkinter overlay (fast, no browser
+    startup). Styled to match typical dark-themed web cookie bars. Cost 1."""
     return _c(r"""
-HTML='<html><head><style>
-body{font-family:sans-serif;margin:0;padding:40px;background:#f5f5f5}
-.bar{position:fixed;bottom:0;left:0;right:0;background:#1f2937;color:#fff;padding:20px;display:flex;align-items:center;gap:20px}
-.bar p{margin:0;flex:1;font-size:14px}
-.bar button{padding:10px 20px;border:none;border-radius:4px;cursor:pointer;background:#10b981;color:#fff;font-weight:600}
-</style></head><body><h2>Welcome</h2><p>Example content on a mock page.</p>
-<div class="bar" id="b"><p>This site uses cookies for analytics and functionality. By continuing, you accept our cookie policy.</p><button onclick="document.getElementById(&apos;b&apos;).remove()">Accept</button></div>
-</body></html>';
-google-chrome --new-window --window-size=1000,700 "data:text/html,$HTML" >/dev/null 2>&1 & disown
+DISPLAY=:0 python3 -c "
+import tkinter as tk, random
+r=tk.Tk(); r.overrideredirect(True); r.attributes('-topmost', True)
+r.geometry('1920x74+0+1006')
+r.configure(bg='#1f2937')
+MSGS=['This site uses cookies for analytics and functionality. By continuing, you accept our cookie policy.',
+      'We use cookies to improve your browsing experience and serve personalized ads.',
+      'Cookie notice: we and our partners use cookies to enhance functionality and analytics.']
+lbl=tk.Label(r, text=random.choice(MSGS), bg='#1f2937', fg='white', font=('Sans',11), anchor='w')
+lbl.pack(side='left', padx=20, pady=16, fill='x', expand=True)
+tk.Button(r, text='Accept', command=r.destroy, bg='#10b981', fg='white',
+          font=('Sans',10,'bold'), relief='flat', padx=16, pady=6).pack(side='right', padx=20)
+r.mainloop()
+" >/dev/null 2>&1 & disown
 """)
 
 
@@ -317,6 +328,7 @@ r=tk.Tk()
 r.title(random.choice(['Notes','Editor','Quick Memo','Scratchpad']))
 W,H=random.randint(420,640), random.randint(280,440)
 r.geometry(f'{W}x{H}+{random.randint(200,1200)}+{random.randint(150,600)}')
+r.lift(); r.attributes('-topmost', True); r.after(500, lambda: r.attributes('-topmost', False))
 txt=tk.Text(r, font=('Monospace', 11))
 txt.pack(fill='both', expand=True, padx=8, pady=8)
 SEEDS=['Working notes:','Draft session:','Scratch for later:','Ideas bucket:','Review checklist:']

@@ -82,6 +82,13 @@ Practical sources:
 - MCTS successful trajectories
 - task metadata: domain, related_apps, multi-app requirement
 
+Current implementation note:
+
+- success rate remains the anchor
+- horizon is currently implemented as a metadata proxy (related apps + sequencing cues)
+- domain/UI fragility are implemented as conservative heuristics
+- trajectory-derived horizon statistics can replace the proxy later without changing the controller shape
+
 ### 2. Realized Noise Difficulty
 
 Realized difficulty is how much burden a sampled noisy rollout actually imposes.

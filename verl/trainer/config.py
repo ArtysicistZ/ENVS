@@ -82,6 +82,7 @@ class AlgorithmConfig:
     noise_tau_down: float = 0.15
     noise_k_up: int = 3
     noise_ema_alpha: float = 0.3
+    noise_recovery_ema_alpha: float = 0.2  # EMA smoothing for per-task recovery burden
     noise_lr: float = 0.05
     noise_initial_tier: int = 1
     noise_tier_min: int = 0

@@ -1285,16 +1285,25 @@ class RemoteEnvWorker:
         return r.json()
 
     def _task_config_with_noise(self, task_config: dict) -> dict:
+        """Ensure noise keys are present on task_config before HTTP dispatch.
+
+        The trainer's `_annotate_task_configs_with_noise()` is the authoritative
+        source for per-task curriculum values (`noise_probability`, `noise_tier`)
+        — those must NOT be overwritten. This method only fills in missing keys
+        as a defense-in-depth safety net for codepaths that bypass the trainer
+        annotation (e.g., isolated testing).
+        """
         cfg = dict(task_config)
         algo = getattr(self.config, "algorithm", None)
         if algo is None or not getattr(algo, "enable_noise", False):
             return cfg
 
-        cfg["enable_noise"] = True
-        cfg["noise_mode"] = getattr(algo, "noise_mode", "task_noise_meta")
-        cfg["noise_probability"] = float(getattr(algo, "noise_probability", 0.0))
-        cfg["noise_tier"] = int(getattr(algo, "noise_initial_tier", 1))
-        cfg["noise_use_heldout"] = bool(getattr(algo, "noise_use_heldout", False))
+        # setdefault preserves trainer-annotated per-task curriculum state.
+        cfg.setdefault("enable_noise", True)
+        cfg.setdefault("noise_mode", getattr(algo, "noise_mode", "runtime_library"))
+        cfg.setdefault("noise_probability", float(getattr(algo, "noise_probability", 0.0)))
+        cfg.setdefault("noise_tier", int(getattr(algo, "noise_initial_tier", 1)))
+        cfg.setdefault("noise_use_heldout", bool(getattr(algo, "noise_use_heldout", False)))
         return cfg
 
     def reset(self, task_config):
@@ -1357,6 +1366,7 @@ class RemoteEnvWorker:
             "obs_messages": self.history_messages if obs_wire else None,
             "is_done": self._is_done,
             "format_reward": resp.get("format_reward", 0.0),
+            "noise_burden": resp.get("noise_burden"),
         }
 
     def step(self, prediction):

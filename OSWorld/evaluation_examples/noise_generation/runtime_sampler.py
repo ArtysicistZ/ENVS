@@ -112,6 +112,51 @@ def tier_for_success_rate(sr: float) -> int:
     return 5      # very_easy
 
 
+def fires_for_sr(sr: float, rng: random.Random) -> int:
+    """Map per-task success rate to a deterministic fire-count budget.
+
+    This is the v4 difficulty knob — replaces probabilistic per-step dice
+    rolls. The count is sampled from `rng` so that all `n` rollouts of the
+    same `(task_id, training_step)` group get the same count (CRN with Fix A).
+
+    Buckets (per user spec, 2026-04-14):
+      SR ≥ 0.50 → 3-5 fires per rollout (easy task can absorb noise)
+      SR 0.25-0.50 → 1-3 fires
+      SR 0.10-0.25 → exactly 1 fire
+      SR < 0.10 → 0 fires (very_hard task: protect training signal)
+    """
+    if sr < 0.10:
+        return 0
+    if sr < 0.25:
+        return 1
+    if sr < 0.50:
+        return rng.randint(1, 3)
+    return rng.randint(3, 5)
+
+
+def bucket_spaced_fire_steps(count: int, max_steps: int, rng: random.Random) -> List[int]:
+    """Pick `count` fire-step indices in `[0, max_steps)` with bucket-based
+    spacing to prevent harmful clumping (e.g. 5 fires all in steps 0-4).
+
+    Algorithm: split `[0, max_steps)` into `count` equal buckets, pick one
+    random step from each bucket. Within a bucket the choice is uniform.
+    Result is sorted ascending.
+    """
+    if count <= 0 or max_steps <= 0:
+        return []
+    if count >= max_steps:
+        return list(range(max_steps))
+    bucket = max_steps / count
+    steps: List[int] = []
+    for b in range(count):
+        lo = int(b * bucket)
+        hi = min(int((b + 1) * bucket), max_steps) - 1
+        if hi < lo:
+            hi = lo
+        steps.append(rng.randint(lo, hi))
+    return sorted(set(steps))
+
+
 # ---------------------------------------------------------------------------
 # Per-task overrides (optional)
 # ---------------------------------------------------------------------------
@@ -253,6 +298,64 @@ class RuntimeNoiseSampler:
                     break
 
         return [self._materialize(e, target_title) for e in selected]
+
+    def sample_fire_schedule(
+        self,
+        task_json: Dict,
+        sr: float,
+        max_steps: int,
+        avoid_categories: Optional[Set[str]] = None,
+        use_heldout: bool = False,
+    ) -> List[Dict]:
+        """v4 deterministic fire schedule.
+
+        Returns a list of materialized noise elements, each with an extra
+        `fire_step` field giving the agent step index at which it should fire.
+        Count is determined by `fires_for_sr(sr)`; fire-step indices are
+        bucket-spaced uniformly within `[0, max_steps)` so the rollout is not
+        front-loaded with a clump of noise.
+
+        Determinism: all randomness (count, fire steps, element selection) goes
+        through `self.rng`. With Fix A's `(task_id, training_step)` seed, all
+        n rollouts in a GRPO group get the SAME schedule.
+
+        Hard-task protection: SR < 0.10 returns []; the sampler is a no-op
+        and `noise_enabled` will be False on the env side.
+        """
+        count = fires_for_sr(sr, self.rng)
+        if count <= 0 or max_steps <= 0:
+            return []
+
+        target_title = _T.resolve_app_title(task_json.get("related_apps", []))
+        task_id = task_json.get("id")
+        effective_avoid: Set[str] = set(avoid_categories or set())
+        if task_id and task_id in self._overrides:
+            effective_avoid.update(self._overrides[task_id].get("avoid_categories", []))
+
+        catalog = self.eval_catalog if use_heldout else self.train_catalog
+        eligible = list(catalog)
+        if target_title is None:
+            eligible = [e for e in eligible if not e.get("needs_target")]
+        if effective_avoid:
+            eligible = [e for e in eligible if e.get("category") not in effective_avoid]
+        if not eligible:
+            return []
+
+        # Cap count by what the eligible pool can support (no replacement).
+        count = min(count, len(eligible))
+        chosen_templates = self.rng.sample(eligible, k=count)
+        fire_steps = bucket_spaced_fire_steps(count, max_steps, self.rng)
+        # Pad fire_steps if dedup shrunk the list (rare).
+        while len(fire_steps) < count:
+            fire_steps.append(min(max_steps - 1, fire_steps[-1] + 1 if fire_steps else 0))
+        fire_steps = sorted(fire_steps)[:count]
+
+        out: List[Dict] = []
+        for step_idx, tmpl in zip(fire_steps, chosen_templates):
+            mat = self._materialize(tmpl, target_title)
+            mat["fire_step"] = int(step_idx)
+            out.append(mat)
+        return out
 
     def _materialize(self, template_entry: Dict, target_title: Optional[str]) -> Dict:
         """Call the template's bash-generator fn and wrap as an element dict."""

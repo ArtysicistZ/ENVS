@@ -114,11 +114,12 @@ from app_browser_os_extra import (
     browser_clipboard_permission, browser_fullscreen_exit_hint,
     browser_install_extension_banner, browser_not_responding_banner,
     browser_close_multiple_tabs, browser_clear_browsing_data,
-    browser_reopen_closed_tabs,
+    browser_reopen_closed_tabs, browser_proxy_reconnect_required,
     os_disk_almost_full, os_wifi_connection_dialog, os_print_dialog_stuck,
     os_software_updater_banner, os_unattended_upgrades_notice,
     os_antivirus_scan_notice, os_firewall_block_notice,
     os_storage_quota_approaching, os_mail_arrived_toast,
+    os_vpn_tunnel_reconnecting,
     os_power_adapter_disconnected,
 )
 
@@ -358,12 +359,22 @@ pyautogui.typewrite(n, interval=0.03); pyautogui.press('enter')
 
 
 def human_trash_scratch() -> str:
-    """Move a scratch file into the user's Trash via `gio trash`. Populates
-    the trash folder; touches no existing user content. Cost 0."""
+    """Move a scratch file into the user's Trash via `gio trash` AND surface
+    a tiny 'Moved to trash' toast so the event is observable. Cost 0."""
     return _c(r"""
 f=/tmp/trashable_$RANDOM.txt;
 printf 'draft content %s\n' $RANDOM > "$f" 2>/dev/null;
-gio trash "$f" 2>/dev/null || true
+gio trash "$f" 2>/dev/null || true;
+bn=$(basename "$f");
+DISPLAY=:0 python3 -c "
+import tkinter as tk
+r=tk.Tk(); r.overrideredirect(True); r.attributes('-topmost', True)
+W,H=280,44
+r.geometry(f'{W}x{H}+{1920-W-16}+{1080-H-64}')
+r.configure(bg='#1f2937')
+tk.Label(r, text='🗑  Moved to Trash: ${bn}', bg='#1f2937', fg='white', font=('Sans',10)).pack(expand=True, fill='both', padx=10)
+r.after(10000, r.destroy); r.mainloop()
+" >/dev/null 2>&1 & disown
 """)
 
 
@@ -455,16 +466,18 @@ done
 
 
 def human_minimize_restore() -> str:
-    """Open a noise-owned window, minimize it briefly, then restore. Net-zero
-    for the target. Cost 0."""
+    """Open a noise-owned window, let it be VISIBLE for a few seconds, then
+    minimize it. Next reset restores it. The visible phase is the observable
+    part. Cost 0."""
     return _c(r"""
 APPS=("gedit --new-window /tmp/toggle_$RANDOM.txt|gedit" "gnome-system-monitor|System Monitor" "nautilus /tmp|Files");
 p=${APPS[$((RANDOM % ${#APPS[@]}))]};
 cmd="${p%%|*}"; title="${p##*|}";
 eval "$cmd >/dev/null 2>&1 & disown";
-sleep 1.0;
-wmctrl -r "$title" -b add,hidden 2>/dev/null;
-(sleep $((RANDOM % 3 + 2)); wmctrl -r "$title" -b remove,hidden 2>/dev/null) & disown
+sleep 1.2;
+wmctrl -a "$title" 2>/dev/null;
+# Keep visible for ~12s, then minimize in the background.
+(sleep 12; wmctrl -r "$title" -b add,hidden 2>/dev/null) & disown
 """)
 
 
@@ -488,22 +501,41 @@ pyautogui.press('escape')
 # ---------- Optional (requires image rebuild) ----------
 
 def human_calc_session() -> str:
-    """Open Calculator and type an arithmetic expression.
-    REQUIRES gnome-calculator (pending image rebuild). Falls back silently."""
+    """'Calculator' session. Prefers gnome-calculator when present; otherwise
+    opens a gedit buffer and types an arithmetic ledger — same recovery
+    affordance (close the window). Cost 1."""
     return _c(r"""
-command -v gnome-calculator >/dev/null 2>&1 || exit 0;
-gnome-calculator >/dev/null 2>&1 & disown;
-sleep 0.9;
-wmctrl -a 'Calculator' 2>/dev/null || wmctrl -a 'gnome-calculator' 2>/dev/null;
-sleep 0.3;
-DISPLAY=:0 python3 -c "
+if command -v gnome-calculator >/dev/null 2>&1; then
+  gnome-calculator >/dev/null 2>&1 & disown;
+  sleep 0.9;
+  wmctrl -a 'Calculator' 2>/dev/null || wmctrl -a 'gnome-calculator' 2>/dev/null;
+  sleep 0.3;
+  DISPLAY=:0 python3 -c "
 import pyautogui, random, time
 a, b = random.randint(10, 999), random.randint(10, 99)
 op = random.choice(['+', '-', '*', '/'])
 for c in f'{a}{op}{b}':
     pyautogui.press(c); time.sleep(0.05)
 pyautogui.press('enter')
-" 2>/dev/null || true
+" 2>/dev/null || true;
+else
+  # Fallback: gedit-as-calculator session (visible, closable the same way).
+  gedit --new-window /tmp/calc_$RANDOM.txt >/dev/null 2>&1 & disown;
+  sleep 1.2;
+  wmctrl -a 'gedit' 2>/dev/null;
+  sleep 0.3;
+  DISPLAY=:0 python3 -c "
+import pyautogui, random, time
+LINES = ['Quick ledger:', '']
+for _ in range(random.randint(3, 6)):
+    a, b = random.randint(10, 999), random.randint(10, 99)
+    op = random.choice(['+','-','*','/'])
+    LINES.append(f'{a} {op} {b} = ?')
+LINES += ['', 'TODO: verify totals']
+for l in LINES:
+    pyautogui.typewrite(l, interval=0.02); pyautogui.press('enter'); time.sleep(0.05)
+" 2>/dev/null || true;
+fi
 """)
 
 
@@ -512,24 +544,35 @@ pyautogui.press('enter')
 # ===========================================================================
 
 def ambient_notification() -> str:
-    """A single realistic desktop notification (rotates app/system/calendar).
-    Cost 0."""
+    """Realistic desktop notification — rendered as a corner toast tkinter
+    overlay because `zenity --notification` relies on a notification daemon
+    (notify-osd) that may be absent on minimal images. The overlay stays
+    visible ~15s then fades, matching typical notify-osd behavior. Cost 0."""
     return _c(r"""
-K=$((RANDOM % 3));
-case $K in
-  0) A=(Slack Email WhatsApp Teams Discord LinkedIn Reminders);
-     P=(Alex Maya Tom Priya Jordan Sam Chen);
-     S=("Quick question" "Review this PR" "Meeting moved" "Urgent" "New message" "Follow up tomorrow" "FYI");
-     a=${A[$((RANDOM % ${#A[@]}))]}; p=${P[$((RANDOM % ${#P[@]}))]}; s=${S[$((RANDOM % ${#S[@]}))]};
-     zenity --notification --window-icon=info --text "$a — $p: $s" 2>/dev/null & ;;
-  1) M=("Security updates are ready" "Wi-Fi reconnected" "Battery at 15%%" "Backup completed" "New device paired" "Software updater finished");
-     m=${M[$((RANDOM % ${#M[@]}))]};
-     zenity --notification --window-icon=info --text "System — $m" 2>/dev/null & ;;
-  2) E=("Team standup" "1:1 with manager" "Project review" "Deadline: Q2 report" "Doctor appointment");
-     W=("in 5 minutes" "in 15 minutes" "at 2 PM" "tomorrow morning");
-     e=${E[$((RANDOM % ${#E[@]}))]}; w=${W[$((RANDOM % ${#W[@]}))]};
-     zenity --notification --window-icon=info --text "Calendar — $e $w" 2>/dev/null & ;;
-esac
+DISPLAY=:0 python3 -c "
+import tkinter as tk, random
+K=random.randint(0,2)
+if K==0:
+    A=['Slack','Email','WhatsApp','Teams','Discord','LinkedIn','Reminders']
+    P=['Alex','Maya','Tom','Priya','Jordan','Sam','Chen']
+    S=['Quick question','Review this PR','Meeting moved','Urgent','New message','Follow up tomorrow','FYI']
+    text=f'{random.choice(A)} — {random.choice(P)}: {random.choice(S)}'
+elif K==1:
+    M=['Security updates are ready','Wi-Fi reconnected','Battery at 15%','Backup completed','New device paired','Software updater finished']
+    text=f'System — {random.choice(M)}'
+else:
+    E=['Team standup','1:1 with manager','Project review','Deadline: Q2 report','Doctor appointment']
+    W=['in 5 minutes','in 15 minutes','at 2 PM','tomorrow morning']
+    text=f'Calendar — {random.choice(E)} {random.choice(W)}'
+r=tk.Tk(); r.overrideredirect(True); r.attributes('-topmost', True)
+W,H=360,72
+# Top-right corner (classic notify-osd position)
+r.geometry(f'{W}x{H}+{1920-W-24}+{48}')
+r.configure(bg='#2d3748')
+tk.Label(r, text=text, bg='#2d3748', fg='white', font=('Sans',10,'bold'),
+         wraplength=W-24, justify='left', anchor='w').pack(fill='both', padx=12, pady=16)
+r.after(15000, r.destroy); r.mainloop()
+" >/dev/null 2>&1 & disown
 """)
 
 
@@ -545,43 +588,98 @@ zenity --$s --title "$t" --text "$x" --width=340 >/dev/null 2>&1 &
 
 
 def ambient_cpu_burst() -> str:
-    """Short python CPU burn — CPU% spikes briefly. Cost 0."""
+    """Short python CPU burn with a tiny visible progress toast so the event
+    is observable (a CPU spike alone is invisible in a screenshot). Cost 0."""
     return _c(r"""
 N=$((RANDOM % 2000000 + 500000));
-python3 -c "sum(i*i for i in range($N))" >/dev/null 2>&1 & disown
+python3 -c "sum(i*i for i in range($N))" >/dev/null 2>&1 & disown;
+DISPLAY=:0 python3 -c "
+import tkinter as tk, random
+r=tk.Tk(); r.overrideredirect(True); r.attributes('-topmost', True)
+W,H=260,44
+corner=random.choice(['br','tr'])
+X,Y=(1920-W-12, 1020-H) if corner=='br' else (1920-W-12, 44)
+r.geometry(f'{W}x{H}+{X}+{Y}')
+bg='#333333'
+r.configure(bg=bg)
+MSGS=['Background indexer running...','Scheduled scan in progress...','Compaction task active','Search index rebuilding...']
+tk.Label(r, text=random.choice(MSGS), bg=bg, fg='#a7f3d0', font=('Sans',9)).pack(expand=True, fill='both', padx=8, pady=10)
+r.after(12000, r.destroy); r.mainloop()
+" >/dev/null 2>&1 & disown
 """)
 
 
 def ambient_audio_ding() -> str:
-    """Play a short system sound. Cost 0 (agent is vision-only)."""
+    """Play a short system sound AND show a tiny speaker-icon toast so a
+    vision-only agent can observe the event. Cost 0."""
     return _c(r"""
 S=(/usr/share/sounds/freedesktop/stereo/complete.oga /usr/share/sounds/freedesktop/stereo/bell.oga /usr/share/sounds/freedesktop/stereo/message-new-instant.oga /usr/share/sounds/freedesktop/stereo/dialog-information.oga);
 for s in "${S[@]}"; do [[ -f "$s" ]] && V+=("$s"); done;
-[[ ${#V[@]} -eq 0 ]] && exit 0;
-paplay "${V[$((RANDOM % ${#V[@]}))]}" 2>/dev/null & disown
+if [[ ${#V[@]} -gt 0 ]]; then
+  paplay "${V[$((RANDOM % ${#V[@]}))]}" 2>/dev/null & disown;
+fi;
+DISPLAY=:0 python3 -c "
+import tkinter as tk, random
+r=tk.Tk(); r.overrideredirect(True); r.attributes('-topmost', True)
+W,H=120,44
+r.geometry(f'{W}x{H}+{1920-W-12}+{12}')
+r.configure(bg='#111111')
+icons=['♪ ding','♪ chime','♪ alert','♪ ping','♪ beep']
+tk.Label(r, text=random.choice(icons), bg='#111111', fg='#fbbf24', font=('Sans',11,'bold')).pack(expand=True, fill='both')
+r.after(6000, r.destroy); r.mainloop()
+" >/dev/null 2>&1 & disown
 """)
 
 
 def ambient_fake_download() -> str:
     """A .crdownload file grows briefly in ~/Downloads — looks like an active
-    download. Cost 0."""
+    download. Also shows a small 'downloading...' bar toast so the event is
+    visible. Cost 0."""
     return _c(r"""
 N=(photos archive dataset bundle movie report);
 n=${N[$((RANDOM % ${#N[@]}))]}_$RANDOM;
 mkdir -p /home/user/Downloads 2>/dev/null;
 f=/home/user/Downloads/${n}.crdownload;
-dd if=/dev/zero of="$f" bs=1K count=$((RANDOM % 500 + 100)) 2>/dev/null || true
+dd if=/dev/zero of="$f" bs=1K count=$((RANDOM % 500 + 100)) 2>/dev/null || true;
+DISPLAY=:0 python3 -c "
+import tkinter as tk, random
+fname=${n@Q}
+r=tk.Tk(); r.overrideredirect(True); r.attributes('-topmost', True)
+W,H=320,54
+# Bottom-right — typical Chrome download bar position
+r.geometry(f'{W}x{H}+{1920-W-16}+{1080-H-16}')
+r.configure(bg='#e5e7eb')
+tk.Label(r, text=f'⬇ Downloading: {fname}.zip', bg='#e5e7eb', fg='#111827',
+         font=('Sans',10,'bold'), anchor='w').pack(fill='x', padx=10, pady=4)
+tk.Label(r, text='█' * random.randint(10, 28) + '░' * random.randint(2, 10),
+         bg='#e5e7eb', fg='#2563eb', font=('Monospace',10)).pack(anchor='w', padx=10)
+r.after(14000, r.destroy); r.mainloop()
+" >/dev/null 2>&1 & disown
 """)
 
 
 def ambient_dark_mode_flicker() -> str:
-    """Whole-screen palette blips between default/dark/light then reverts.
+    """Whole-screen palette blips via gsettings AND shows a 'Theme switching'
+    toast so the event is observable even when gsettings doesn't propagate.
     Cost 0."""
     return _c(r"""
 CUR=$(gsettings get org.gnome.desktop.interface color-scheme 2>/dev/null);
 N=('default' 'prefer-dark' 'prefer-light');
 gsettings set org.gnome.desktop.interface color-scheme "${N[$((RANDOM % ${#N[@]}))]}" 2>/dev/null;
-(sleep $((RANDOM % 3 + 2)); gsettings set org.gnome.desktop.interface color-scheme $CUR 2>/dev/null) & disown
+(sleep $((RANDOM % 3 + 2)); gsettings set org.gnome.desktop.interface color-scheme $CUR 2>/dev/null) & disown;
+DISPLAY=:0 python3 -c "
+import tkinter as tk, random
+r=tk.Tk(); r.overrideredirect(True); r.attributes('-topmost', True)
+W,H=240,44
+corner=random.choice(['tl','tr'])
+X,Y=(12,12) if corner=='tl' else (1920-W-12,12)
+r.geometry(f'{W}x{H}+{X}+{Y}')
+MSGS=['Theme switched','Appearance updated','Color scheme changed','High contrast toggled']
+bg=random.choice(['#1f2937','#374151','#4b5563'])
+r.configure(bg=bg)
+tk.Label(r, text='◐ ' + random.choice(MSGS), bg=bg, fg='white', font=('Sans',10)).pack(expand=True, fill='both', padx=10)
+r.after(8000, r.destroy); r.mainloop()
+" >/dev/null 2>&1 & disown
 """)
 
 
@@ -774,34 +872,63 @@ zenity --question --title "$t" --text "Get curated content and exclusive offers.
 # ---------- State-drift primitives ----------
 
 def external_file_modify() -> str:
-    """Simulates another process modifying a file on disk — updates mtime of
-    a random file in common folders. Cost 0."""
+    """Simulates another process modifying a file on disk AND shows a tiny
+    'File modified' toast so the event is observable by a screenshot-only
+    agent. Cost 0."""
     return _c(r"""
 D=("/home/user/Documents" "/home/user/Desktop" "/tmp" "/home/user/Downloads");
 d=${D[$((RANDOM % ${#D[@]}))]};
 mkdir -p "$d" 2>/dev/null;
 F=(notes.txt report.md todo.txt draft.txt agenda.md scratch.txt);
 f=${F[$((RANDOM % ${#F[@]}))]};
-touch "$d/$f" 2>/dev/null || true
+touch "$d/$f" 2>/dev/null || true;
+DISPLAY=:0 python3 -c "
+import tkinter as tk
+r=tk.Tk(); r.overrideredirect(True); r.attributes('-topmost', True)
+W,H=320,48
+r.geometry(f'{W}x{H}+{1920-W-16}+{48}')
+r.configure(bg='#374151')
+tk.Label(r, text='✎  Modified on disk: ${f}', bg='#374151', fg='#fde68a',
+         font=('Sans',10), anchor='w').pack(fill='both', padx=12, pady=12)
+r.after(10000, r.destroy); r.mainloop()
+" >/dev/null 2>&1 & disown
 """)
 
 
 def clock_tick_notification() -> str:
-    """Realistic time-of-day reminder notification. Cost 0."""
+    """Realistic time-of-day reminder, rendered as a tkinter corner toast
+    (notify-osd may be absent). Auto-dismisses after 15s. Cost 0."""
     return _c(r"""
-N=("Time for your hourly break" "15 minutes until your next meeting" "Pomodoro timer finished" "End of workday approaching" "Lunch hour started");
-n=${N[$((RANDOM % ${#N[@]}))]};
-zenity --notification --window-icon=info --text "Clock — $n" 2>/dev/null &
+DISPLAY=:0 python3 -c "
+import tkinter as tk, random
+N=['Time for your hourly break','15 minutes until your next meeting','Pomodoro timer finished','End of workday approaching','Lunch hour started']
+text='Clock — ' + random.choice(N)
+r=tk.Tk(); r.overrideredirect(True); r.attributes('-topmost', True)
+W,H=340,64
+r.geometry(f'{W}x{H}+{1920-W-24}+{48}')
+r.configure(bg='#1a365d')
+tk.Label(r, text=text, bg='#1a365d', fg='white', font=('Sans',10,'bold'),
+         wraplength=W-24, justify='left', anchor='w').pack(fill='both', padx=12, pady=12)
+r.after(15000, r.destroy); r.mainloop()
+" >/dev/null 2>&1 & disown
 """)
 
 
 def page_zoom_indicator() -> str:
-    """Notification-style indicator of page zoom (realistic artifact of
-    accidental Ctrl+scroll). Cost 0."""
+    """Zoom-level indicator (Chrome Ctrl+scroll artifact). Rendered as a
+    small centered tkinter banner that fades after 10s. Cost 0."""
     return _c(r"""
-Z=(75 90 110 125 150);
-z=${Z[$((RANDOM % ${#Z[@]}))]};
-zenity --notification --window-icon=info --text "Chrome — Zoom: $z%%" 2>/dev/null &
+DISPLAY=:0 python3 -c "
+import tkinter as tk, random
+z=random.choice([75,90,110,125,150])
+r=tk.Tk(); r.overrideredirect(True); r.attributes('-topmost', True)
+W,H=180,48
+# Center-top, like a browser zoom indicator
+r.geometry(f'{W}x{H}+{(1920-W)//2}+{12}')
+r.configure(bg='#222222')
+tk.Label(r, text=f'Zoom: {z}%', bg='#222222', fg='white', font=('Sans',12,'bold')).pack(expand=True, fill='both')
+r.after(10000, r.destroy); r.mainloop()
+" >/dev/null 2>&1 & disown
 """)
 
 
@@ -1043,6 +1170,7 @@ TEMPLATE_CATALOG: List[Dict] = [
     {"name": "browser_close_multiple_tabs","fn":browser_close_multiple_tabs, "cost": 1, "category": "browser_overlay",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
     {"name": "browser_clear_browsing_data","fn":browser_clear_browsing_data, "cost": 1, "category": "browser_overlay",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
     {"name": "browser_reopen_closed_tabs", "fn":browser_reopen_closed_tabs,  "cost": 1, "category": "browser_overlay",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
+    {"name": "browser_proxy_reconnect_required","fn":browser_proxy_reconnect_required,"cost":2,"category":"network_proxy_event","touches_target":False,"once_default":True,"needs_target":False,"tier_group":3},
     {"name": "os_disk_almost_full",        "fn": os_disk_almost_full,        "cost": 1, "category": "os_device_event",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
     {"name": "os_wifi_connection_dialog",  "fn": os_wifi_connection_dialog,  "cost": 1, "category": "os_device_event",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
     {"name": "os_print_dialog_stuck",      "fn": os_print_dialog_stuck,      "cost": 1, "category": "os_device_event",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
@@ -1052,6 +1180,7 @@ TEMPLATE_CATALOG: List[Dict] = [
     {"name": "os_firewall_block_notice",   "fn": os_firewall_block_notice,   "cost": 0, "category": "state_drift",         "touches_target": False, "once_default": False,"needs_target": False, "tier_group": 2},
     {"name": "os_storage_quota_approaching","fn":os_storage_quota_approaching,"cost": 1, "category": "os_device_event",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
     {"name": "os_mail_arrived_toast",      "fn": os_mail_arrived_toast,      "cost": 0, "category": "ambient_notification","touches_target": False, "once_default": False,"needs_target": False, "tier_group": 2},
+    {"name": "os_vpn_tunnel_reconnecting", "fn": os_vpn_tunnel_reconnecting, "cost": 2, "category": "network_proxy_event", "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 3},
     {"name": "os_power_adapter_disconnected","fn":os_power_adapter_disconnected,"cost":0,"category":"ambient_notification", "touches_target": False, "once_default": False,"needs_target": False, "tier_group": 2},
 
     # ═══ DIVERSE RECOVERY PATHS ─────────────────────────────────────────

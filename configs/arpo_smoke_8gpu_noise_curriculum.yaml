@@ -1,9 +1,10 @@
-# ARPO Smoke Test with fixed runtime noise.
+# ARPO Smoke Test with adaptive runtime noise curriculum.
 #
-# This is the first-stage noise config:
+# This is the first real curriculum config:
 # - uses the runtime noise library
-# - fixed firing probability
-# - no adaptive curriculum yet
+# - per-task static seeding (success rate + fragility priors)
+# - adaptive p_noise / tier updates during training
+# - logs realized burden through rollout metadata
 
 data:
   train_files: OSWorld/evaluation_examples/test_smoke_4.json
@@ -28,11 +29,19 @@ algorithm:
   enable_replay: true
   enable_noise: true
   noise_mode: runtime_library
-  noise_probability: 0.10
+  noise_probability: 0.05
   noise_probability_min: 0.0
   noise_probability_max: 0.20
-  noise_initial_tier: 2
   noise_use_curriculum: true
+  noise_target_sr: 0.50
+  noise_tau_up: 0.70
+  noise_tau_down: 0.35
+  noise_k_up: 3
+  noise_ema_alpha: 0.30
+  noise_lr: 0.05
+  noise_initial_tier: 1
+  noise_tier_min: 0
+  noise_tier_max: 5
   noise_use_heldout: false
 
 worker:
@@ -104,7 +113,7 @@ trainer:
   total_episodes: 2
   logger: ["console"]
   project_name: arpo-smoke
-  experiment_name: arpo_smoke_4tasks_noise_fixed_8xa100
+  experiment_name: arpo_smoke_4tasks_noise_curriculum_8xa100
   n_gpus_per_node: 8
   nnodes: 1
   val_before_train: false

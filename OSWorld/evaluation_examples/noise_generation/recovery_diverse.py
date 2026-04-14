@@ -27,15 +27,16 @@ def _c(src: str) -> str:
 
 
 def recovery_wait_autodismiss() -> str:
-    """Modal with timeout — auto-dismisses after 4-6 seconds. Correct agent
-    action: do nothing, keep working. Cost 0."""
+    """Modal with timeout — auto-dismisses after 20-25 seconds (long enough
+    that the agent's NEXT observation still sees it, training the agent to
+    NOT-click rather than to dismiss). Cost 0."""
     return _c(r"""
 T=("Routine check" "Status update" "Background info" "Informational");
 t=${T[$((RANDOM % ${#T[@]}))]};
 M=("Maintenance finished." "Cache reloaded." "Settings synced." "Connection restored.");
 m=${M[$((RANDOM % ${#M[@]}))]};
-S=$((RANDOM % 3 + 4));
-zenity --info --title "$t" --text "$m\n(This message will close automatically)" --timeout=$S >/dev/null 2>&1 &
+S=$((RANDOM % 6 + 20));
+zenity --info --title "$t" --text "$m\n(This message will close automatically)" --timeout=$S >/dev/null 2>&1 & disown
 """)
 
 
@@ -286,6 +287,6 @@ else: X,Y=1720,1010
 r.geometry(f'{W}x{H}+{X}+{Y}')
 r.configure(bg='#fefce8')
 tk.Label(r, text=random.choice(['Autosaved','Background','Synced','Ready','Active']), bg='#fefce8', font=('Sans',10)).pack(pady=10)
-r.after(5000, r.destroy); r.mainloop()
+r.after(18000, r.destroy); r.mainloop()
 " >/dev/null 2>&1 & disown
 """)
