@@ -444,6 +444,9 @@ class RayPPOTrainer:
         """
         if self.noise_curriculum is None:
             return
+        if is_val:
+            # Run validation with zero noise to get clean success-rate signal.
+            return
         from OSWorld.evaluation_examples.noise_generation.difficulty import compute_static_noise_seed
         algo = self.config.algorithm
         for tc in task_configs:
@@ -1819,6 +1822,54 @@ class RayPPOTrainer:
                 pos_batch.batch[key] = torch.cat([pad_t, tensor], dim=-1)
         return pos_batch
 
+    @staticmethod
+    def _summarize_noise_burden(step_metadata):
+        summary = {
+            "interruptions": 0.0,
+            "recovery_cost": 0.0,
+            "occlusion": 0.0,
+            "focus_loss": 0.0,
+        }
+        if not step_metadata:
+            return summary
+
+        for step in step_metadata:
+            burden = (step or {}).get("noise_burden") or {}
+            summary["interruptions"] += float(burden.get("interruptions", 0.0) or 0.0)
+            summary["recovery_cost"] += float(burden.get("total_recovery", 0.0) or 0.0)
+            summary["occlusion"] += float(burden.get("occlusion", 0.0) or 0.0)
+            summary["focus_loss"] += float(burden.get("focus_loss", 0.0) or 0.0)
+        return summary
+
+    def _build_replay_tags(self, task_configs, batch):
+        eval_results = batch.batch["eval_results"].tolist()
+        metadata_entries = list(batch.non_tensor_batch.get("rollout_step_metadata", []))
+        if len(metadata_entries) < len(eval_results):
+            metadata_entries.extend([[] for _ in range(len(eval_results) - len(metadata_entries))])
+
+        replay_tags = []
+        for task_config, eval_result, step_metadata in zip(task_configs, eval_results, metadata_entries):
+            if eval_result <= 0.1:
+                replay_tags.append(None)
+                continue
+
+            burden = self._summarize_noise_burden(step_metadata)
+            noise_enabled = bool(task_config.get("enable_noise"))
+            realized_noise = any(value > 0 for value in burden.values())
+            if realized_noise:
+                replay_tags.append("recovery_success")
+            elif noise_enabled:
+                replay_tags.append("noisy_success")
+            else:
+                replay_tags.append("clean_success")
+        return replay_tags
+
+    @staticmethod
+    def _preferred_replay_tags(task_config):
+        if bool(task_config.get("enable_noise")):
+            return ["recovery_success", "noisy_success", "clean_success"]
+        return ["clean_success", "noisy_success", "recovery_success"]
+
     def apply_replay(self, task_configs, batch):
         eval_results = batch.batch["eval_results"].tolist()
         assert len(task_configs) == len(batch)
@@ -1830,39 +1881,38 @@ class RayPPOTrainer:
 
         cur_seq_len = batch.batch["input_ids"].size(-1)
         pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
+        replay_tags = self._build_replay_tags(task_configs, batch)
 
         final_batch = []
-        final_eval_results = []
         for i in range(bsz):
             cur_task_config = task_configs[i * rollout_n:(i + 1) * rollout_n]
             assert len(set([x['id'] for x in cur_task_config])) == 1
             task_id = cur_task_config[0]['id']
             instruction = cur_task_config[0]['instruction']
 
-            cur_eval_results = eval_results[i * rollout_n:(i + 1) * rollout_n]
-
             cur_rewards = np.array(eval_results[i * rollout_n:(i + 1) * rollout_n], dtype=float)
             cur_batch = batch[i * rollout_n:(i + 1) * rollout_n]
             cur_reward_std = np.std(cur_rewards)
             cur_reward_mean = np.mean(cur_rewards)
-            if cur_reward_std < 0.05 and cur_reward_mean < 0.2: # all negative group
-                pos_batch = self.replay.get_pos(cur_task_config[0]['id'], num_samples=1)
+            preferred_tags = self._preferred_replay_tags(cur_task_config[0])
+            if cur_reward_std < 0.05 and cur_reward_mean < 0.2:  # all negative group
+                pos_batch = self.replay.get_pos(cur_task_config[0]['id'], num_samples=1, preferred_tags=preferred_tags)
             else:
                 pos_batch = []
 
             if len(pos_batch) > 0:
-                # Align replay item's sequence length to current batch (different
-                # steps may collate to different max lengths).
                 pos_batch = self._align_replay_seq_len(pos_batch, cur_seq_len, pad_token_id)
                 final_batch.append(pos_batch)
                 final_batch.append(cur_batch[len(pos_batch):])
             else:
                 final_batch.append(cur_batch)
 
-            print(f'Task {task_id} {instruction} replay_buffer: {len(pos_batch)}| rewards: {cur_rewards}')
+            print(
+                f'Task {task_id} {instruction} replay_buffer: {len(pos_batch)} | '
+                f'preferred_tags: {preferred_tags} | rewards: {cur_rewards}'
+            )
 
-        # update replay buffer
-        self.replay.update_replay_buffer_batch(task_configs, batch)
+        self.replay.update_replay_buffer_batch(task_configs, batch, replay_tags=replay_tags)
         print('Update replay buffer done')
         final_batch = DataProto.concat(final_batch)
         return final_batch
@@ -2338,6 +2388,24 @@ class RayPPOTrainer:
                             "prompt_lengths": t_plen,
                         })
 
+                    # Aggregate realized noise burden for observability.
+                    step_metadata_entries = list(batch.non_tensor_batch.get("rollout_step_metadata", []))
+                    noise_summary = {
+                        "trajectories_with_noise": 0,
+                        "interruptions": 0.0,
+                        "recovery_cost": 0.0,
+                        "occlusion": 0.0,
+                        "focus_loss": 0.0,
+                    }
+                    for step_meta in step_metadata_entries:
+                        burden = self._summarize_noise_burden(step_meta)
+                        if any(v > 0 for v in burden.values()):
+                            noise_summary["trajectories_with_noise"] += 1
+                        noise_summary["interruptions"] += burden["interruptions"]
+                        noise_summary["recovery_cost"] += burden["recovery_cost"]
+                        noise_summary["occlusion"] += burden["occlusion"]
+                        noise_summary["focus_loss"] += burden["focus_loss"]
+
                     # Print per-task summary
                     print(f"\n{'='*80}")
                     print(f"  Step {self.global_step}  |  {datetime.datetime.now().strftime('%H:%M:%S')}  |  "
@@ -2358,6 +2426,11 @@ class RayPPOTrainer:
                     print(f"  pg_loss={metrics.get('actor/pg_loss', 'n/a')}  "
                           f"grad_norm={metrics.get('actor/grad_norm', 'n/a')}  "
                           f"entropy={metrics.get('actor/entropy_loss', 'n/a')}")
+                    print(f"  noise_fired={noise_summary['trajectories_with_noise']}/{len(batch)}  "
+                          f"interruptions={noise_summary['interruptions']:.1f}  "
+                          f"recovery_cost={noise_summary['recovery_cost']:.1f}  "
+                          f"occlusion={noise_summary['occlusion']:.1f}  "
+                          f"focus_loss={noise_summary['focus_loss']:.1f}")
                     print(f"{'='*80}\n")
 
                     # Write JSONL log entry
@@ -2383,6 +2456,7 @@ class RayPPOTrainer:
                         "prompt_length_max": _json_safe(metrics.get("prompt_length/max")),
                         "response_length_mean": _json_safe(metrics.get("response_length/mean")),
                         "throughput": _json_safe(metrics.get("perf/throughput")),
+                        "noise_summary": {k: _json_safe(v) for k, v in noise_summary.items()},
                     }
                     with open(self._training_log_path, "a") as f:
                         f.write(json.dumps(log_entry) + "\n")

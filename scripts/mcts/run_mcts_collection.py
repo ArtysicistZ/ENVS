@@ -189,8 +189,44 @@ def main():
         remote_server_urls=cfg["remote_server_urls"],
         output_dir=cfg["output_dir"],
         save_full_tree=cfg.get("save_full_tree", False),
+        # Noise config (v3)
+        enable_noise=cfg.get("enable_noise", False),
+        noise_mode=cfg.get("noise_mode", "runtime_library"),
+        noise_branch_probability=cfg.get("noise_branch_probability", 0.8),
+        noise_min_fire_step=cfg.get("noise_min_fire_step", 3),
+        noise_min_task_buffer=cfg.get("noise_min_task_buffer", 4),
+        noise_sr_file=cfg.get("noise_sr_file", ""),
     )
-    orchestrator = MCTSOrchestrator(config, vllm_pool, processor, tokenizer)
+
+    # Load per-task clean SR for noise fire count decisions
+    task_sr_map: dict = {}
+    sr_file = cfg.get("noise_sr_file", "")
+    if sr_file:
+        sr_path = os.path.join(PROJ_ROOT, sr_file)
+        if os.path.exists(sr_path):
+            with open(sr_path) as f:
+                sr_data = json.load(f)
+            # Handle both formats: {task_id: {success_rate: ...}} and {results: [...]}
+            if isinstance(sr_data, dict) and "results" not in sr_data:
+                for tid, info in sr_data.items():
+                    if isinstance(info, dict):
+                        task_sr_map[tid] = float(info.get("success_rate", 0))
+                    else:
+                        task_sr_map[tid] = float(info)
+            elif isinstance(sr_data, dict) and "results" in sr_data:
+                for r in sr_data["results"]:
+                    task_sr_map[r["task_id"]] = float(r.get("success_rate", 0))
+            logger.info("Loaded clean SR for %d tasks from %s", len(task_sr_map), sr_path)
+        else:
+            logger.warning("noise_sr_file not found: %s", sr_path)
+
+    if config.enable_noise:
+        logger.info("Noisy MCTS enabled: branch_prob=%.2f, min_fire_step=%d, min_buffer=%d",
+                     config.noise_branch_probability, config.noise_min_fire_step,
+                     config.noise_min_task_buffer)
+
+    orchestrator = MCTSOrchestrator(config, vllm_pool, processor, tokenizer,
+                                     task_sr_map=task_sr_map)
 
     # Run tasks
     task_workers = workers[:cfg["vms_per_task"]]

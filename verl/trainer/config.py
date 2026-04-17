@@ -63,6 +63,8 @@ class AlgorithmConfig:
     kl_horizon: float = 0.0
     kl_target: float = 0.0
     enable_replay: bool = False
+    entropy_coef: float = 0.0
+    noise_entropy_coef: float = 0.0
 
     # Opt-in noise system (see docs/noise_generating/RESEARCH_FRAMING.md).
     # Inert when enable_noise=False — clean training/eval is byte-identical
@@ -142,6 +144,10 @@ class PPOConfig:
         self.worker.actor.use_kl_loss = self.algorithm.use_kl_loss
         self.worker.actor.kl_penalty = self.algorithm.kl_penalty
         self.worker.actor.kl_coef = self.algorithm.kl_coef
+        self.worker.actor.entropy_coef = self.algorithm.entropy_coef
+        self.worker.actor.noisy_entropy_coef = self.algorithm.noise_entropy_coef
+        self.worker.actor.entropy_coef = self.algorithm.entropy_coef
+        self.worker.actor.noisy_entropy_coef = self.algorithm.noise_entropy_coef
 
     def deep_post_init(self):
         recursive_post_init(self)

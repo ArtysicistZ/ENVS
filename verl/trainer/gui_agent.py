@@ -1404,6 +1404,7 @@ class RemoteEnvWorker:
             "obs_messages": self.history_messages if obs_wire else None,
             "is_done": self._is_done,
             "format_reward": resp.get("format_reward", 0.0),
+            "noise_burden": resp.get("noise_burden"),
         }
 
     def evaluate(self):

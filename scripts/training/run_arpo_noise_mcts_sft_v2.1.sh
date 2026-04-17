@@ -1,35 +1,28 @@
 #!/usr/bin/env bash
-# Full ARPO + v4 Noise training launcher.
+# ARPO + v4 Noise from MCTS SFT v2.1 checkpoint.
 #
 # Topology:
-#   - 86 trainable OSWorld tasks (test_86tasks_trainable.json)
-#   - 8x A100-80GB on this GPU node (10.100.4.8)
+#   - 86 trainable OSWorld tasks
+#   - 8x A100-80GB on this GPU node
 #   - 2 env_servers × 48 docker slots = 96 envs:
-#       10.100.4.6:15001  ← run start_noise_env_server.sh on that host first
-#       10.100.4.8:15001  ← run start_noise_env_server.sh here first
-#
-# v4 noise pipeline summary:
-#   - synchronized within-group noise via seed=(task_id, training_step) (CRN)
-#   - SR→count mapping: SR<0.10→0, SR<0.25→1, SR<0.50→1-3, SR≥0.50→3-5 fires
-#   - bucket-spaced random fire-step indices over the 15-step rollout
-#   - adaptive: live curriculum EMA SR feeds the SR bucket every step
-#   - hard tasks (SR<0.10) get zero noise to preserve training signal
+#       10.100.4.4:15001
+#       10.100.4.7:15001
 #
 # Usage:
-#   bash scripts/training/run_arpo_8gpu_noise_full.sh
-#
-# Pass-through args after CLI overrides for verl.trainer.main are accepted:
-#   bash scripts/training/run_arpo_8gpu_noise_full.sh trainer.total_episodes=5
+#   bash scripts/training/run_arpo_noise_mcts_sft_v2.1.sh
+#   bash scripts/training/run_arpo_noise_mcts_sft_v2.1.sh trainer.total_episodes=5
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}"
 
+CONFIG="configs/arpo_8gpu_noise_mcts_sft_v2.1.yaml"
+
 # ─── Pre-flight: both env_servers must be healthy ──────────────────────────
-echo "=== Pre-flight: env_server health on 10.100.4.6 + 10.100.4.8 ==="
+echo "=== Pre-flight: env_server health on 10.100.4.4 + 10.100.4.7 ==="
 ALL_OK=1
-for url in http://10.100.4.6:15001 http://10.100.4.8:15001; do
+for url in http://10.100.4.4:15001 http://10.100.4.7:15001; do
   if ! resp=$(curl -sf --max-time 5 "$url/health/containers" 2>/dev/null); then
     echo "  ✗ $url unreachable"
     ALL_OK=0
@@ -46,12 +39,11 @@ done
 if [[ $ALL_OK -ne 1 ]]; then
   echo ""
   echo "ERROR: one or both env_servers not ready."
-  echo "Start each with:"
-  echo "  bash $ROOT_DIR/scripts/servers/start_noise_env_server.sh"
+  echo "On each host run: OSWORLD_POOL_SIZE=48 python scripts/servers/remote_env_server.py"
   exit 1
 fi
 
-# ─── Pre-flight: GPU memory check (need ≥ 35 GB free per GPU) ───────────────
+# ─── Pre-flight: GPU memory check ─────────────────────────────────────────
 echo ""
 echo "=== Pre-flight: GPU memory ==="
 gpu_check=$(nvidia-smi --query-gpu=index,memory.free --format=csv,noheader,nounits 2>/dev/null \
@@ -59,18 +51,8 @@ gpu_check=$(nvidia-smi --query-gpu=index,memory.free --format=csv,noheader,nouni
 if [[ -n "$gpu_check" ]]; then
   echo "$gpu_check"
   echo "WARNING: some GPUs have <35 GB free. vllm may fail during memory profiling."
-  echo "If shared with other users, consider lower gpu_memory_utilization."
 fi
 nvidia-smi --query-gpu=index,memory.free --format=csv,noheader
-
-# ─── Pre-flight: MCTS SR file present (so curriculum can read priors) ──────
-SR_FILE="${ROOT_DIR}/checkpoints/mcts_trajectories_v2/combined_all/collection_results.json"
-if [[ ! -f "$SR_FILE" ]]; then
-  echo ""
-  echo "WARNING: MCTS SR file missing at $SR_FILE"
-  echo "Curriculum will start at noise_initial_tier=2 for all tasks."
-  echo "(For full training, this file should contain all 86 task SRs.)"
-fi
 
 # ─── Activate venv + Ray + env tuning ──────────────────────────────────────
 if [[ -f "${ROOT_DIR}/.venv/bin/activate" ]]; then
@@ -90,16 +72,18 @@ export MKL_THREADING_LAYER=GNU
 
 # ─── Launch ────────────────────────────────────────────────────────────────
 TS=$(date +%Y%m%d_%H%M%S)
-LOG="${ROOT_DIR}/checkpoints/arpo_86tasks_v4_noise_${TS}.log"
+LOG="${ROOT_DIR}/checkpoints/arpo_mcts_sft_v2.1_noise_${TS}.log"
 mkdir -p "$(dirname "$LOG")"
 
 echo ""
-echo "=== Launching ARPO + v4 noise (full 86 tasks) ==="
-echo "  config: configs/arpo_8gpu_noise_full.yaml"
+echo "=== Launching ARPO + v4 noise (MCTS SFT v2.1 base) ==="
+echo "  config: $CONFIG"
+echo "  model:  checkpoints/mcts_sft_v2.1/beta05_2e-6/epoch_1"
+echo "  envs:   10.100.4.4 + 10.100.4.7 (48+48)"
 echo "  log:    $LOG"
 echo ""
 
 python -m verl.trainer.main \
-    config=configs/arpo_8gpu_noise_full.yaml \
+    config="$CONFIG" \
     "$@" \
     2>&1 | tee "$LOG"

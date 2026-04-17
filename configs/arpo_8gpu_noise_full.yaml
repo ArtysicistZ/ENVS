@@ -63,8 +63,8 @@ algorithm:
 worker:
   actor:
     global_batch_size: 12
-    micro_batch_size_per_device_for_update: 1
-    micro_batch_size_per_device_for_experience: 1
+    micro_batch_size_per_device_for_update: 2
+    micro_batch_size_per_device_for_experience: 2
     max_grad_norm: 1.0
     padding_free: true
     ulysses_sequence_parallel_size: 1
@@ -130,10 +130,10 @@ trainer:
   logger: ["console", "wandb"]
   project_name: OSWorld-ARPO
   experiment_name: arpo_86tasks_v4_noise_8xa100
-  wandb_entity: hanszhu05
+  wandb_entity: artysicistz-university-of-pennsylvania
   n_gpus_per_node: 8
   nnodes: 1
   val_before_train: false
-  val_freq: -1
+  val_freq: 5
   save_freq: 5
   save_limit: -1

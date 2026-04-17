@@ -1296,6 +1296,29 @@ def _env_reset_locked(slot_id: int, body: ResetRequest):
     slot.noise_probability = float(task_config.get("noise_probability", 0.0))
     slot.history_messages = []
 
+    # ─── noise debug diagnostics ───
+    _nd_enabled = getattr(env, "noise_enabled", "MISSING")
+    _nd_scheduler = getattr(env, "noise_scheduler", "MISSING")
+    _nd_prob = getattr(env, "noise_probability_default", "MISSING")
+    _nd_tc_enable = task_config.get("enable_noise")
+    _nd_tc_mode = task_config.get("noise_mode")
+    _nd_tc_sr = task_config.get("noise_observed_sr")
+    print(
+        f"[slot {slot_id}] NOISE_DEBUG: env.noise_enabled={_nd_enabled}, "
+        f"scheduler={'YES' if _nd_scheduler is not None and _nd_scheduler != 'MISSING' else 'NO'}, "
+        f"env.noise_probability_default={_nd_prob}, "
+        f"tc.enable_noise={_nd_tc_enable}, tc.noise_mode={_nd_tc_mode}, "
+        f"tc.noise_observed_sr={_nd_tc_sr}",
+        flush=True,
+    )
+    if _nd_scheduler is not None and _nd_scheduler != "MISSING":
+        _nd_by_step = getattr(_nd_scheduler, "_by_step", {})
+        print(
+            f"[slot {slot_id}] NOISE_DEBUG: scheduler._by_step keys={sorted(_nd_by_step.keys())}, "
+            f"total_elements={sum(len(v) for v in _nd_by_step.values())}",
+            flush=True,
+        )
+
     _safe_env_pause(env)
     screenshot = obs.get("screenshot")
     if screenshot is None:
@@ -1639,6 +1662,8 @@ def _env_step_locked(slot_id: int, body: StepRequest):
 
     noise_events_after = list(getattr(env, "noise_events_fired", []) or [])
     new_noise_events = noise_events_after[len(noise_events_before):]
+    if new_noise_events:
+        print(f"[slot {slot_id}] NOISE_FIRED: step={slot.step_counter} events={new_noise_events}", flush=True)
     noise_burden = _summarize_noise_burden(new_noise_events, noise_events_after)
 
     if step_successful and not step_stall_penalized and not parse_failed and not _is_wait_action(actions):
@@ -1938,4 +1963,6 @@ def health_recover(body: SlotRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=15001)
+    host = os.environ.get("REMOTE_ENV_HOST", "0.0.0.0")
+    port = int(os.environ.get("REMOTE_ENV_PORT", "15001"))
+    uvicorn.run(app, host=host, port=port)

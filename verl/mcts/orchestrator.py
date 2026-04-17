@@ -34,6 +34,17 @@ from verl.mcts.clustering import (
 from verl.mcts.trajectory_io import make_mcts_trajectory
 from verl.trainer.gui_agent import add_box_token
 
+# Noise support (v3 noisy MCTS)
+try:
+    from OSWorld.evaluation_examples.noise_generation.runtime_sampler import (
+        RuntimeNoiseSampler,
+        fires_for_sr_mcts,
+        feasibility_constrained_fire_steps,
+    )
+    _NOISE_AVAILABLE = True
+except ImportError:
+    _NOISE_AVAILABLE = False
+
 
 SYSTEM_PROMPT = """You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
 
@@ -69,11 +80,80 @@ LIMIT_IMAGES = 3
 class MCTSOrchestrator:
     """Orchestrates MCTS trajectory collection for one task."""
 
-    def __init__(self, config: MCTSConfig, vllm_pool, processor, tokenizer):
+    def __init__(self, config: MCTSConfig, vllm_pool, processor, tokenizer,
+                 task_sr_map: Optional[Dict[str, float]] = None):
         self.config = config
         self.vllm_pool = vllm_pool
         self.processor = processor
         self.tokenizer = tokenizer
+        # Per-task clean SR from v2 collection (used for noise fire count)
+        self._task_sr_map: Dict[str, float] = task_sr_map or {}
+
+    # ----------------------------------------------------------------
+    # Noise helpers (v3 noisy MCTS)
+    # ----------------------------------------------------------------
+
+    def _noise_fire_count_for_task(self, task_id: str) -> int:
+        """Determine noise fire count based on task's clean SR."""
+        sr = self._task_sr_map.get(task_id, 0.0)
+        if not _NOISE_AVAILABLE or not self.config.enable_noise:
+            return 0
+        return fires_for_sr_mcts(sr)
+
+    def _should_branch_have_noise(self, rng) -> bool:
+        """Decide if a branch gets noise (vs. clean control)."""
+        return rng.random() < self.config.noise_branch_probability
+
+    def _build_noise_task_config(self, task_config: Dict, node: TreeNode) -> Dict:
+        """Build a task_config with per-branch noise settings for env reset.
+
+        If noise is disabled for this node, returns config with enable_noise=False.
+        Otherwise, sets a unique noise_step_seed so the env samples a unique schedule.
+        """
+        cfg = dict(task_config)
+        if not node.noise_enabled:
+            cfg["enable_noise"] = False
+            return cfg
+
+        task_id = task_config.get("id", "")
+        sr = self._task_sr_map.get(task_id, 0.0)
+        cfg["enable_noise"] = True
+        cfg["noise_mode"] = self.config.noise_mode
+        cfg["noise_step_seed"] = node.noise_seed
+        cfg["noise_success_rate"] = sr
+        cfg["noise_observed_sr"] = sr
+        cfg["noise_probability"] = 0.1  # vestigial for v4 scheduler
+        cfg["noise_max_steps"] = self.config.max_steps
+        return cfg
+
+    def _build_clean_task_config(self, task_config: Dict) -> Dict:
+        """Build a task_config with noise disabled (for replay)."""
+        cfg = dict(task_config)
+        cfg["enable_noise"] = False
+        return cfg
+
+    def _assign_noise_to_node(self, node: TreeNode, task_id: str,
+                               branch_idx: int = 0) -> None:
+        """Assign noise metadata to a node (seed, fire count, schedule)."""
+        import random as _rng_mod
+
+        if not self.config.enable_noise or not _NOISE_AVAILABLE:
+            node.noise_enabled = False
+            return
+
+        rng = _rng_mod.Random(hash((task_id, node.node_id, branch_idx)) & 0xFFFFFFFF)
+        if not self._should_branch_have_noise(rng):
+            node.noise_enabled = False
+            return
+
+        fire_count = self._noise_fire_count_for_task(task_id)
+        if fire_count <= 0:
+            node.noise_enabled = False
+            return
+
+        node.noise_enabled = True
+        node.noise_seed = hash((task_id, node.node_id, branch_idx)) & 0xFFFFFFFF
+        node.noise_fire_count = fire_count
 
     def run_task(
         self,
@@ -130,6 +210,11 @@ class MCTSOrchestrator:
                     instruction=instruction,
                     current_screenshot_b64=init_screenshot_b64,
                 )
+                task_id = task_config.get("id", "")
+                self._assign_noise_to_node(root, task_id, branch_idx=0)
+                if root.noise_enabled:
+                    logger.info("Root node %s: noise_seed=%d, fire_count=%d",
+                                root.node_id, root.noise_seed, root.noise_fire_count)
                 tree.add_root(root)
                 active_nodes.append(root)
                 alive = [root]
@@ -234,6 +319,9 @@ class MCTSOrchestrator:
                             branch_action=child_action,
                             just_spawned=True,
                         )
+                        task_id = task_config.get("id", "")
+                        self._assign_noise_to_node(child, task_id,
+                                                    branch_idx=node_counter[0])
                         tree.add_child(node, child)
                         active_nodes.append(child)
 
@@ -248,10 +336,13 @@ class MCTSOrchestrator:
                         child.current_screenshot_b64 = node.current_screenshot_b64
 
                         # Fire replay async — collect later
+                        # NOTE: replay uses noise-free config (noise starts after branch)
                         if parent_physical:
                             replay_timeout = max(60, len(parent_physical) * 5 + 30)
-                            logger.info("  Spawning %s: replay %d actions on VM %d (async)",
-                                        child.node_id, len(parent_physical), vm_idx)
+                            noise_tag = (f", noise_seed={child.noise_seed}"
+                                         if child.noise_enabled else ", clean")
+                            logger.info("  Spawning %s: replay %d actions on VM %d (async%s)",
+                                        child.node_id, len(parent_physical), vm_idx, noise_tag)
                             future = env_workers[vm_idx].replay.remote(
                                 parent_physical,
                                 replay_pause_sec=self.config.replay_pause_sec,
@@ -446,6 +537,20 @@ class MCTSOrchestrator:
                     screenshot_b64 = _extract_screenshot_from_wire(obs_messages)
                     if screenshot_b64:
                         node.current_screenshot_b64 = screenshot_b64
+                # Capture noise burden (v3 noisy MCTS)
+                noise_burden = result.get("noise_burden")
+                if noise_burden and node.noise_enabled:
+                    fired_this_step = noise_burden.get("events_fired_this_step", 0)
+                    if fired_this_step > 0:
+                        node.noise_events_fired.append({
+                            "step": node.current_step() - 1,
+                            "events": noise_burden.get("events", []),
+                            "step_recovery_cost": noise_burden.get("step_recovery_cost", 0),
+                        })
+                        node.noise_total_recovery_cost += noise_burden.get("step_recovery_cost", 0)
+                        logger.info("  %s: noise fired at step %d (cost=%d)",
+                                    node_id, node.current_step() - 1,
+                                    noise_burden.get("step_recovery_cost", 0))
             except Exception as e:
                 logger.error("Step failed for %s: %s", node_id, e)
                 node.done = True

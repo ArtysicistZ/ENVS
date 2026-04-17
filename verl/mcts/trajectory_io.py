@@ -60,9 +60,34 @@ def make_mcts_trajectory(
         "vm_idx": node.vm_slot_id,
         "node_id": node.node_id,
         "n_steps_executed": n_steps,
+
+        # Noise metadata (v3 noisy MCTS — empty for clean collection)
+        "noise_enabled": node.noise_enabled,
+        "noise_seed": node.noise_seed,
+        "noise_fire_count": node.noise_fire_count,
+        "noise_fire_steps": list(node.noise_fire_steps),
+        "noise_events_fired": list(node.noise_events_fired),
+        "noise_recovery_events": list(node.noise_recovery_events),
+        "noise_total_recovery_cost": node.noise_total_recovery_cost,
+        "trajectory_tag": _classify_trajectory(node),
     }
 
     return trajectory
+
+
+def _classify_trajectory(node: TreeNode) -> str:
+    """Classify trajectory for downstream training (SFT/KTO tag)."""
+    success = (node.eval_score or 0.0) > 0.5
+    has_noise = node.noise_enabled and node.noise_fire_count > 0
+    has_recovery = len(node.noise_recovery_events) > 0
+
+    if not has_noise:
+        return "clean_success" if success else "clean_failure"
+    if success and has_recovery:
+        return "recovery_success"
+    if success:
+        return "noisy_success"
+    return "noisy_failure"
 
 
 def _build_branch_path(node: TreeNode) -> str:

@@ -74,6 +74,15 @@ class TreeNode:
     # Metadata
     instruction: str = ""
 
+    # Noise (v3: per-branch random noise)
+    noise_seed: int = 0                     # unique RNG seed for this branch's noise schedule
+    noise_enabled: bool = False             # whether this branch has noise
+    noise_fire_count: int = 0               # scheduled number of fires
+    noise_fire_steps: List[int] = field(default_factory=list)  # step indices where noise fires
+    noise_events_fired: List[dict] = field(default_factory=list)  # actual fire records from env
+    noise_recovery_events: List[dict] = field(default_factory=list)  # detected recoveries
+    noise_total_recovery_cost: int = 0      # cumulative recovery cost of all fires
+
     def record_action(self, action_text: str, screenshot_b64: Optional[str] = None) -> None:
         """Record an executed action and its preceding screenshot.
 

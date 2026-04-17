@@ -134,6 +134,77 @@ def fires_for_sr(sr: float, rng: random.Random) -> int:
     return rng.randint(3, 5)
 
 
+def fires_for_sr_mcts(sr: float) -> int:
+    """MCTS collection fire count — adaptive to task difficulty.
+
+    Unlike ``fires_for_sr`` (used in ARPO training with CRN), this function
+    is deterministic (no rng) because each MCTS branch gets its own seed.
+
+    Buckets:
+      SR < 0.15  → 0 fires (very hard task: noise would only produce failures)
+      SR 0.15–0.60 → 1 fire (recoverable single disruption)
+      SR > 0.60  → 2 fires (easy task can handle sequential disruptions)
+    """
+    if sr < 0.15:
+        return 0
+    if sr <= 0.60:
+        return 1
+    return 2
+
+
+def feasibility_constrained_fire_steps(
+    count: int,
+    max_steps: int,
+    element_costs: List[int],
+    rng: random.Random,
+    min_fire_step: int = 3,
+    min_task_buffer: int = 4,
+) -> List[int]:
+    """Place ``count`` fire steps such that recovery is always feasible.
+
+    Each fire must leave enough remaining steps for recovery AND task work:
+      fire_step <= max_steps - recovery_cost - min_task_buffer
+
+    For 2 fires the windows are non-overlapping: fire 1 in the first half,
+    fire 2 in the second half (after fire 1's recovery window).
+
+    Returns sorted fire-step indices, possibly fewer than ``count`` if
+    feasibility cannot be satisfied for all elements.
+    """
+    if count <= 0 or max_steps <= 0 or not element_costs:
+        return []
+
+    steps: List[int] = []
+
+    if count == 1:
+        cost = element_costs[0]
+        hi = max_steps - cost - min_task_buffer
+        if hi < min_fire_step:
+            return []  # element too costly for this horizon
+        steps.append(rng.randint(min_fire_step, hi))
+
+    elif count >= 2:
+        # Fire 1: first half of the rollout
+        cost1 = element_costs[0]
+        mid = max_steps // 2
+        hi1 = min(mid, max_steps - cost1 - min_task_buffer)
+        if hi1 < min_fire_step:
+            return []  # first element infeasible
+        step1 = rng.randint(min_fire_step, hi1)
+        steps.append(step1)
+
+        # Fire 2: second half, after fire 1's recovery window
+        cost2 = element_costs[1] if len(element_costs) > 1 else element_costs[0]
+        lo2 = step1 + cost1 + 2  # +2 for perception + execution gap
+        hi2 = max_steps - cost2 - min_task_buffer
+        if lo2 > hi2:
+            # Second fire infeasible — return only the first
+            return steps
+        steps.append(rng.randint(lo2, hi2))
+
+    return sorted(steps)
+
+
 def bucket_spaced_fire_steps(count: int, max_steps: int, rng: random.Random) -> List[int]:
     """Pick `count` fire-step indices in `[0, max_steps)` with bucket-based
     spacing to prevent harmful clumping (e.g. 5 fires all in steps 0-4).

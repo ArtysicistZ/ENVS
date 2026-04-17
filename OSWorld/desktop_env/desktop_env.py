@@ -310,6 +310,14 @@ class DesktopEnv(gym.Env):
                 # keep because get_info_from_website depend on this
                 self.current_use_proxy = task_use_proxy
 
+            # Set task metadata (self.task_id, self.instruction, self.config,
+            # self.evaluator, …) BEFORE any operation that can fail (revert,
+            # emulator restart, setup). This guarantees that if reset raises
+            # mid-way, a subsequent env.evaluate() won't crash with
+            # `AttributeError: 'DesktopEnv' object has no attribute 'evaluator'`;
+            # evaluate() will just see this task's evaluator and return 0.
+            self._set_task_info(task_config)
+
         if self.is_environment_used:
             logger.info("Environment has been used, reverting to snapshot {}...".format(self.snapshot_name))
             self._revert_to_snapshot()
@@ -326,7 +334,6 @@ class DesktopEnv(gym.Env):
             if task_config.get("proxy", False) and self.enable_proxy:
                 # If using proxy and proxy is enabled, set up the proxy configuration
                 self.setup_controller._proxy_setup(self.client_password)
-            self._set_task_info(task_config)
             self.setup_controller.reset_cache_dir(self.cache_dir)
             logger.info("Setting up environment...")
             success = self.setup_controller.setup(self.config, task_config.get("proxy", False) and self.enable_proxy)
