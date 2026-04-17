@@ -1,0 +1,116 @@
+{
+  "id": "3aaa4e37-dc91-482e-99af-132a612d40f3",
+  "snapshot": "libreoffice_calc",
+  "instruction": "Could you help me to export the current sheet to a csv file? Export the contents just as they are shown on the screen. Just keep the other options untouched. A default csv format is ok. The csv should share the file name with the original xlsx.",
+  "source": "https://www.quora.com/How-can-you-import-export-CSV-files-with-LibreOffice-Calc-or-OpenOffice",
+  "config": [
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_calc/3aaa4e37-dc91-482e-99af-132a612d40f3/Export_Calc_to_CSV.xlsx",
+            "path": "/home/user/Export_Calc_to_CSV.xlsx"
+          }
+        ]
+      }
+    },
+    {
+      "type": "open",
+      "parameters": {
+        "path": "/home/user/Export_Calc_to_CSV.xlsx"
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 90 + 20)) && notify-send 'Slack' 'New message from Alex: can you check the Q3 data?' && sleep $((RANDOM % 14 + 8)) && notify-send 'Calendar' 'Weekly data review in 10 minutes') >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 25 + 5)) && gedit 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(while true; do sleep $((RANDOM % 80 + 30)); touch /home/user/Downloads/report_$RANDOM.tmp; done) >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 30 + 12)) && wmctrl -a 'LibreOffice Calc' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui, time; pyautogui.hotkey('alt', 'v'); time.sleep(0.35); pyautogui.press('b')\" 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 25 + 15)) && wmctrl -r 'LibreOffice Calc' -e 0,80,60,1440,900 2>/dev/null) &"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/3aaa4e37-dc91-482e-99af-132a612d40f3",
+  "related_apps": [
+    "libreoffice_calc"
+  ],
+  "evaluator": {
+    "func": "compare_csv",
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/Export_Calc_to_CSV.csv",
+      "dest": "Export_Calc_to_CSV.csv"
+    },
+    "expected": {
+      "type": "cloud_file",
+      "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_calc/3aaa4e37-dc91-482e-99af-132a612d40f3/Export_Calc_to_CSV.csv",
+      "dest": "Export_Calc_to_CSV_gold.csv"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.1607,
+    "categories_applied": [
+      "random_notifications",
+      "background_apps",
+      "filesystem_clutter",
+      "view_mode_change",
+      "window_geometry"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ]
+  }
+}

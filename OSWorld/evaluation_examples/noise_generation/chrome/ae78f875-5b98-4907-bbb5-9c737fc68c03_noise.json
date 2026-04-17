@@ -1,0 +1,56 @@
+{
+  "id": "ae78f875-5b98-4907-bbb5-9c737fc68c03",
+  "snapshot": "chrome",
+  "instruction": "Could you please change the number of search results displayed on one page to 50? I find that having more results visible at once significantly enhances my research efficiency, as it reduces the need to constantly click through multiple pages. ",
+  "source": "https://support.google.com/chrome/thread/219988391/increase-search-results-per-page?hl=en",
+  "config": [],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "chrome"
+  ],
+  "evaluator": {
+    "func": "infeasible"
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "rubric_version": 2,
+    "trigger_mode": "action_triggered_probabilistic",
+    "tier": "very_hard",
+    "success_rate_used": 0.003,
+    "total_recovery_cost": 0,
+    "elements": [
+      {
+        "id": "n0",
+        "category": "passive_notification",
+        "severity": "low",
+        "recovery_cost": 0,
+        "recovery_actions": [],
+        "touches_target_app": false,
+        "once": false,
+        "description": "Single passive notification, randomized content.",
+        "command": [
+          "bash",
+          "-c",
+          "A=(Slack Email WhatsApp Calendar Teams Discord SMS Signal LinkedIn Twitter Reddit News System Weather Spotify YouTube Reminders Zoom Mail Drive); P=(Alex Maya Tom Priya Kenji Sarah Diego Yuki Ahmed Elena Jordan Sam Riley Chen Lee Park Kim Garcia Brown Wilson); S=(\"Can we chat briefly?\" \"Review this PR when you can\" \"Meeting moved to 3pm\" \"Urgent: please check\" \"Happy birthday!\" \"New message incoming\" \"Reminder: deadline tomorrow\" \"Security alert verified\" \"New version 22.1 available\" \"Ping me when free\" \"Daily digest ready\" \"Weekly summary attached\" \"Standup starts soon\" \"Coffee at 2?\" \"Quick favor please\" \"Update ready to install\"); a=${A[$((RANDOM % ${#A[@]}))]}; p=${P[$((RANDOM % ${#P[@]}))]}; s=${S[$((RANDOM % ${#S[@]}))]}; zenity --notification --window-icon=info --text \"$a — $p: $s\" 2>/dev/null &"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "passive_notification",
+        "severity": "low",
+        "recovery_cost": 0,
+        "recovery_actions": [],
+        "touches_target_app": false,
+        "once": false,
+        "description": "Single system toast.",
+        "command": [
+          "bash",
+          "-c",
+          "T=(\"Security updates are ready to install\" \"Wi-Fi reconnected to office network\" \"VPN status: connected\" \"Disk usage at 78%% of capacity\" \"Battery at 15%% — consider plugging in\" \"Bluetooth device paired\" \"Screen brightness auto-adjusted\" \"New external display detected\" \"System backup completed\" \"Time zone updated\" \"Keyboard layout switched\" \"Printer added successfully\" \"Software updater finished\" \"Location service enabled\" \"Firewall rule updated\"); m=${T[$((RANDOM % ${#T[@]}))]}; zenity --notification --window-icon=info --text \"System — $m\" 2>/dev/null &"
+        ]
+      }
+    ]
+  }
+}

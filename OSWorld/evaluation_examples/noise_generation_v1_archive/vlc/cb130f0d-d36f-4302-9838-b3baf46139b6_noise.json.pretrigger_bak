@@ -1,0 +1,72 @@
+{
+  "id": "cb130f0d-d36f-4302-9838-b3baf46139b6",
+  "snapshot": "base_setup",
+  "instruction": "Automatically adjust the brightness and contrast of this video to match my room's lighting.",
+  "source": "https://www.vlchelp.com/increase-brightness-contrast-videos/",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": "VLC_VERBOSE=-1 vlc --no-audio --no-video-title-show",
+        "shell": true
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 60 + 15)) && notify-send 'Email' 'FWD: Q2 budget review spreadsheet attached' && sleep $((RANDOM % 12 + 4)) && notify-send 'Calendar' 'Team sync starting in 10 minutes') >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 20 + 5)) && gedit 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 25 + 10)) && wmctrl -r 'VLC' -e 0,80,60,1200,750 2>/dev/null) &"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "vlc"
+  ],
+  "evaluator": {
+    "func": "infeasible"
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "hard",
+    "success_rate_used": 0.0595,
+    "categories_applied": [
+      "random_notifications",
+      "background_apps",
+      "window_geometry"
+    ],
+    "noise_element_count": 3,
+    "added_step_indices": [
+      1,
+      2,
+      3
+    ]
+  }
+}

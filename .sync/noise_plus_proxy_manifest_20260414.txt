@@ -1,0 +1,22 @@
+# Noise library (151 templates + runtime)
+OSWorld/evaluation_examples/noise_generation/
+OSWorld/evaluation_examples/noise_overrides.json
+
+# Noise curriculum code + docs
+OSWorld/desktop_env/noise_scheduler.py
+OSWorld/desktop_env/desktop_env.py
+verl/trainer/ray_trainer.py
+verl/trainer/gui_agent.py
+verl/trainer/config.py
+verl/workers/noise_curriculum.py
+docs/noise_generating/
+configs/base_eval_n1_t0_noise_fixed.yaml
+configs/arpo_smoke_8gpu_noise_fixed.yaml
+
+# Proxy setup (contains credentials; handle carefully)
+OSWorld/evaluation_examples/settings/proxy/
+OSWorld/desktop_env/controllers/setup.py
+OSWorld/desktop_env/providers/aws/proxy_pool.py
+OSWorld/desktop_env/providers/aws/manager.py
+OSWorld/SETUP_GUIDELINE.md
+OSWorld/README.md

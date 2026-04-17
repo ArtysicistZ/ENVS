@@ -1,52 +1,56 @@
-import numpy as np
-import math
-import json
 import random
 from collections import defaultdict
 
-from ..protocol import DataProto, pad_dataproto_to_divisor, unpad_dataproto, collate_fn
+from ..protocol import DataProto, collate_fn
+
 
 class ReplayBuffer():
 
     def __init__(self, json_path, buffer_size):
         self.buffer_size = buffer_size
+        self.pos_dataset = defaultdict(lambda: defaultdict(list))
 
-        self.pos_dataset = defaultdict(list)
-
-        # if json_path is not None:
-        #     with open(json_path, 'r') as f:
-        #         replay_data = json.load(f)
-        
-        #     for data in replay_data:
-        #         # task_id, history_images, history_messages, eval_result
-        #         task_id = data['task_id']
-        #         eval_result = data['eval_result']
-        #         if eval_result > 0.1:
-        #             self.pos_dataset[task_id].append(data)
-            
-    
-    def update_replay_buffer(self, task_config, batch_item, eval_result):
+    def update_replay_buffer(self, task_config, batch_item, eval_result, replay_tag="clean_success"):
         task_id = task_config["task_id"]
-        if eval_result > 0.1:
-            task_replay_buffer = self.pos_dataset[task_id]
-        else:
-            return 
+        if eval_result <= 0.1:
+            return
 
+        task_replay_buffer = self.pos_dataset[task_id][replay_tag]
         task_replay_buffer.append(batch_item)
 
         if len(task_replay_buffer) > self.buffer_size:
             task_replay_buffer.pop(0)
 
-    def update_replay_buffer_batch(self, task_configs, batch):
-        eval_results = batch.batch['eval_results'].tolist()
+    def update_replay_buffer_batch(self, task_configs, batch, replay_tags=None):
+        eval_results = batch.batch["eval_results"].tolist()
+        if replay_tags is None:
+            replay_tags = ["clean_success"] * len(eval_results)
 
-        for task_config, batch_item, eval_result in zip(task_configs, batch, eval_results):
-            self.update_replay_buffer(task_config, batch_item, eval_result)
+        for task_config, batch_item, eval_result, replay_tag in zip(task_configs, batch, eval_results, replay_tags):
+            self.update_replay_buffer(task_config, batch_item, eval_result, replay_tag=replay_tag)
 
-    def get_pos(self, task_id, num_samples=1):
-        if task_id not in self.pos_dataset:
+    def _get_candidates(self, task_id, preferred_tags=None):
+        task_buffers = self.pos_dataset.get(task_id)
+        if not task_buffers:
+            return [], None
+
+        if preferred_tags:
+            for tag in preferred_tags:
+                if task_buffers.get(tag):
+                    return task_buffers[tag], tag
+
+        merged = []
+        for tag, items in task_buffers.items():
+            merged.extend(items)
+        return merged, None
+
+    def get_pos(self, task_id, num_samples=1, preferred_tags=None):
+        datalist, selected_tag = self._get_candidates(task_id, preferred_tags=preferred_tags)
+        if not datalist:
             return DataProto()
-        else:
-            datalist = random.choices(self.pos_dataset[task_id], k=num_samples)
-            return collate_fn(datalist)
-    
+
+        chosen = random.choices(datalist, k=num_samples)
+        batch = collate_fn(chosen)
+        if selected_tag is not None:
+            batch.meta_info["replay_source_tag"] = selected_tag
+        return batch

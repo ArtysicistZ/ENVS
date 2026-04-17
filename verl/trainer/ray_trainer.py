@@ -368,6 +368,213 @@ class RayPPOTrainer:
         self._create_dataloader()
         self._create_envs()
         self._load_replay_data()
+        self._init_noise_state()
+
+    def _init_noise_state(self):
+        """Initialize opt-in noise curriculum (see docs/noise_generating/RESEARCH_FRAMING.md).
+
+        Safe to call even when enable_noise=False — sets self.noise_curriculum=None
+        and self._noise_sr_by_task={} so downstream code can check a single flag.
+        """
+        self.noise_curriculum = None
+        self._noise_sr_by_task: Dict[str, float] = {}
+        algo = self.config.algorithm
+        if not getattr(algo, "enable_noise", False):
+            return
+
+        # Lazy import so non-noise runs never load the curriculum module.
+        from verl.workers.noise_curriculum import NoiseCurriculum
+
+        self.noise_curriculum = NoiseCurriculum(
+            target_success_rate=algo.noise_target_sr,
+            lr=algo.noise_lr,
+            p_min=algo.noise_probability_min,
+            p_max=algo.noise_probability_max,
+            tau_up=algo.noise_tau_up,
+            tau_down=algo.noise_tau_down,
+            k_up=algo.noise_k_up,
+            ema_alpha=algo.noise_ema_alpha,
+            recovery_ema_alpha=algo.noise_recovery_ema_alpha,
+            initial_tier=algo.noise_initial_tier,
+            initial_p=algo.noise_probability,
+            tier_min=algo.noise_tier_min,
+            tier_max=algo.noise_tier_max,
+        )
+
+        # Load per-task clean/MCTS success rates if available. We deliberately
+        # do NOT seed tiers here from success rate alone; the actual initial
+        # tier is computed later in `_annotate_task_configs_with_noise()` from a
+        # broader static prior (success rate + horizon/domain/UI fragility).
+        mcts_path = os.path.join(
+            os.getcwd(), "checkpoints", "mcts_trajectories_v2",
+            "combined_all", "collection_results.json",
+        )
+        if os.path.exists(mcts_path):
+            try:
+                import json as _json
+                with open(mcts_path, "r", encoding="utf-8") as _f:
+                    _data = _json.load(_f)
+                _results = _data.get("results") if isinstance(_data, dict) else None
+                if isinstance(_results, list):
+                    n_loaded = 0
+                    for entry in _results:
+                        tid = entry.get("task_id")
+                        sr = float(entry.get("success_rate", 0.0))
+                        if not tid:
+                            continue
+                        self._noise_sr_by_task[tid] = sr
+                        n_loaded += 1
+                    print(f"[noise] Loaded success-rate priors for {n_loaded} tasks from MCTS SR file")
+            except Exception as _e:
+                print(f"[noise] Failed to seed from MCTS SR file: {_e}")
+        else:
+            print(f"[noise] MCTS SR file not found ({mcts_path}); curriculum starts at initial_tier={algo.noise_initial_tier} for all tasks")
+
+    def _annotate_task_configs_with_noise(self, task_configs: List[dict], is_val: bool = False) -> None:
+        """Decorate each task_config dict in-place with noise_* fields that
+        `desktop_env._build_noise_meta()` will read. No-op when noise is
+        disabled. Tasks that appear multiple times (e.g. rollout.n copies) are
+        annotated consistently from the single curriculum state.
+
+        Also stamps `noise_step_seed = self.global_step` so all `n` rollouts of
+        the same `(task_id, training_step)` see an identical noise sample
+        (Common Random Numbers / PAIRED-style fixed-env-instance baseline).
+        Different training steps draw different schedules — diversity preserved
+        across the curriculum, locked within each GRPO group.
+        """
+        if self.noise_curriculum is None:
+            return
+        if is_val:
+            # Run validation with zero noise to get clean success-rate signal.
+            return
+        from OSWorld.evaluation_examples.noise_generation.difficulty import compute_static_noise_seed
+        algo = self.config.algorithm
+        for tc in task_configs:
+            if not isinstance(tc, dict):
+                continue
+            tid = tc.get("id") or tc.get("task_id")
+            if not tid:
+                continue
+            success_rate = float(self._noise_sr_by_task.get(tid, 0.0))
+            # When MCTS SR is missing for this task, fall back to the configured
+            # `noise_initial_tier` as the explicit tier — otherwise the seed
+            # collapses to `tier=very_hard=0` (cost cap 0 → sampler returns []
+            # → `_build_noise_meta` returns None → noise NEVER FIRES).
+            explicit_tier = tc.get("noise_tier_override")
+            if explicit_tier is None and tid not in self._noise_sr_by_task:
+                explicit_tier = int(algo.noise_initial_tier)
+            static_seed = compute_static_noise_seed(
+                success_rate=success_rate,
+                task_json=tc,
+                explicit_tier=explicit_tier,
+            )
+            static_seed_tier = int(static_seed["tier"])
+            static_seed_p = max(
+                float(algo.noise_probability_min),
+                min(
+                    float(algo.noise_probability_max),
+                    float(algo.noise_probability) * (0.50 + 0.50 * (static_seed_tier / max(1, int(algo.noise_tier_max)))),
+                ),
+            )
+            if algo.noise_use_curriculum:
+                if not self.noise_curriculum.has_task(tid):
+                    # Seed curriculum state with all three priors at once so
+                    # `get_sr` returns the MCTS SR (not 0.0) before any
+                    # rollouts have been observed.
+                    self.noise_curriculum.seed_tier(
+                        tid, static_seed_tier, static_seed_p,
+                        initial_sr=success_rate,
+                    )
+                p = float(self.noise_curriculum.get_p(tid))
+                tier = int(self.noise_curriculum.get_tier(tid))
+                # v4: live EMA SR drives the per-rollout noise budget.
+                observed_sr = float(self.noise_curriculum.get_sr(tid))
+            else:
+                p = static_seed_p
+                tier = static_seed_tier
+                observed_sr = success_rate
+            tc["enable_noise"] = True
+            tc["noise_mode"] = algo.noise_mode if algo.noise_mode != "none" else "runtime_library"
+            tc["noise_probability"] = p   # v4: vestigial; scheduler ignores it
+            tc["noise_tier"] = tier       # v4: tier still bounds eligible pool
+            tc["noise_success_rate"] = success_rate
+            tc["noise_observed_sr"] = observed_sr  # v4: live EMA SR → fires count
+            tc["noise_use_heldout"] = bool(algo.noise_use_heldout or is_val)
+            # CRN seed: same (task_id, training_step) across all n rollouts of
+            # this group → identical noise sample → clean GRPO advantage.
+            # Reads `self.global_step` (incremented in fit() before this call).
+            tc["noise_step_seed"] = int(getattr(self, "global_step", 0))
+            tc["noise_static_seed_tier"] = static_seed_tier
+            tc["noise_static_seed_probability"] = static_seed_p
+            tc["noise_horizon_proxy"] = float(static_seed.get("horizon_proxy", 0.0))
+            tc["noise_domain_fragility"] = float(static_seed.get("domain_fragility", 0.0))
+            tc["noise_ui_fragility"] = float(static_seed.get("ui_fragility", 0.0))
+            tc["noise_fragility_penalty"] = float(static_seed.get("fragility_penalty", 0.0))
+
+    def _update_noise_curriculum(self, task_configs: List[dict], eval_results: List[float], process_results: Optional[List[dict]] = None) -> None:
+        """Update per-task curriculum state from this step's observed success.
+        Aggregates duplicate task_ids (rollout.n copies) before updating."""
+        if self.noise_curriculum is None:
+            return
+        from collections import defaultdict as _dd
+        bucket: Dict[str, List[float]] = _dd(list)
+        burden_bucket: Dict[str, List[float]] = _dd(list)
+        process_results = process_results or [None] * len(task_configs)
+        for tc, er, pr in zip(task_configs, eval_results, process_results):
+            if tc is None:
+                continue
+            tid = tc.get("id") or tc.get("task_id")
+            if not tid:
+                continue
+            bucket[tid].append(float(er) if er is not None else 0.0)
+            step_meta_list = []
+            if isinstance(pr, dict):
+                step_meta_list = pr.get("rollout_step_metadata") or []
+            total_recovery = 0.0
+            total_interruptions = 0.0
+            total_occlusion = 0.0
+            total_focus_loss = 0.0
+            for sm in step_meta_list:
+                if not isinstance(sm, dict):
+                    continue
+                nb = sm.get("noise_burden")
+                if not isinstance(nb, dict):
+                    continue
+                total_recovery += float(nb.get("step_recovery_cost", 0.0))
+                total_interruptions += float(nb.get("events_fired_this_step", 0.0))
+                total_occlusion += float(nb.get("occlusion_events", 0.0))
+                total_focus_loss += float(nb.get("focus_loss_events", 0.0))
+            realized_burden = (
+                0.50 * total_recovery
+                + 0.20 * total_interruptions
+                + 0.20 * total_occlusion
+                + 0.10 * total_focus_loss
+            )
+            burden_bucket[tid].append(realized_burden)
+        for tid, vals in bucket.items():
+            if not vals:
+                continue
+            sr = sum(1 for v in vals if v > 0.5) / len(vals)
+            burden_vals = burden_bucket.get(tid, [])
+            mean_burden = sum(burden_vals) / len(burden_vals) if burden_vals else 0.0
+            self.noise_curriculum.update(tid, sr, mean_burden)
+
+    def _collect_noise_metrics(self) -> Dict[str, float]:
+        if self.noise_curriculum is None:
+            return {}
+        snapshot = self.noise_curriculum.snapshot()
+        if not snapshot:
+            return {}
+        ps = [float(v.get("p_noise", 0.0)) for v in snapshot.values()]
+        tiers = [float(v.get("tier", 0.0)) for v in snapshot.values()]
+        sr_emas = [float(v.get("sr_ema", 0.0)) for v in snapshot.values()]
+        recovery_emas = [float(v.get("recovery_ema", 0.0)) for v in snapshot.values()]
+        return {
+            "noise/p_mean": sum(ps) / len(ps),
+            "noise/tier_mean": sum(tiers) / len(tiers),
+            "noise/sr_ema_mean": sum(sr_emas) / len(sr_emas),
+            "noise/recovery_ema_mean": sum(recovery_emas) / len(recovery_emas),
+        }
     
     def _load_replay_data(self):
         self.replay = ReplayBuffer(None, 8)
@@ -599,7 +806,11 @@ class RayPPOTrainer:
                     print(f"Step {step_idx} of {self.config.env.max_steps}: {is_done_results}")
                     world_size = self.actor_rollout_wg.world_size
 
-                    vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(env_outputs)
+                    vllm_batch, valid_env_idx, overlong_env_idx = self.prepare_vllm_inputs_full(env_outputs)
+
+                    # Mark overlong-prompt envs as done so they don't break generation
+                    for eidx in overlong_env_idx:
+                        env_outputs = [x for x in env_outputs if x['env_idx'] != eidx]
 
                     if vllm_batch is None:
                         # No envs produced valid observations (e.g. all failed to start).
@@ -655,10 +866,6 @@ class RayPPOTrainer:
                                            fallback_fn=lambda idx: 0.0)
             eval_results_total.extend(eval_results)
 
-            history_futures = [worker.get_history_messages.remote() for worker in self.env_workers[:num_tasks]]
-            history_messages = _ray_get_robust(history_futures, timeout=60, label="val_history",
-                                               fallback_fn=lambda idx: [])
-
             # --- Trajectory saving (if enabled) — only successful episodes ---
             if getattr(self.config.trainer, 'save_trajectories', False):
                 from verl.utils.trajectory_io import TrajectoryWriter
@@ -690,19 +897,33 @@ class RayPPOTrainer:
             scores = eval_results
             reward_tensor = torch.tensor(scores, dtype=torch.float32).unsqueeze(-1)
 
-            sample_inputs.extend([task_config.get('instruction', '') for task_config in task_configs])
-            prompts = []
-            for history_message in history_messages:
-                if not history_message or (isinstance(history_message, list) and len(history_message) == 0):
-                    prompts.append("")  # Remote env timeout/failure or no steps
-                else:
-                    try:
-                        prompts.append(self.processor.apply_chat_template(history_message))
-                    except (IndexError, KeyError, TypeError):
-                        prompts.append("")  # Malformed history (e.g. after timeout)
-            sample_outputs.extend(prompts)
-            sample_labels.extend(['none']*len(prompts))
-            sample_scores.extend(scores)
+            # Only fetch history messages (which contain huge base64 screenshots) if we
+            # actually need them for logging. Skip to avoid accumulating GBs of RAM in
+            # the Runner process, which causes OOM on large evals (300+ tasks × n=8).
+            _n_to_log = getattr(self.config.trainer, 'val_generations_to_log', 0)
+            if _n_to_log > 0 and len(sample_inputs) < _n_to_log:
+                history_futures = [worker.get_history_messages.remote() for worker in self.env_workers[:num_tasks]]
+                history_messages = _ray_get_robust(history_futures, timeout=60, label="val_history",
+                                                   fallback_fn=lambda idx: [])
+                sample_inputs.extend([task_config.get('instruction', '') for task_config in task_configs])
+                prompts = []
+                for history_message in history_messages:
+                    if not history_message or (isinstance(history_message, list) and len(history_message) == 0):
+                        prompts.append("")
+                    else:
+                        try:
+                            prompts.append(self.processor.apply_chat_template(history_message))
+                        except (IndexError, KeyError, TypeError):
+                            prompts.append("")
+                sample_outputs.extend(prompts)
+                sample_labels.extend(['none']*len(prompts))
+                sample_scores.extend(scores)
+                del history_messages, prompts
+            else:
+                sample_inputs.extend([task_config.get('instruction', '') for task_config in task_configs])
+                sample_outputs.extend([''] * num_tasks)
+                sample_labels.extend(['none'] * num_tasks)
+                sample_scores.extend(scores)
 
             reward_tensor_lst.append(reward_tensor)
 
@@ -768,6 +989,13 @@ class RayPPOTrainer:
 
         self._maybe_log_val_generations(sample_inputs, sample_outputs, sample_labels, sample_scores)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
+
+        # Free accumulated validation data to prevent OOM in Runner process.
+        # With 300+ tasks × n=8, these lists can hold GBs of data.
+        del sample_inputs, sample_outputs, sample_labels, sample_scores
+        del reward_tensor_lst, task_configs_total, eval_results_total
+        import gc; gc.collect()
+
         return {"val/reward_score": reward_score}
 
     def init_workers(self) -> None:
@@ -912,6 +1140,15 @@ class RayPPOTrainer:
             process_result["rollout_step_metadata"] = copy.deepcopy(step_metadata)
         return process_results
 
+    @staticmethod
+    def _attach_env_noise_metadata(step_metadata_by_job: List[List[dict]], slot: int, result: dict) -> None:
+        noise_burden = result.get("noise_burden")
+        if noise_burden is None:
+            return
+        if not step_metadata_by_job[slot]:
+            step_metadata_by_job[slot].append({})
+        step_metadata_by_job[slot][-1]["noise_burden"] = copy.deepcopy(noise_burden)
+
     def _task_family_decoding_overrides(self, task_config: Optional[dict], is_val: bool = False) -> Dict[str, Any]:
         """Minimal task-family-conditioned decoding presets (safe for smoke runs)."""
         if not task_config:
@@ -1016,11 +1253,11 @@ class RayPPOTrainer:
         obs_messages = [x['obs_messages'] for x in env_outputs]
         env_idx = [x['env_idx'] for x in env_outputs]
 
-        valid_obs_messages = [x['obs_messages'] for x in env_outputs if x['obs_messages'] is not None]
-        valid_env_idx = [x['env_idx'] for x in env_outputs if x['obs_messages'] is not None]
+        valid_obs_messages = [x['obs_messages'] for x in env_outputs if x['obs_messages'] is not None and not x.get('is_done', False)]
+        valid_env_idx = [x['env_idx'] for x in env_outputs if x['obs_messages'] is not None and not x.get('is_done', False)]
 
         if not valid_obs_messages:
-            return None, []
+            return None, [], []
 
         dataset = OSWorldDataset(
             valid_obs_messages,
@@ -1044,10 +1281,31 @@ class RayPPOTrainer:
 
         # batch_dict = ray.get([get_dataset_item.remote(i) for i in range(len(dataset))])
 
+        # Filter out items whose prompt exceeds max_prompt_length
+        max_len = self.config.data.max_prompt_length
+        keep_indices = []
+        overlong_env_idx = []
+        for i, item in enumerate(batch_dict):
+            prompt_len = len(item["raw_prompt_ids"])
+            if prompt_len > max_len:
+                print(
+                    f"[prepare_vllm] Skipping env {valid_env_idx[i]}: "
+                    f"prompt length {prompt_len} > max {max_len}, marking as failed"
+                )
+                overlong_env_idx.append(valid_env_idx[i])
+            else:
+                keep_indices.append(i)
+
+        if not keep_indices:
+            return None, [], overlong_env_idx
+
+        batch_dict = [batch_dict[i] for i in keep_indices]
+        valid_env_idx = [valid_env_idx[i] for i in keep_indices]
+
         batch_dict = collate_fn_dataproto(batch_dict)
         batch = DataProto.from_single_dict(batch_dict)
-        
-        return batch, valid_env_idx
+
+        return batch, valid_env_idx, overlong_env_idx
 
 
     def prepare_grpo_inputs(self, messages, eval_results, task_configs):
@@ -1100,6 +1358,9 @@ class RayPPOTrainer:
 
     def _build_rollout_chunks(self, batch_dict: List[dict]) -> List[List[dict]]:
         rollout_jobs = build_rollout_jobs(batch_dict, self.config.worker.rollout.n)
+        # Opt-in: annotate per-task noise fields from current curriculum state
+        # so workers (local or remote via HTTP) read a self-contained task_config.
+        self._annotate_task_configs_with_noise(rollout_jobs, is_val=False)
         return chunk_rollout_jobs(rollout_jobs, len(self.env_workers))
 
     def _launch_prefetch_resets(self, batch_dict: List[dict]):
@@ -1234,7 +1495,15 @@ class RayPPOTrainer:
                     self._last_remote_fail_log = time.time()
 
             with _timer("prepare_vllm_inputs", local_timing):
-                vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(env_outputs)
+                vllm_batch, valid_env_idx, overlong_env_idx = self.prepare_vllm_inputs_full(env_outputs)
+
+            # Mark overlong-prompt slots as done with score 0
+            for eidx in overlong_env_idx:
+                slot = slot_by_env_idx.get(eidx)
+                if slot is not None and slot not in done_slots:
+                    format_rewards[slot] = 0.0
+                    done_slots.add(slot)
+                    eval_results_objects[slot] = active_workers[slot].evaluate.remote()
 
             if vllm_batch is None or not isinstance(vllm_batch, DataProto):
                 # All reset outputs failed — no valid obs to generate from
@@ -1342,6 +1611,7 @@ class RayPPOTrainer:
                             "format_reward": 0.0,
                         }
 
+                    self._attach_env_noise_metadata(rollout_step_metadata_by_job, slot, result)
                     format_rewards[slot] += float(result.get("format_reward", 0.0))
                     if result["is_done"] or result.get("obs_messages") is None:
                         done_slots.add(slot)
@@ -1386,7 +1656,16 @@ class RayPPOTrainer:
                     )
 
                     with _timer("prepare_vllm_inputs", local_timing):
-                        vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(all_ready_obs)
+                        vllm_batch, valid_env_idx, overlong_env_idx = self.prepare_vllm_inputs_full(all_ready_obs)
+
+                    # Mark overlong-prompt slots as done with score 0
+                    for eidx in overlong_env_idx:
+                        slot = slot_by_env_idx.get(eidx)
+                        if slot is not None and slot not in done_slots:
+                            format_rewards[slot] = 0.0
+                            done_slots.add(slot)
+                            if eval_results_objects[slot] is None:
+                                eval_results_objects[slot] = active_workers[slot].evaluate.remote()
 
                     if vllm_batch is not None and isinstance(vllm_batch, DataProto):
                         had_successful_generate = True
@@ -1543,6 +1822,54 @@ class RayPPOTrainer:
                 pos_batch.batch[key] = torch.cat([pad_t, tensor], dim=-1)
         return pos_batch
 
+    @staticmethod
+    def _summarize_noise_burden(step_metadata):
+        summary = {
+            "interruptions": 0.0,
+            "recovery_cost": 0.0,
+            "occlusion": 0.0,
+            "focus_loss": 0.0,
+        }
+        if not step_metadata:
+            return summary
+
+        for step in step_metadata:
+            burden = (step or {}).get("noise_burden") or {}
+            summary["interruptions"] += float(burden.get("interruptions", 0.0) or 0.0)
+            summary["recovery_cost"] += float(burden.get("total_recovery", 0.0) or 0.0)
+            summary["occlusion"] += float(burden.get("occlusion", 0.0) or 0.0)
+            summary["focus_loss"] += float(burden.get("focus_loss", 0.0) or 0.0)
+        return summary
+
+    def _build_replay_tags(self, task_configs, batch):
+        eval_results = batch.batch["eval_results"].tolist()
+        metadata_entries = list(batch.non_tensor_batch.get("rollout_step_metadata", []))
+        if len(metadata_entries) < len(eval_results):
+            metadata_entries.extend([[] for _ in range(len(eval_results) - len(metadata_entries))])
+
+        replay_tags = []
+        for task_config, eval_result, step_metadata in zip(task_configs, eval_results, metadata_entries):
+            if eval_result <= 0.1:
+                replay_tags.append(None)
+                continue
+
+            burden = self._summarize_noise_burden(step_metadata)
+            noise_enabled = bool(task_config.get("enable_noise"))
+            realized_noise = any(value > 0 for value in burden.values())
+            if realized_noise:
+                replay_tags.append("recovery_success")
+            elif noise_enabled:
+                replay_tags.append("noisy_success")
+            else:
+                replay_tags.append("clean_success")
+        return replay_tags
+
+    @staticmethod
+    def _preferred_replay_tags(task_config):
+        if bool(task_config.get("enable_noise")):
+            return ["recovery_success", "noisy_success", "clean_success"]
+        return ["clean_success", "noisy_success", "recovery_success"]
+
     def apply_replay(self, task_configs, batch):
         eval_results = batch.batch["eval_results"].tolist()
         assert len(task_configs) == len(batch)
@@ -1554,39 +1881,38 @@ class RayPPOTrainer:
 
         cur_seq_len = batch.batch["input_ids"].size(-1)
         pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
+        replay_tags = self._build_replay_tags(task_configs, batch)
 
         final_batch = []
-        final_eval_results = []
         for i in range(bsz):
             cur_task_config = task_configs[i * rollout_n:(i + 1) * rollout_n]
             assert len(set([x['id'] for x in cur_task_config])) == 1
             task_id = cur_task_config[0]['id']
             instruction = cur_task_config[0]['instruction']
 
-            cur_eval_results = eval_results[i * rollout_n:(i + 1) * rollout_n]
-
             cur_rewards = np.array(eval_results[i * rollout_n:(i + 1) * rollout_n], dtype=float)
             cur_batch = batch[i * rollout_n:(i + 1) * rollout_n]
             cur_reward_std = np.std(cur_rewards)
             cur_reward_mean = np.mean(cur_rewards)
-            if cur_reward_std < 0.05 and cur_reward_mean < 0.2: # all negative group
-                pos_batch = self.replay.get_pos(cur_task_config[0]['id'], num_samples=1)
+            preferred_tags = self._preferred_replay_tags(cur_task_config[0])
+            if cur_reward_std < 0.05 and cur_reward_mean < 0.2:  # all negative group
+                pos_batch = self.replay.get_pos(cur_task_config[0]['id'], num_samples=1, preferred_tags=preferred_tags)
             else:
                 pos_batch = []
 
             if len(pos_batch) > 0:
-                # Align replay item's sequence length to current batch (different
-                # steps may collate to different max lengths).
                 pos_batch = self._align_replay_seq_len(pos_batch, cur_seq_len, pad_token_id)
                 final_batch.append(pos_batch)
                 final_batch.append(cur_batch[len(pos_batch):])
             else:
                 final_batch.append(cur_batch)
 
-            print(f'Task {task_id} {instruction} replay_buffer: {len(pos_batch)}| rewards: {cur_rewards}')
+            print(
+                f'Task {task_id} {instruction} replay_buffer: {len(pos_batch)} | '
+                f'preferred_tags: {preferred_tags} | rewards: {cur_rewards}'
+            )
 
-        # update replay buffer
-        self.replay.update_replay_buffer_batch(task_configs, batch)
+        self.replay.update_replay_buffer_batch(task_configs, batch, replay_tags=replay_tags)
         print('Update replay buffer done')
         final_batch = DataProto.concat(final_batch)
         return final_batch
@@ -1619,7 +1945,12 @@ class RayPPOTrainer:
             val_metrics = self._validate()
             self.logger.log(data=val_metrics, step=self.global_step)
             if self.config.trainer.val_only:
+                print("[val_only] Validation complete.")
                 return
+
+        if self.config.trainer.val_only:
+            print("[val_only] val_before_train is False; nothing to do.")
+            return
 
         for _ in tqdm(range(self.config.trainer.total_episodes), desc="Episode", position=0):
             prefetched = None  # (batch_dict, rollout_chunks, reset_futures) or None
@@ -1687,6 +2018,14 @@ class RayPPOTrainer:
                             all_task_configs[start:end] = chunk_task_configs
                     finally:
                         self.actor_rollout_wg.finish_generate_sequences()
+
+                    # Opt-in: update per-task noise curriculum from this step's
+                    # observed success rates. Must run before prefetch so the
+                    # next step's annotation reflects updated tier/p.
+                    try:
+                        self._update_noise_curriculum(all_task_configs, all_eval_results, all_process_results)
+                    except Exception as _ne:
+                        print(f"[noise] curriculum update failed (non-fatal): {_ne}")
 
                     # Workers are idle after rollout. Peek at next batch and launch VM resets
                     # concurrently with GPU training (compute logprobs, advantages, updates).
@@ -2011,6 +2350,7 @@ class RayPPOTrainer:
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
+                metrics.update(self._collect_noise_metrics())
 
                 self.logger.log(data=metrics, step=self.global_step)
 
@@ -2048,6 +2388,24 @@ class RayPPOTrainer:
                             "prompt_lengths": t_plen,
                         })
 
+                    # Aggregate realized noise burden for observability.
+                    step_metadata_entries = list(batch.non_tensor_batch.get("rollout_step_metadata", []))
+                    noise_summary = {
+                        "trajectories_with_noise": 0,
+                        "interruptions": 0.0,
+                        "recovery_cost": 0.0,
+                        "occlusion": 0.0,
+                        "focus_loss": 0.0,
+                    }
+                    for step_meta in step_metadata_entries:
+                        burden = self._summarize_noise_burden(step_meta)
+                        if any(v > 0 for v in burden.values()):
+                            noise_summary["trajectories_with_noise"] += 1
+                        noise_summary["interruptions"] += burden["interruptions"]
+                        noise_summary["recovery_cost"] += burden["recovery_cost"]
+                        noise_summary["occlusion"] += burden["occlusion"]
+                        noise_summary["focus_loss"] += burden["focus_loss"]
+
                     # Print per-task summary
                     print(f"\n{'='*80}")
                     print(f"  Step {self.global_step}  |  {datetime.datetime.now().strftime('%H:%M:%S')}  |  "
@@ -2068,6 +2426,11 @@ class RayPPOTrainer:
                     print(f"  pg_loss={metrics.get('actor/pg_loss', 'n/a')}  "
                           f"grad_norm={metrics.get('actor/grad_norm', 'n/a')}  "
                           f"entropy={metrics.get('actor/entropy_loss', 'n/a')}")
+                    print(f"  noise_fired={noise_summary['trajectories_with_noise']}/{len(batch)}  "
+                          f"interruptions={noise_summary['interruptions']:.1f}  "
+                          f"recovery_cost={noise_summary['recovery_cost']:.1f}  "
+                          f"occlusion={noise_summary['occlusion']:.1f}  "
+                          f"focus_loss={noise_summary['focus_loss']:.1f}")
                     print(f"{'='*80}\n")
 
                     # Write JSONL log entry
@@ -2093,6 +2456,7 @@ class RayPPOTrainer:
                         "prompt_length_max": _json_safe(metrics.get("prompt_length/max")),
                         "response_length_mean": _json_safe(metrics.get("response_length/mean")),
                         "throughput": _json_safe(metrics.get("perf/throughput")),
+                        "noise_summary": {k: _json_safe(v) for k, v in noise_summary.items()},
                     }
                     with open(self._training_log_path, "a") as f:
                         f.write(json.dumps(log_entry) + "\n")

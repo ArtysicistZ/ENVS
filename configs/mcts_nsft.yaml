@@ -1,0 +1,43 @@
+# MCTS nSFT — SFT + Unlikelihood Loss on Negative Steps
+#
+# Extends SFT v2.1 with audited negative (WRONG) steps.
+# Positive KEEP steps: standard NLL loss
+# Negative WRONG steps: unlikelihood loss -log(1 - p(bad_token))
+# All steps share per-task difficulty weighting.
+#
+# Usage:
+#   torchrun --nproc_per_node=8 scripts/train_mcts_nsft.py \
+#       --config configs/mcts_nsft.yaml
+
+# ---- Model ----
+model_path: "ByteDance-Seed/UI-TARS-1.5-7B"
+freeze_vision_tower: true
+bf16: true
+
+# ---- Data ----
+tree_dir: "checkpoints/mcts_trajectories_v2/combined_all/trees"
+task_index_path: "checkpoints/mcts_trajectories_v2/combined_all/task_index.json"
+mask_path: "checkpoints/mcts_trajectories_v2/combined_all/step_masks_v2.json"
+sr_path: "checkpoints/mcts_trajectories_v2/combined_all/mcts_success.jsonl"
+negatives_path: "checkpoints/mcts_kto/kto_negatives_all.jsonl"
+max_length: 12000
+limit_images: 3
+
+# ---- Weighting ----
+beta: 0.5
+max_step_ratio: 2.0
+
+# ---- Training ----
+output_dir: "checkpoints/mcts_nsft/beta05_2e-6"
+num_epochs: 1
+per_device_batch_size: 1
+gradient_accumulation_steps: 4
+learning_rate: 2e-6
+lr_scheduler_type: "cosine"
+warmup_ratio: 0.03
+weight_decay: 0.01
+max_grad_norm: 1.0
+logging_steps: 1
+
+# ---- Infrastructure ----
+fsdp_offload: false

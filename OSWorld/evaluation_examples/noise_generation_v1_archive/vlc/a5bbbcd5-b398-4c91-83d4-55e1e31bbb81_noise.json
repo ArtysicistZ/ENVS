@@ -1,0 +1,148 @@
+{
+  "id": "a5bbbcd5-b398-4c91-83d4-55e1e31bbb81",
+  "snapshot": "chrome",
+  "instruction": "Enable VLC Minimal Interface in window mode so the bottom playback controls are hidden, and make sure the setting persists after restarting VLC. I often multitask on my computer, and the persistent toolbar in VLC is very distracting.",
+  "source": "https://superuser.com/questions/776056/how-to-hide-bottom-toolbar-in-vlc",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": "VLC_VERBOSE=-1 vlc --no-audio --no-video-title-show",
+        "shell": true
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "python",
+          "-c",
+          "import pyautogui; import time; pyautogui.click({SCREEN_WIDTH_HALF}, {SCREEN_HEIGHT_HALF}); time.sleep(0.5);"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "vlc"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "launch",
+        "parameters": {
+          "command": [
+            "pkill",
+            "vlc"
+          ]
+        }
+      },
+      {
+        "type": "launch",
+        "parameters": {
+          "command": "vlc --no-audio --no-video-title-show",
+          "shell": true
+        }
+      }
+    ],
+    "func": "check_qt_minimal_view",
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "expected_qt_minimal_view": 1
+      }
+    },
+    "result": {
+      "type": "vlc_config",
+      "dest": "vlcrc"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.2143,
+    "categories_applied": [
+      "background_apps",
+      "random_notifications",
+      "filesystem_clutter",
+      "window_geometry",
+      "random_notifications"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "gedit /home/user/Desktop/meeting_notes.txt"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Email' 'New message: Meeting agenda attached'"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Stand-up in 5 minutes'"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "filesystem_clutter",
+        "once": false,
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Downloads/download_$RANDOM.tmp"
+        ]
+      },
+      {
+        "id": "n4",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'VLC media player' -e 0,150,80,1300,820"
+        ]
+      },
+      {
+        "id": "n5",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'System' 'Bluetooth adapter detected'"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 5; elements produced: 6."
+  }
+}

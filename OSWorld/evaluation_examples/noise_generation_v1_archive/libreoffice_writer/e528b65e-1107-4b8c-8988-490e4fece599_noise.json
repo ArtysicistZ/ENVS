@@ -1,0 +1,155 @@
+{
+  "id": "e528b65e-1107-4b8c-8988-490e4fece599",
+  "snapshot": "libreoffice_writer",
+  "instruction": "Please help me make the first letter of each word to uppercase.",
+  "source": "https://www.youtube.com/watch?v=l25Evu4ohKg",
+  "config": [
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_writer/e528b65e-1107-4b8c-8988-490e4fece599/Geography_And_Magical_Realism.docx",
+            "path": "/home/user/Desktop/Geography_And_Magical_Realism.docx"
+          }
+        ]
+      }
+    },
+    {
+      "type": "open",
+      "parameters": {
+        "path": "/home/user/Desktop/Geography_And_Magical_Realism.docx"
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "libreoffice_writer"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "activate_window",
+        "parameters": {
+          "window_name": "Geography_And_Magical_Realism.docx - LibreOffice Writer",
+          "strict": true
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 0.5
+        }
+      },
+      {
+        "type": "execute",
+        "parameters": {
+          "command": [
+            "python",
+            "-c",
+            "import pyautogui; import time; pyautogui.hotkey('ctrl', 's'); time.sleep(0.5); "
+          ]
+        }
+      }
+    ],
+    "func": "compare_docx_files",
+    "expected": {
+      "type": "cloud_file",
+      "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_writer/e528b65e-1107-4b8c-8988-490e4fece599/Geography_And_Magical_Realism_Gold.docx",
+      "dest": "Geography_And_Magical_Realism_Gold.docx"
+    },
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/Desktop/Geography_And_Magical_Realism.docx",
+      "dest": "Geography_And_Magical_Realism.docx"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.1696,
+    "categories_applied": [
+      "random_notifications",
+      "background_apps",
+      "focus_stealing",
+      "panel_toggle",
+      "window_geometry"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Email' 'Re: Document Review — see attached'"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Team stand-up starting in 5 min'"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "gedit /home/user/Documents/notes_draft.txt"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'gedit'"
+        ]
+      },
+      {
+        "id": "n4",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'LibreOffice Writer' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui; pyautogui.press('f5')\""
+        ]
+      },
+      {
+        "id": "n5",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'LibreOffice Writer' -e 0,100,50,1440,900"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 5; elements produced: 6."
+  }
+}

@@ -11,6 +11,7 @@ import gymnasium as gym
 
 from desktop_env.controllers.python import PythonController
 from desktop_env.controllers.setup import SetupController
+from desktop_env.noise_scheduler import NoiseScheduler
 from desktop_env.evaluators import metrics, getters
 from desktop_env.providers import create_vm_manager_and_provider
 
@@ -20,6 +21,42 @@ Metric = Callable[[Any, Any], float]
 Getter = Callable[[gym.Env, Dict[str, Any]], Any]
 
 MAX_RETRIES = 5 # Maximum retries for environment setup
+
+# Best-effort import of the noise sampler. The noise_generation directory
+# may not be on sys.path depending on how this env is launched (trainer vs.
+# remote env server vs. CLI), so we try several resolution strategies and
+# fall back to None — which keeps noise features inert if unavailable.
+RuntimeNoiseSampler = None
+tier_for_success_rate = None
+for _mod_path in (
+    "OSWorld.evaluation_examples.noise_generation.runtime_sampler",
+    "evaluation_examples.noise_generation.runtime_sampler",
+    "runtime_sampler",
+):
+    try:
+        _mod = __import__(_mod_path, fromlist=["RuntimeNoiseSampler", "tier_for_success_rate"])
+        RuntimeNoiseSampler = getattr(_mod, "RuntimeNoiseSampler", None)
+        tier_for_success_rate = getattr(_mod, "tier_for_success_rate", None)
+        if RuntimeNoiseSampler is not None:
+            break
+    except Exception:
+        continue
+if RuntimeNoiseSampler is None:
+    # Last-resort: add the noise_generation dir to sys.path and retry.
+    import sys as _sys
+    _ng_dir = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        os.pardir, "evaluation_examples", "noise_generation",
+    )
+    _ng_dir = os.path.abspath(_ng_dir)
+    if os.path.isdir(_ng_dir) and _ng_dir not in _sys.path:
+        _sys.path.insert(0, _ng_dir)
+        try:
+            import runtime_sampler as _rs  # type: ignore
+            RuntimeNoiseSampler = _rs.RuntimeNoiseSampler
+            tier_for_success_rate = _rs.tier_for_success_rate
+        except Exception as _e:
+            logger.debug("noise runtime_sampler unavailable: %s", _e)
             
 
 
@@ -192,6 +229,15 @@ class DesktopEnv(gym.Env):
         self._traj_no: int = -1
         self._step_no: int = 0
         self.action_history: List[Dict[str, any]] = []
+        # Opt-in noise system (see docs/noise_generating/RESEARCH_FRAMING.md).
+        # Fully gated by per-task annotation: task_config must set
+        # `enable_noise=True` + `noise_mode="runtime_library"` for the scheduler
+        # to activate. Clean training/eval is byte-identical to pre-feature
+        # behavior when those keys are absent.
+        self.noise_scheduler: Optional[NoiseScheduler] = None
+        self.noise_enabled: bool = False
+        self.noise_probability_default: float = 0.0
+        self.noise_events_fired: List[Dict[str, Any]] = []
 
 
     def _start_emulator(self):
@@ -245,7 +291,7 @@ class DesktopEnv(gym.Env):
         self.provider.unpause_emulator()
 
     def reset(self, task_config: Optional[Dict[str, Any]] = None, seed=None, options=None) -> Dict[str, Any]:
-        
+
         # Reset to certain task in OSWorld
         logger.info("Resetting environment...")
         logger.info("Switching task...")
@@ -264,6 +310,14 @@ class DesktopEnv(gym.Env):
                 # keep because get_info_from_website depend on this
                 self.current_use_proxy = task_use_proxy
 
+            # Set task metadata (self.task_id, self.instruction, self.config,
+            # self.evaluator, …) BEFORE any operation that can fail (revert,
+            # emulator restart, setup). This guarantees that if reset raises
+            # mid-way, a subsequent env.evaluate() won't crash with
+            # `AttributeError: 'DesktopEnv' object has no attribute 'evaluator'`;
+            # evaluate() will just see this task's evaluator and return 0.
+            self._set_task_info(task_config)
+
         if self.is_environment_used:
             logger.info("Environment has been used, reverting to snapshot {}...".format(self.snapshot_name))
             self._revert_to_snapshot()
@@ -280,7 +334,6 @@ class DesktopEnv(gym.Env):
             if task_config.get("proxy", False) and self.enable_proxy:
                 # If using proxy and proxy is enabled, set up the proxy configuration
                 self.setup_controller._proxy_setup(self.client_password)
-            self._set_task_info(task_config)
             self.setup_controller.reset_cache_dir(self.cache_dir)
             logger.info("Setting up environment...")
             success = self.setup_controller.setup(self.config, task_config.get("proxy", False) and self.enable_proxy)
@@ -290,6 +343,7 @@ class DesktopEnv(gym.Env):
                     self.is_environment_used = True
             else:
                 raise RuntimeError("Environment setup failed (setup_controller.setup returned False)")
+            self._initialize_noise_scheduler(task_config)
             
         logger.info("Environment setup complete.")
 
@@ -331,6 +385,92 @@ class DesktopEnv(gym.Env):
         self.config = task_config["config"] if "config" in task_config else []
         
         self._set_evaluator_info(task_config)
+
+    def _build_noise_meta(self, task_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        noise_meta = task_config.get("noise_meta")
+        if noise_meta:
+            return noise_meta
+
+        if not task_config.get("enable_noise"):
+            return None
+
+        if task_config.get("noise_mode") != "runtime_library":
+            return None
+
+        if RuntimeNoiseSampler is None or tier_for_success_rate is None:
+            logger.warning("RuntimeNoiseSampler unavailable; noise disabled for task %s", task_config.get("id"))
+            return None
+
+        # v4 difficulty knob: deterministic fire count derived from the task's
+        # live observed SR (curriculum EMA, falling back to MCTS prior). The
+        # `noise_success_rate` field is the static prior; `noise_observed_sr`
+        # is the live EMA from the curriculum (added by the trainer).
+        success_rate = float(task_config.get("noise_success_rate", 0.0))
+        observed_sr = float(task_config.get("noise_observed_sr", success_rate))
+        use_heldout = bool(task_config.get("noise_use_heldout", False))
+
+        # max_steps controls how the fire-step indices are bucket-spread.
+        # The env's max_steps is exposed via the rollout config; default 15.
+        max_steps = int(task_config.get("noise_max_steps", 15))
+
+        # CRN seed: depends on (task_id, training_step) only — NOT on per-env
+        # `self._traj_no` — so that all `n` rollouts of the same task at the
+        # same training step draw IDENTICAL count, fire-step indices, and
+        # template selection. The trainer stamps `noise_step_seed = global_step`.
+        sampler = RuntimeNoiseSampler(
+            rng_seed=hash((task_config.get("id"), task_config.get("noise_step_seed", 0))) & 0xFFFFFFFF
+        )
+        schedule = sampler.sample_fire_schedule(
+            task_json=task_config,
+            sr=observed_sr,
+            max_steps=max_steps,
+            use_heldout=use_heldout,
+        )
+        if not schedule:
+            return None
+
+        total_cost = sum(int(e.get("recovery_cost", 0)) for e in schedule)
+        return {
+            "trigger_mode": "deterministic_schedule_v4",
+            "success_rate_used": success_rate,
+            "observed_sr_used": observed_sr,
+            "fires_count": len(schedule),
+            "fire_steps": [int(e["fire_step"]) for e in schedule],
+            "total_recovery_cost": total_cost,
+            "elements": schedule,  # each element has `fire_step`
+        }
+
+    def _initialize_noise_scheduler(self, task_config: Dict[str, Any]) -> None:
+        self.noise_scheduler = None
+        self.noise_enabled = False
+        self.noise_events_fired = []
+        # v4: probability is vestigial; scheduler ignores it and fires per
+        # the precomputed schedule. Kept here only for log/back-compat.
+        self.noise_probability_default = float(task_config.get("noise_probability", 0.0))
+
+        noise_meta = self._build_noise_meta(task_config)
+        if not noise_meta:
+            return
+
+        elements = noise_meta.get("elements") or []
+        if not elements:
+            return
+
+        # v4: hand the FULL schedule (each element carries `fire_step`) to
+        # the scheduler. CRN-seeded so all n rollouts share it.
+        self.noise_scheduler = NoiseScheduler(
+            setup_controller=self.setup_controller,
+            elements=elements,
+        )
+        self.noise_enabled = True
+        logger.info(
+            "Initialized noise scheduler for task=%s: %d fires at steps %s (observed_sr=%.3f, total_cost=%d)",
+            task_config.get("id"),
+            len(elements),
+            noise_meta.get("fire_steps"),
+            noise_meta.get("observed_sr_used", 0.0),
+            noise_meta.get("total_recovery_cost", 0),
+        )
 
     def _set_evaluator_info(self, task_config: Dict[str, Any]):
         """Set evaluator information from task config"""
@@ -379,10 +519,10 @@ class DesktopEnv(gym.Env):
                 or (len(self.metric) == len(self.result_getter) == len(self.expected_getter) == len(
                     self.metric_options)))
 
-    def step(self, action, pause=2):
+    def step(self, action, pause=2, noise_probability: float = 0.0):
         self._step_no += 1
         self.action_history.append(action)
-        
+
         # Mark environment as used when step is called
         self.is_environment_used = True
 
@@ -417,6 +557,24 @@ class DesktopEnv(gym.Env):
                     # Fix PyAutoGUI '<' character bug before execution
                     fixed_command = _fix_pyautogui_less_than_bug(action['command'])
                     self.controller.execute_python_command(fixed_command)
+
+        # Fire noise after the agent's action so the next screenshot reflects it.
+        if self.noise_enabled and self.noise_scheduler is not None:
+            current_probability = self.noise_probability_default if noise_probability <= 0.0 else float(noise_probability)
+            try:
+                fired = self.noise_scheduler.on_step(current_probability)
+                if fired:
+                    self.noise_events_fired.extend(
+                        {
+                            "step": self._step_no,
+                            "element_id": evt.element_id,
+                            "category": evt.category,
+                            "recovery_cost": evt.recovery_cost,
+                        }
+                        for evt in fired
+                    )
+            except Exception as e:
+                logger.warning("NoiseScheduler.on_step raised (swallowed): %s", e)
 
         time.sleep(pause)
         observation = self._get_obs()

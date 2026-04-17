@@ -1,0 +1,183 @@
+{
+  "id": "7a4deb26-d57d-4ea9-9a73-630f66a7b568",
+  "snapshot": "gimp",
+  "instruction": "Could you tone down the brightness of my photo?",
+  "source": "https://www.quora.com/How-do-I-edit-a-photo-in-GIMP",
+  "config": [
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/gimp/7a4deb26-d57d-4ea9-9a73-630f66a7b568/woman_sitting_by_the_tree.png",
+            "path": "/home/user/Desktop/woman_sitting_by_the_tree.png"
+          }
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "gimp",
+          "/home/user/Desktop/woman_sitting_by_the_tree.png"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "gimp"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "execute",
+        "parameters": {
+          "command": [
+            "python3",
+            "-c",
+            "import time; import pyautogui; time.sleep(1);pyautogui.hotkey(\"shift\", \"ctrl\", \"e\");"
+          ]
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 0.5
+        }
+      },
+      {
+        "type": "execute",
+        "parameters": {
+          "command": [
+            "python3",
+            "-c",
+            "import time; import pyautogui; time.sleep(1);pyautogui.write(\"edited_darker\");time.sleep(1);pyautogui.press([\"enter\"]);"
+          ]
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 2
+        }
+      },
+      {
+        "type": "execute",
+        "parameters": {
+          "command": [
+            "python3",
+            "-c",
+            "import pyautogui; pyautogui.press([\"enter\"]);"
+          ]
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 5
+        }
+      }
+    ],
+    "func": "check_brightness_decrease_and_structure_sim",
+    "expected": {
+      "type": "cloud_file",
+      "path": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/gimp/7a4deb26-d57d-4ea9-9a73-630f66a7b568/woman_sitting_by_the_tree.png",
+      "dest": "woman_sitting_by_the_tree.png"
+    },
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/Desktop/edited_darker.png",
+      "dest": "edited_darker.png"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.2411,
+    "categories_applied": [
+      "random_notifications",
+      "background_apps",
+      "filesystem_clutter",
+      "window_geometry",
+      "panel_toggle"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Email' 'RE: Project photos — review needed'"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Design review starts in 10 min'"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "gedit"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "filesystem_clutter",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Desktop/vacation_backup.png /home/user/Desktop/old_photo_draft.png /home/user/Desktop/notes_for_review.txt"
+        ]
+      },
+      {
+        "id": "n4",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'GNU Image Manipulation Program' -e 0,80,60,1440,880 2>/dev/null || wmctrl -r 'GIMP' -e 0,80,60,1440,880"
+        ]
+      },
+      {
+        "id": "n5",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'Layers' -e 0,40,580,260,320"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 5; elements produced: 6."
+  }
+}

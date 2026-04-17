@@ -1,0 +1,184 @@
+{
+  "id": "af630914-714e-4a24-a7bb-f9af687d3b91",
+  "snapshot": "chrome",
+  "instruction": "My grandmother has been using the Chrome lately and told me that the font size is way too small for her poor eyesight. Could you set the default font size to the largest for her?",
+  "source": "https://www.howtogeek.com/680260/how-to-change-chromes-default-text-size/",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "google-chrome",
+          "--remote-debugging-port=1337"
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "socat",
+          "tcp-listen:9222,fork",
+          "tcp:localhost:1337"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "chrome"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "launch",
+        "parameters": {
+          "command": [
+            "pkill",
+            "chrome"
+          ]
+        }
+      },
+      {
+        "type": "launch",
+        "parameters": {
+          "command": [
+            "google-chrome",
+            "--remote-debugging-port=1337"
+          ]
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 3
+        }
+      }
+    ],
+    "func": "check_font_size",
+    "result": {
+      "type": "chrome_font_size"
+    },
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "type": "range",
+        "min": 16,
+        "max": 99999
+      }
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "easy",
+    "success_rate_used": 0.5179,
+    "categories_applied": [
+      "background_apps",
+      "filesystem_clutter",
+      "random_notifications",
+      "window_geometry",
+      "window_occlusion",
+      "dialog_popup",
+      "focus_stealing",
+      "scroll_displacement"
+    ],
+    "noise_element_count": 7,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "gedit /home/user/Desktop/scratch_notes.txt"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "filesystem_clutter",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "mkdir -p /home/user/Desktop && touch /home/user/Desktop/family_photos_todo.txt /home/user/Desktop/browser_tips.txt /home/user/Desktop/grocery_list.txt"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Gmail' 'New message from Alice: Re: Photos'"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Family dinner reminder in 30 min'"
+        ]
+      },
+      {
+        "id": "n4",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'Google Chrome' -e 0,80,60,1440,860"
+        ]
+      },
+      {
+        "id": "n5",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "nautilus /home/user/Desktop"
+        ]
+      },
+      {
+        "id": "n6",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'Google Chrome' && DISPLAY=:0 python3 -c \"import pyautogui, time; pyautogui.hotkey('ctrl', 'f'); time.sleep(0.3); pyautogui.typewrite('news', interval=0.05)\""
+        ]
+      },
+      {
+        "id": "n7",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'gedit'"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 7; elements produced: 8."
+  }
+}

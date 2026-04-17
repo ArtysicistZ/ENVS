@@ -1,0 +1,135 @@
+{
+  "id": "57242fad-77ca-454f-b71b-f187181a9f23",
+  "snapshot": "vscode",
+  "instruction": "Please help me create a new python file named \"test.py\" via VS Code and save it at \"/home/user/Desktop\".",
+  "source": "https://download.microsoft.com/download/8/A/4/8A48E46A-C355-4E5C-8417-E6ACD8A207D4/VisualStudioCode-TipsAndTricks-Vol.1.pdf",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "code"
+        ]
+      }
+    },
+    {
+      "type": "activate_window",
+      "parameters": {
+        "window_name": "Visual Studio Code"
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "vscode"
+  ],
+  "evaluator": {
+    "func": "is_extension_installed",
+    "result": {
+      "type": "vm_command_line",
+      "command": [
+        "ls",
+        "/home/user/Desktop",
+        "|",
+        "grep",
+        "test.py"
+      ],
+      "shell": true
+    },
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "type": "contain",
+        "expected": "test.py"
+      }
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.2321,
+    "categories_applied": [
+      "background_apps",
+      "filesystem_clutter",
+      "random_notifications",
+      "panel_toggle",
+      "window_geometry"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "gedit"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "filesystem_clutter",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "mkdir -p /tmp/noise_clutter && touch /tmp/noise_clutter/notes.txt /tmp/noise_clutter/TODO.txt /tmp/noise_clutter/readme_old.txt"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Email' 'New message: code review requested'"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Daily stand-up in 5 minutes'"
+        ]
+      },
+      {
+        "id": "n4",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'Visual Studio Code' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui; pyautogui.hotkey('ctrl', 'b')\""
+        ]
+      },
+      {
+        "id": "n5",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'Visual Studio Code' -e 0,80,50,1440,900"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 5; elements produced: 6."
+  }
+}

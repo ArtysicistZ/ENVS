@@ -1,0 +1,143 @@
+{
+  "id": "2ae9ba84-3a0d-4d4c-8338-3a1478dc5fe3",
+  "snapshot": "chrome",
+  "instruction": "Lately I have changed my English name to Thomas. I want to update my username. Could you help me change the username in chrome profiles to Thomas?",
+  "source": "https://superuser.com/questions/1393683/how-to-change-the-username-in-google-chrome-profiles?rq=1",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "google-chrome",
+          "--remote-debugging-port=1337"
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "socat",
+          "tcp-listen:9222,fork",
+          "tcp:localhost:1337"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 15 + 5)) && gedit 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 90 + 20)) && notify-send 'Slack' 'New message from Alex: Are you free for a call?' && sleep $((RANDOM % 15 + 5)) && notify-send 'Calendar' 'Team stand-up starting in 5 minutes') >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(while true; do sleep $((RANDOM % 60 + 20)); touch /home/user/Downloads/download_$RANDOM.tmp; done) >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 30 + 15)) && wmctrl -a 'Google Chrome' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui, time; [pyautogui.hotkey('ctrl', '+') or time.sleep(0.15) for _ in range(3)]\") &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 25 + 20)) && wmctrl -r 'Google Chrome' -e 0,80,50,1440,900 2>/dev/null) &"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "chrome"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "launch",
+        "parameters": {
+          "command": [
+            "pkill",
+            "chrome"
+          ]
+        }
+      },
+      {
+        "type": "launch",
+        "parameters": {
+          "command": [
+            "google-chrome",
+            "--remote-debugging-port=1337"
+          ]
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 3
+        }
+      }
+    ],
+    "func": "exact_match",
+    "result": {
+      "type": "profile_name"
+    },
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "expected": "Thomas"
+      }
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.1875,
+    "categories_applied": [
+      "background_apps",
+      "random_notifications",
+      "filesystem_clutter",
+      "view_mode_change",
+      "window_geometry"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ]
+  }
+}

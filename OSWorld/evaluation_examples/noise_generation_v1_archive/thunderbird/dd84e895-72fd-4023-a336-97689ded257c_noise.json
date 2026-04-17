@@ -1,0 +1,187 @@
+{
+  "id": "dd84e895-72fd-4023-a336-97689ded257c",
+  "snapshot": "thunderbird",
+  "instruction": "Add a star to every email in local Bills folder",
+  "source": "https://support.mozilla.org/en-US/kb/organize-your-messages-using-filters",
+  "config": [
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/thunderbird/dd84e895-72fd-4023-a336-97689ded257c/thunderbird-profile.tar.gz",
+            "path": "/home/user/thunderbird-profile.tar.gz"
+          }
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "tar",
+          "-xzv",
+          "--recursive-unlink",
+          "-f",
+          "/home/user/thunderbird-profile.tar.gz",
+          "-C",
+          "/home/user/"
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "/usr/bin/thunderbird"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "thunderbird"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "close_window",
+        "parameters": {
+          "window_name": "Mail.thunderbird",
+          "strict": true,
+          "by_class": true
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 0.5
+        }
+      }
+    ],
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/.thunderbird/t5q2a5hp.default-release/global-messages-db.sqlite",
+      "dest": "global-messages-db.sqlite"
+    },
+    "func": "run_sqlite3",
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "sql": "select (select count(*) from messageAttributes where attributeID = 58 and value = 1 and messageID in (select id from messages where folderID = 13)) = (select count(*) from messages where folderID = 13);"
+      }
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "easy",
+    "success_rate_used": 0.5446,
+    "categories_applied": [
+      "background_apps",
+      "random_notifications",
+      "filesystem_clutter",
+      "window_geometry",
+      "window_occlusion",
+      "dialog_popup",
+      "focus_stealing"
+    ],
+    "noise_element_count": 7,
+    "added_step_indices": [
+      2,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "filesystem_clutter",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Desktop/bills_notes.txt && gedit /home/user/Desktop/bills_notes.txt"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Thunderbird' 'New message from bank@bills.com'"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Bill payment due in 30 minutes'"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "filesystem_clutter",
+        "once": false,
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Downloads/statement_$RANDOM.tmp"
+        ]
+      },
+      {
+        "id": "n4",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'Thunderbird' -e 0,80,-60,1400,950"
+        ]
+      },
+      {
+        "id": "n5",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "nautilus /home/user/Desktop"
+        ]
+      },
+      {
+        "id": "n6",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'Thunderbird' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui, time; pyautogui.hotkey('alt', 't'); time.sleep(0.4); pyautogui.press('a')\""
+        ]
+      },
+      {
+        "id": "n7",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'gedit'"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 7; elements produced: 8."
+  }
+}

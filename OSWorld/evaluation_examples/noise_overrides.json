@@ -1,0 +1,3 @@
+{
+  "_comment": "Optional per-task overrides for RuntimeNoiseSampler. Each entry is keyed by OSWorld task_id and may contain {avoid_categories: [category_names], notes: 'why'}. Initially empty; populated only when a task has a specific action clash with a noise category (e.g., a task that creates a Desktop folder should avoid 'human_file_session' noise that also creates folders). Remove this _comment key before adding real entries; JSON parsers tolerate unknown keys but the noise_overrides.json reader ignores it."
+}

@@ -1,0 +1,57 @@
+# MCTS SFT Training — Step-Masked, Per-Task Balanced
+#
+# Trains UI-TARS-1.5-7B on MCTS-collected trajectories with:
+#   1. Step-level loss masking (REMOVE steps = zero loss, visible as context)
+#   2. Per-task √n resampling (α=0.5) with UniMax capping (K=3)
+#
+# Usage:
+#   torchrun --nproc_per_node=8 scripts/train_mcts_sft.py --config configs/mcts_sft.yaml
+#
+#   Override any param via CLI:
+#   torchrun --nproc_per_node=8 scripts/train_mcts_sft.py \
+#       --config configs/mcts_sft.yaml --alpha 0.3 --num_epochs 3
+
+# ---- Model ----
+model_path: "ByteDance-Seed/UI-TARS-1.5-7B"
+freeze_vision_tower: true
+bf16: true
+
+# ---- Data ----
+data_path: "checkpoints/mcts_trajectories/combined/mcts_success.jsonl"
+mask_path: "checkpoints/mcts_trajectories/combined/step_masks_train.json"
+max_length: 12000
+limit_images: 3
+
+# ---- Per-Task Balancing ----
+# Sampling exponent α: gradient mass per task ∝ n_t^α
+#   α=0.5 (√n, default): 77:1 task → 8.8:1 gradient ratio
+#   α=0.3 (XLM-R/mT5):   77:1 task → 3.7:1 gradient ratio
+#   α=1.0 (natural):      no balancing
+#   α=0.0 (task-uniform):  all tasks equal
+alpha: 0.3
+balance_method: "resample"    # "resample" (recommended) or "loss_weight"
+max_traj_repeat: 3            # UniMax cap: max trajectory appearances per epoch
+
+# ---- Training ----
+# Calibrated from naive SFT sweet spot: epoch=1, lr=5e-6, grad_accum=4 (eff=32),
+# 715 trajs, 7,361 examples, 230 steps → 39/300 eval (13%).
+#
+# MCTS dataset: 1,852 trajs → 15,920 KEEP examples (2.16x more data).
+# With same eff_batch=32: 497 steps/epoch (2.16x more gradient updates).
+# Same LR is warranted: 2.16x more unique examples = 2.16x more to learn from.
+# Total learning budget ∝ lr × steps = 5e-6 × 497 ≈ 2.49e-3 (proportional to data).
+#
+# If eval degrades vs 13% baseline, reduce lr to 3e-6 (halves total budget).
+output_dir: "checkpoints/mcts_sft/v1_2e-6"
+num_epochs: 1                    # K=3 resampling already gives rare tasks ~3 exposures
+per_device_batch_size: 1
+gradient_accumulation_steps: 4   # effective_batch = 1 × 4 × 8 GPUs = 32 (sweet spot)
+learning_rate: 2e-6              
+lr_scheduler_type: "cosine"
+warmup_ratio: 0.03               # ~15 warmup steps out of 497
+weight_decay: 0.01
+max_grad_norm: 1.0
+logging_steps: 1
+
+# ---- Infrastructure ----
+fsdp_offload: false           # CPU offload (slower but saves GPU memory)

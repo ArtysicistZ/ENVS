@@ -1,0 +1,56 @@
+# MCTS Trajectory Collection — 86 doable tasks, 80 VMs, 8 GPUs
+#
+# Usage:
+#   python scripts/mcts/run_mcts_collection.py --config configs/mcts_collection_86tasks.yaml
+#   python scripts/mcts/run_mcts_collection.py --config configs/mcts_collection_86tasks.yaml --resume
+#   sudo -E /home/kevinzyz/yincheng/arpo/.venv/bin/python scripts/mcts/run_mcts_collection.py --config configs/mcts_collection_86tasks.yaml --resume
+
+# ---- VMs ----
+vms_per_task: 80
+max_active_vms: 80
+tasks_per_batch: 1
+
+# ---- Env servers (80 VMs: 32 + 16 + 32) ----
+remote_server_urls:
+  - "http://10.100.4.4:15001"
+  - "http://10.100.4.6:15001"
+  - "http://10.100.4.8:15001"
+remote_server_env_counts: [32, 16, 32]
+
+# ---- Probing ----
+probe_temperature: 1.0
+total_probe_budget: 64
+k_max: 64
+
+# ---- Branching ----
+spatial_grid_size: 50
+min_cluster_size: 1
+max_branch_per_explorer: 6
+child_branch_budget: 3
+max_branches_per_step: 3
+never_branch_after: 15
+late_step_threshold: 10
+
+# ---- Replay ----
+replay_pause_sec: 1.0
+
+# ---- Pruning ----
+stuck_repeat_limit: 3
+stuck_wait_limit: 2
+
+# ---- Pipeline ----
+max_steps: 15
+
+# ---- GPU / Inference ----
+model_path: "ByteDance-Seed/UI-TARS-1.5-7B"
+tp: 8
+gpu_memory_utilization: 0.85
+max_model_len: 12000
+limit_images: 3
+generation_max_tokens: 512
+
+# ---- Task file ----
+task_file: "OSWorld/evaluation_examples/test_all_300tasks_noproxy_softreset_clean.json"
+
+# ---- Output ----
+output_dir: "checkpoints/mcts_trajectories"

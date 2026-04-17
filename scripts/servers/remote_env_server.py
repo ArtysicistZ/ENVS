@@ -177,6 +177,7 @@ class SlotState:
     _last_step_reward_components: dict = field(default_factory=dict)
     _eval_precondition_state: dict | None = None
     _parse_fail_streak: int = 0
+    noise_probability: float = 0.0
 
 
 # Slot pool: slot_id -> SlotState; protected by _slots_lock
@@ -269,6 +270,7 @@ class ResetRequest(BaseModel):
 class StepRequest(BaseModel):
     prediction: str
     slot_id: int = 0
+    noise_probability: float = 0.0
 
 
 class SlotRequest(BaseModel):
@@ -1291,7 +1293,31 @@ def _env_reset_locked(slot_id: int, body: ResetRequest):
     slot._recent_action_signatures.clear()
     slot._eval_precondition_state = None
     slot._parse_fail_streak = 0
+    slot.noise_probability = float(task_config.get("noise_probability", 0.0))
     slot.history_messages = []
+
+    # ─── noise debug diagnostics ───
+    _nd_enabled = getattr(env, "noise_enabled", "MISSING")
+    _nd_scheduler = getattr(env, "noise_scheduler", "MISSING")
+    _nd_prob = getattr(env, "noise_probability_default", "MISSING")
+    _nd_tc_enable = task_config.get("enable_noise")
+    _nd_tc_mode = task_config.get("noise_mode")
+    _nd_tc_sr = task_config.get("noise_observed_sr")
+    print(
+        f"[slot {slot_id}] NOISE_DEBUG: env.noise_enabled={_nd_enabled}, "
+        f"scheduler={'YES' if _nd_scheduler is not None and _nd_scheduler != 'MISSING' else 'NO'}, "
+        f"env.noise_probability_default={_nd_prob}, "
+        f"tc.enable_noise={_nd_tc_enable}, tc.noise_mode={_nd_tc_mode}, "
+        f"tc.noise_observed_sr={_nd_tc_sr}",
+        flush=True,
+    )
+    if _nd_scheduler is not None and _nd_scheduler != "MISSING":
+        _nd_by_step = getattr(_nd_scheduler, "_by_step", {})
+        print(
+            f"[slot {slot_id}] NOISE_DEBUG: scheduler._by_step keys={sorted(_nd_by_step.keys())}, "
+            f"total_elements={sum(len(v) for v in _nd_by_step.values())}",
+            flush=True,
+        )
 
     _safe_env_pause(env)
     screenshot = obs.get("screenshot")
@@ -1530,10 +1556,16 @@ def _env_step_locked(slot_id: int, body: StepRequest):
     step_successful = False
     step_stall_penalized = False
     appended_any_step_screenshot = False
+    current_noise_probability = float(body.noise_probability or slot.noise_probability or 0.0)
+    noise_events_before = list(getattr(env, "noise_events_fired", []) or [])
     for action in actions:
         try:
             obs, reward, step_done, info = _run_with_timeout(
-                lambda a=action: env.step(a, pause=ACTION_PAUSE_SEC),
+                lambda a=action: env.step(
+                    a,
+                    pause=ACTION_PAUSE_SEC,
+                    noise_probability=current_noise_probability,
+                ),
                 timeout=ENV_STEP_TIMEOUT,
                 label=f"step-slot-{slot_id}",
             )
@@ -1628,6 +1660,12 @@ def _env_step_locked(slot_id: int, body: StepRequest):
 
     _safe_env_pause(env)
 
+    noise_events_after = list(getattr(env, "noise_events_fired", []) or [])
+    new_noise_events = noise_events_after[len(noise_events_before):]
+    if new_noise_events:
+        print(f"[slot {slot_id}] NOISE_FIRED: step={slot.step_counter} events={new_noise_events}", flush=True)
+    noise_burden = _summarize_noise_burden(new_noise_events, noise_events_after)
+
     if step_successful and not step_stall_penalized and not parse_failed and not _is_wait_action(actions):
         format_reward += FORMAT_STEP_SUCCESS_BONUS
         reward_components["step_success"] = reward_components.get("step_success", 0.0) + FORMAT_STEP_SUCCESS_BONUS
@@ -1642,7 +1680,13 @@ def _env_step_locked(slot_id: int, body: StepRequest):
         _log_step_reward_final(slot, format_reward, slot.is_done)
         # Return history so the client can see the final observation even on episode end
         final_obs = messages_to_wire(slot.history_messages) if slot.history_messages else None
-        return {"env_idx": slot_id, "obs_messages": final_obs, "is_done": True, "format_reward": format_reward}
+        return {
+            "env_idx": slot_id,
+            "obs_messages": final_obs,
+            "is_done": True,
+            "format_reward": format_reward,
+            "noise_burden": noise_burden,
+        }
 
     if obs is None or obs.get("screenshot") is None:
         slot.is_done = True
@@ -1651,7 +1695,13 @@ def _env_step_locked(slot_id: int, body: StepRequest):
         slot._last_step_reward_components = reward_components
         _log_step_reward_final(slot, format_reward, slot.is_done)
         final_obs = messages_to_wire(slot.history_messages) if slot.history_messages else None
-        return {"env_idx": slot_id, "obs_messages": final_obs, "is_done": True, "format_reward": format_reward}
+        return {
+            "env_idx": slot_id,
+            "obs_messages": final_obs,
+            "is_done": True,
+            "format_reward": format_reward,
+            "noise_burden": noise_burden,
+        }
 
     if not appended_any_step_screenshot:
         _append_screenshot_message(slot.history_messages, obs["screenshot"])
@@ -1663,6 +1713,35 @@ def _env_step_locked(slot_id: int, body: StepRequest):
         "obs_messages": messages_to_wire(slot.history_messages),
         "is_done": False,
         "format_reward": format_reward,
+        "noise_burden": noise_burden,
+    }
+
+
+def _summarize_noise_burden(step_events, cumulative_events):
+    """Summarize realized noise burden for logging/curriculum analysis."""
+    step_events = list(step_events or [])
+    cumulative_events = list(cumulative_events or [])
+
+    def _category_count(substrs):
+        return sum(
+            1
+            for evt in step_events
+            if any(s in str(evt.get("category", "")).lower() for s in substrs)
+        )
+
+    step_recovery_cost = sum(int(evt.get("recovery_cost", 0)) for evt in step_events)
+    total_recovery_cost = sum(int(evt.get("recovery_cost", 0)) for evt in cumulative_events)
+    occlusion_like = _category_count(("modal", "overlay", "banner", "cookie", "dialog"))
+    focus_loss_like = _category_count(("focus", "steal", "switch", "window"))
+
+    return {
+        "events_fired_this_step": len(step_events),
+        "events_fired_total": len(cumulative_events),
+        "step_recovery_cost": step_recovery_cost,
+        "total_recovery_cost": total_recovery_cost,
+        "occlusion_events": occlusion_like,
+        "focus_loss_events": focus_loss_like,
+        "events": step_events,
     }
 
 
@@ -1884,4 +1963,6 @@ def health_recover(body: SlotRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=15001)
+    host = os.environ.get("REMOTE_ENV_HOST", "0.0.0.0")
+    port = int(os.environ.get("REMOTE_ENV_PORT", "15001"))
+    uvicorn.run(app, host=host, port=port)

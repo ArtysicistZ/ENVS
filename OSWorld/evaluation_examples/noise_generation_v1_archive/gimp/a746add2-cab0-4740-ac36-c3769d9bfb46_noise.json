@@ -1,0 +1,203 @@
+{
+  "id": "a746add2-cab0-4740-ac36-c3769d9bfb46",
+  "snapshot": "gimp",
+  "instruction": "Help me open up the Vignette filter window.",
+  "source": "https://www.youtube.com/watch?v=_L_MMU22bAw",
+  "config": [
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/gimp/a746add2-cab0-4740-ac36-c3769d9bfb46/dog_with_background.png",
+            "path": "/home/user/Desktop/dog_with_background.png"
+          }
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "gimp",
+          "/home/user/Desktop/dog_with_background.png"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "gimp"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "execute",
+        "parameters": {
+          "command": [
+            "python3",
+            "-c",
+            "import time; import pyautogui; pyautogui.press([\"esc\"]);time.sleep(1);pyautogui.hotkey([\"ctrl\", \"q\"]);time.sleep(1);"
+          ]
+        }
+      },
+      {
+        "type": "execute",
+        "parameters": {
+          "command": [
+            "python3",
+            "-c",
+            "import time; import pyautogui; pyautogui.press([\"right\"]);time.sleep(1);pyautogui.press([\"enter\"])"
+          ]
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 0.5
+        }
+      }
+    ],
+    "func": "check_include_exclude",
+    "result": {
+      "type": "vm_command_line",
+      "command": "cat /home/user/.config/GIMP/2.10/action-history",
+      "shell": true
+    },
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "include": [
+          "filters-vignette"
+        ],
+        "exclude": [
+          "error",
+          "failed",
+          "not found"
+        ]
+      }
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "easy",
+    "success_rate_used": 0.4554,
+    "categories_applied": [
+      "background_apps",
+      "filesystem_clutter",
+      "random_notifications",
+      "window_geometry",
+      "window_occlusion",
+      "panel_toggle",
+      "focus_stealing"
+    ],
+    "noise_element_count": 7,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "elements": [
+      {
+        "id": "n0",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "gedit /home/user/Desktop/meeting_notes.txt"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "filesystem_clutter",
+        "once": false,
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Desktop/report_draft.txt /home/user/Desktop/meeting_notes.txt /home/user/Desktop/budget_q2.ods"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "filesystem_clutter",
+        "once": false,
+        "command": [
+          "bash",
+          "-c",
+          "touch /home/user/Downloads/download_$RANDOM.tmp"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Slack' 'New message from Alex: can you check the design?'"
+        ]
+      },
+      {
+        "id": "n4",
+        "category": "random_notifications",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "notify-send 'Calendar' 'Team stand-up in 5 minutes'"
+        ]
+      },
+      {
+        "id": "n5",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'GNU Image Manipulation Program' -e 0,-180,40,1600,980 2>/dev/null || wmctrl -r 'GIMP' -e 0,-180,40,1600,980"
+        ]
+      },
+      {
+        "id": "n6",
+        "category": "background_apps",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "nautilus /home/user/Desktop"
+        ]
+      },
+      {
+        "id": "n7",
+        "category": "window_geometry",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -r 'Layers' -e 0,30,650,240,320"
+        ]
+      },
+      {
+        "id": "n8",
+        "category": "focus_stealing",
+        "once": true,
+        "command": [
+          "bash",
+          "-c",
+          "wmctrl -a 'gedit'"
+        ]
+      }
+    ],
+    "trigger_mode": "action_triggered_probabilistic",
+    "migration_note": "Timing-based wrappers removed. Commands fire per-action via env scheduler using a probability passed from the trainer. Original added-step count: 7; elements produced: 9."
+  }
+}

@@ -1,0 +1,1206 @@
+{
+  "bb5e4c0d-f964-439c-97b6-bdb9747de3f4": {
+    "domain": "chrome",
+    "success_rate": 0.2232,
+    "total_runs": 112,
+    "successful_trajectories": 25,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "2ad9387a-65d8-4e33-ad5b-7580065a27ca": {
+    "domain": "chrome",
+    "success_rate": 0.4554,
+    "total_runs": 112,
+    "successful_trajectories": 51,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "2ae9ba84-3a0d-4d4c-8338-3a1478dc5fe3": {
+    "domain": "chrome",
+    "success_rate": 0.1875,
+    "total_runs": 112,
+    "successful_trajectories": 21,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "af630914-714e-4a24-a7bb-f9af687d3b91": {
+    "domain": "chrome",
+    "success_rate": 0.5179,
+    "total_runs": 112,
+    "successful_trajectories": 58,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "ae78f875-5b98-4907-bbb5-9c737fc68c03": {
+    "domain": "chrome",
+    "success_rate": 0.003,
+    "total_runs": 660,
+    "successful_trajectories": 2,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "7a4deb26-d57d-4ea9-9a73-630f66a7b568": {
+    "domain": "gimp",
+    "success_rate": 0.2411,
+    "total_runs": 112,
+    "successful_trajectories": 27,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "554785e9-4523-4e7a-b8e1-8016f565f56a": {
+    "domain": "gimp",
+    "success_rate": 0.375,
+    "total_runs": 112,
+    "successful_trajectories": 42,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "77b8ab4d-994f-43ac-8930-8ca087d7c4b4": {
+    "domain": "gimp",
+    "success_rate": 0.375,
+    "total_runs": 112,
+    "successful_trajectories": 42,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "d52d6308-ec58-42b7-a2c9-de80e4837b2b": {
+    "domain": "gimp",
+    "success_rate": 0.5,
+    "total_runs": 112,
+    "successful_trajectories": 56,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "b148e375-fe0b-4bec-90e7-38632b0d73c2": {
+    "domain": "gimp",
+    "success_rate": 0.9554,
+    "total_runs": 112,
+    "successful_trajectories": 107,
+    "tier": "very_easy",
+    "budget": {
+      "min_elements": 8,
+      "max_elements": 12,
+      "min_categories": 4,
+      "max_categories": 6,
+      "description": "MAXIMUM noise budget: add 8-12 noise elements across 4+ categories, using EVERY noise category that applies to this task's domain. Easy tasks should not be gimmes. Pile on background apps, delayed notifications, filesystem clutter, recently-used-file seeding, window offsets, and domain-specific app clutter."
+    }
+  },
+  "a746add2-cab0-4740-ac36-c3769d9bfb46": {
+    "domain": "gimp",
+    "success_rate": 0.4554,
+    "total_runs": 112,
+    "successful_trajectories": 51,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "7b7617bd-57cc-468e-9c91-40c4ec2bcb3d": {
+    "domain": "gimp",
+    "success_rate": 0.7946,
+    "total_runs": 112,
+    "successful_trajectories": 89,
+    "tier": "very_easy",
+    "budget": {
+      "min_elements": 8,
+      "max_elements": 12,
+      "min_categories": 4,
+      "max_categories": 6,
+      "description": "MAXIMUM noise budget: add 8-12 noise elements across 4+ categories, using EVERY noise category that applies to this task's domain. Easy tasks should not be gimmes. Pile on background apps, delayed notifications, filesystem clutter, recently-used-file seeding, window offsets, and domain-specific app clutter."
+    }
+  },
+  "d16c99dc-2a1e-46f2-b350-d97c86c85c15": {
+    "domain": "gimp",
+    "success_rate": 0.5268,
+    "total_runs": 112,
+    "successful_trajectories": 59,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "06ca5602-62ca-47f6-ad4f-da151cde54cc": {
+    "domain": "gimp",
+    "success_rate": 0.0848,
+    "total_runs": 224,
+    "successful_trajectories": 19,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "e2dd0213-26db-4349-abe5-d5667bfd725c": {
+    "domain": "gimp",
+    "success_rate": 0.0134,
+    "total_runs": 672,
+    "successful_trajectories": 9,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "f723c744-e62c-4ae6-98d1-750d3cd7d79d": {
+    "domain": "gimp",
+    "success_rate": 0.1875,
+    "total_runs": 112,
+    "successful_trajectories": 21,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "72f83cdc-bf76-4531-9a1b-eb893a13f8aa": {
+    "domain": "gimp",
+    "success_rate": 0.3929,
+    "total_runs": 112,
+    "successful_trajectories": 44,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "7767eef2-56a3-4cea-8c9f-48c070c7d65b": {
+    "domain": "gimp",
+    "success_rate": 0.6964,
+    "total_runs": 112,
+    "successful_trajectories": 78,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "58d3eeeb-e9d0-499f-962e-fd0db2a744d8": {
+    "domain": "gimp",
+    "success_rate": 0.0164,
+    "total_runs": 672,
+    "successful_trajectories": 11,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "dbbf4b99-2253-4b10-9274-45f246af2466": {
+    "domain": "gimp",
+    "success_rate": 0.0536,
+    "total_runs": 336,
+    "successful_trajectories": 18,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "2bd59342-0664-4ccb-ba87-79379096cc08": {
+    "domain": "libreoffice_calc",
+    "success_rate": 0.0015,
+    "total_runs": 669,
+    "successful_trajectories": 1,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "3aaa4e37-dc91-482e-99af-132a612d40f3": {
+    "domain": "libreoffice_calc",
+    "success_rate": 0.1607,
+    "total_runs": 112,
+    "successful_trajectories": 18,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "1273e544-688f-496b-8d89-3e0f40aa0606": {
+    "domain": "libreoffice_calc",
+    "success_rate": 0.1161,
+    "total_runs": 224,
+    "successful_trajectories": 26,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "6e99a1ad-07d2-4b66-a1ce-ece6d99c20a5": {
+    "domain": "libreoffice_calc",
+    "success_rate": 0.0759,
+    "total_runs": 224,
+    "successful_trajectories": 17,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "4172ea6e-6b77-4edb-a9cc-c0014bd1603b": {
+    "domain": "libreoffice_calc",
+    "success_rate": 0.0015,
+    "total_runs": 672,
+    "successful_trajectories": 1,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "455d3c66-7dc6-4537-a39a-36d3e9119df7": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.1429,
+    "total_runs": 112,
+    "successful_trajectories": 16,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "c59742c0-4323-4b9d-8a02-723c251deaa0": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.003,
+    "total_runs": 672,
+    "successful_trajectories": 2,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "a097acff-6266-4291-9fbd-137af7ecd439": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.0208,
+    "total_runs": 672,
+    "successful_trajectories": 14,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "21760ecb-8f62-40d2-8d85-0cee5725cb72": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.0982,
+    "total_runs": 224,
+    "successful_trajectories": 22,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "2cd43775-7085-45d8-89fa-9e35c0a915cf": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.0389,
+    "total_runs": 668,
+    "successful_trajectories": 26,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "73c99fb9-f828-43ce-b87a-01dc07faa224": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.3214,
+    "total_runs": 112,
+    "successful_trajectories": 36,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "2b94c692-6abb-48ae-ab0b-b3e8a19cb340": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.3304,
+    "total_runs": 112,
+    "successful_trajectories": 37,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "9cf05d24-6bd9-4dae-8967-f67d88f5d38a": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.067,
+    "total_runs": 224,
+    "successful_trajectories": 15,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "08aced46-45a2-48d7-993b-ed3fb5b32302": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.1696,
+    "total_runs": 112,
+    "successful_trajectories": 19,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "ac1b39ff-ee4d-4483-abce-c117e98942f0": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.0521,
+    "total_runs": 672,
+    "successful_trajectories": 35,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "f23acfd2-c485-4b7c-a1e7-d4303ddfe864": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.1429,
+    "total_runs": 112,
+    "successful_trajectories": 16,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "af2d657a-e6b3-4c6a-9f67-9e3ed015974c": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.0166,
+    "total_runs": 664,
+    "successful_trajectories": 11,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "5c1a6c3d-c1b3-47cb-9b01-8d1b7544ffa1": {
+    "domain": "libreoffice_impress",
+    "success_rate": 0.0759,
+    "total_runs": 224,
+    "successful_trajectories": 17,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "0810415c-bde4-4443-9047-d5f70165a697": {
+    "domain": "libreoffice_writer",
+    "success_rate": 0.4554,
+    "total_runs": 112,
+    "successful_trajectories": 51,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "0e763496-b6bb-4508-a427-fad0b6c3e195": {
+    "domain": "libreoffice_writer",
+    "success_rate": 0.0893,
+    "total_runs": 224,
+    "successful_trajectories": 20,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "3ef2b351-8a84-4ff2-8724-d86eae9b842e": {
+    "domain": "libreoffice_writer",
+    "success_rate": 0.25,
+    "total_runs": 112,
+    "successful_trajectories": 28,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "4bcb1253-a636-4df4-8cb0-a35c04dfef31": {
+    "domain": "libreoffice_writer",
+    "success_rate": 0.9018,
+    "total_runs": 112,
+    "successful_trajectories": 101,
+    "tier": "very_easy",
+    "budget": {
+      "min_elements": 8,
+      "max_elements": 12,
+      "min_categories": 4,
+      "max_categories": 6,
+      "description": "MAXIMUM noise budget: add 8-12 noise elements across 4+ categories, using EVERY noise category that applies to this task's domain. Easy tasks should not be gimmes. Pile on background apps, delayed notifications, filesystem clutter, recently-used-file seeding, window offsets, and domain-specific app clutter."
+    }
+  },
+  "6a33f9b9-0a56-4844-9c3f-96ec3ffb3ba2": {
+    "domain": "libreoffice_writer",
+    "success_rate": 0.2857,
+    "total_runs": 112,
+    "successful_trajectories": 32,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "72b810ef-4156-4d09-8f08-a0cf57e7cefe": {
+    "domain": "libreoffice_writer",
+    "success_rate": 0.4911,
+    "total_runs": 112,
+    "successful_trajectories": 55,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "d53ff5ee-3b1a-431e-b2be-30ed2673079b": {
+    "domain": "libreoffice_writer",
+    "success_rate": 0.0848,
+    "total_runs": 224,
+    "successful_trajectories": 19,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "e528b65e-1107-4b8c-8988-490e4fece599": {
+    "domain": "libreoffice_writer",
+    "success_rate": 0.1696,
+    "total_runs": 112,
+    "successful_trajectories": 19,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "ecc2413d-8a48-416e-a3a2-d30106ca36cb": {
+    "domain": "libreoffice_writer",
+    "success_rate": 0.2321,
+    "total_runs": 112,
+    "successful_trajectories": 26,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "2b9493d7-49b8-493a-a71b-56cd1f4d6908": {
+    "domain": "multi_apps",
+    "success_rate": 0.0402,
+    "total_runs": 672,
+    "successful_trajectories": 27,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "2c9fc0de-3ee7-45e1-a5df-c86206ad78b5": {
+    "domain": "multi_apps",
+    "success_rate": 0.0417,
+    "total_runs": 672,
+    "successful_trajectories": 28,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "510f64c8-9bcc-4be1-8d30-638705850618": {
+    "domain": "multi_apps",
+    "success_rate": 0.2768,
+    "total_runs": 112,
+    "successful_trajectories": 31,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "ee9a3c83-f437-4879-8918-be5efbb9fac7": {
+    "domain": "multi_apps",
+    "success_rate": 0.0804,
+    "total_runs": 336,
+    "successful_trajectories": 27,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "3a93cae4-ad3e-403e-8c12-65303b271818": {
+    "domain": "multi_apps",
+    "success_rate": 0.1607,
+    "total_runs": 112,
+    "successful_trajectories": 18,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "9219480b-3aed-47fc-8bac-d2cffc5849f7": {
+    "domain": "multi_apps",
+    "success_rate": 0.1518,
+    "total_runs": 112,
+    "successful_trajectories": 17,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "a462a795-fdc7-4b23-b689-e8b6df786b78": {
+    "domain": "os",
+    "success_rate": 0.0104,
+    "total_runs": 672,
+    "successful_trajectories": 7,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "f9be0997-4b7c-45c5-b05c-4612b44a6118": {
+    "domain": "os",
+    "success_rate": 0.6696,
+    "total_runs": 112,
+    "successful_trajectories": 75,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "5ea617a3-0e86-4ba6-aab2-dac9aa2e8d57": {
+    "domain": "os",
+    "success_rate": 0.6786,
+    "total_runs": 112,
+    "successful_trajectories": 76,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "e0df059f-28a6-4169-924f-b9623e7184cc": {
+    "domain": "os",
+    "success_rate": 0.8125,
+    "total_runs": 112,
+    "successful_trajectories": 91,
+    "tier": "very_easy",
+    "budget": {
+      "min_elements": 8,
+      "max_elements": 12,
+      "min_categories": 4,
+      "max_categories": 6,
+      "description": "MAXIMUM noise budget: add 8-12 noise elements across 4+ categories, using EVERY noise category that applies to this task's domain. Easy tasks should not be gimmes. Pile on background apps, delayed notifications, filesystem clutter, recently-used-file seeding, window offsets, and domain-specific app clutter."
+    }
+  },
+  "b3d4a89c-53f2-4d6b-8b6a-541fb5d205fa": {
+    "domain": "os",
+    "success_rate": 0.0506,
+    "total_runs": 336,
+    "successful_trajectories": 17,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "a4d98375-215b-4a4d-aee9-3d4370fccc41": {
+    "domain": "os",
+    "success_rate": 0.2143,
+    "total_runs": 112,
+    "successful_trajectories": 24,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "4783cc41-c03c-4e1b-89b4-50658f642bd5": {
+    "domain": "os",
+    "success_rate": 0.0357,
+    "total_runs": 672,
+    "successful_trajectories": 24,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "37887e8c-da15-4192-923c-08fa390a176d": {
+    "domain": "os",
+    "success_rate": 0.0625,
+    "total_runs": 336,
+    "successful_trajectories": 21,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "6f56bf42-85b8-4fbb-8e06-6c44960184ba": {
+    "domain": "os",
+    "success_rate": 0.0595,
+    "total_runs": 336,
+    "successful_trajectories": 20,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "dfac9ee8-9bc4-4cdc-b465-4a4bfcd2f397": {
+    "domain": "thunderbird",
+    "success_rate": 0.8661,
+    "total_runs": 112,
+    "successful_trajectories": 97,
+    "tier": "very_easy",
+    "budget": {
+      "min_elements": 8,
+      "max_elements": 12,
+      "min_categories": 4,
+      "max_categories": 6,
+      "description": "MAXIMUM noise budget: add 8-12 noise elements across 4+ categories, using EVERY noise category that applies to this task's domain. Easy tasks should not be gimmes. Pile on background apps, delayed notifications, filesystem clutter, recently-used-file seeding, window offsets, and domain-specific app clutter."
+    }
+  },
+  "9bc3cc16-074a-45ac-9bdc-b2a362e1daf3": {
+    "domain": "thunderbird",
+    "success_rate": 0.0402,
+    "total_runs": 672,
+    "successful_trajectories": 27,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "3f28fe4f-5d9d-4994-a456-efd78cfae1a3": {
+    "domain": "thunderbird",
+    "success_rate": 0.4911,
+    "total_runs": 112,
+    "successful_trajectories": 55,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "dd84e895-72fd-4023-a336-97689ded257c": {
+    "domain": "thunderbird",
+    "success_rate": 0.5446,
+    "total_runs": 112,
+    "successful_trajectories": 61,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "a10b69e1-6034-4a2b-93e1-571d45194f75": {
+    "domain": "thunderbird",
+    "success_rate": 0.3214,
+    "total_runs": 112,
+    "successful_trajectories": 36,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "f201fbc3-44e6-46fc-bcaa-432f9815454c": {
+    "domain": "thunderbird",
+    "success_rate": 0.0714,
+    "total_runs": 224,
+    "successful_trajectories": 16,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "10a730d5-d414-4b40-b479-684bed1ae522": {
+    "domain": "thunderbird",
+    "success_rate": 0.625,
+    "total_runs": 112,
+    "successful_trajectories": 70,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "8ba5ae7a-5ae5-4eab-9fcc-5dd4fe3abf89": {
+    "domain": "vlc",
+    "success_rate": 0.1518,
+    "total_runs": 112,
+    "successful_trajectories": 17,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "8f080098-ddb1-424c-b438-4e96e5e4786e": {
+    "domain": "vlc",
+    "success_rate": 0.0286,
+    "total_runs": 665,
+    "successful_trajectories": 19,
+    "tier": "very_hard",
+    "budget": {
+      "min_elements": 1,
+      "max_elements": 1,
+      "min_categories": 1,
+      "max_categories": 1,
+      "description": "MINIMAL noise budget: add EXACTLY 1 noise element from 1 category (a single `notify-send` notification). This task is near-impossible (success rate <= 5%); any additional noise risks driving the success rate to 0 and destroying training signal. Do not add background apps, filesystem clutter, or any other noise category."
+    }
+  },
+  "8d9fd4e2-6fdb-46b0-b9b9-02f06495c62f": {
+    "domain": "vlc",
+    "success_rate": 0.1786,
+    "total_runs": 112,
+    "successful_trajectories": 20,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "a5bbbcd5-b398-4c91-83d4-55e1e31bbb81": {
+    "domain": "vlc",
+    "success_rate": 0.2143,
+    "total_runs": 112,
+    "successful_trajectories": 24,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "cb130f0d-d36f-4302-9838-b3baf46139b6": {
+    "domain": "vlc",
+    "success_rate": 0.0595,
+    "total_runs": 672,
+    "successful_trajectories": 40,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "0ed39f63-6049-43d4-ba4d-5fa2fe04a951": {
+    "domain": "vs_code",
+    "success_rate": 0.183,
+    "total_runs": 224,
+    "successful_trajectories": 41,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "53ad5833-3455-407b-bbc6-45b4c79ab8fb": {
+    "domain": "vs_code",
+    "success_rate": 0.3571,
+    "total_runs": 112,
+    "successful_trajectories": 40,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "9439a27b-18ae-42d8-9778-5f68f891805e": {
+    "domain": "vs_code",
+    "success_rate": 0.2411,
+    "total_runs": 112,
+    "successful_trajectories": 27,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "276cc624-87ea-4f08-ab93-f770e3790175": {
+    "domain": "vs_code",
+    "success_rate": 0.1295,
+    "total_runs": 224,
+    "successful_trajectories": 29,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "9d425400-e9b2-4424-9a4b-d4c7abac4140": {
+    "domain": "vs_code",
+    "success_rate": 0.1429,
+    "total_runs": 112,
+    "successful_trajectories": 16,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "5e2d93d8-8ad0-4435-b150-1692aacaa994": {
+    "domain": "vs_code",
+    "success_rate": 0.5179,
+    "total_runs": 112,
+    "successful_trajectories": 58,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  },
+  "6ed0a554-cbee-4b44-84ea-fd6c042f4fe1": {
+    "domain": "vs_code",
+    "success_rate": 0.1757,
+    "total_runs": 222,
+    "successful_trajectories": 39,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "ec71221e-ac43-46f9-89b8-ee7d80f7e1c5": {
+    "domain": "vs_code",
+    "success_rate": 0.0774,
+    "total_runs": 672,
+    "successful_trajectories": 52,
+    "tier": "hard",
+    "budget": {
+      "min_elements": 2,
+      "max_elements": 3,
+      "min_categories": 1,
+      "max_categories": 2,
+      "description": "LIGHT noise budget: add 2-3 noise elements across 1-2 categories. Gentle realism only. Example: one background app launch (gedit) plus one notify-send. Do not overwhelm an already-hard task."
+    }
+  },
+  "70745df8-f2f5-42bd-8074-fbc10334fcc5": {
+    "domain": "vs_code",
+    "success_rate": 0.25,
+    "total_runs": 112,
+    "successful_trajectories": 28,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "57242fad-77ca-454f-b71b-f187181a9f23": {
+    "domain": "vs_code",
+    "success_rate": 0.2321,
+    "total_runs": 112,
+    "successful_trajectories": 26,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "c6bf789c-ba3a-4209-971d-b63abf0ab733": {
+    "domain": "vs_code",
+    "success_rate": 0.2589,
+    "total_runs": 112,
+    "successful_trajectories": 29,
+    "tier": "medium",
+    "budget": {
+      "min_elements": 4,
+      "max_elements": 5,
+      "min_categories": 2,
+      "max_categories": 3,
+      "description": "MODERATE noise budget: add 4-5 noise elements across 2-3 categories. Balanced noise: mix background apps + notifications + 1-2 decoy files or extra browser tabs. The task should still be tractable."
+    }
+  },
+  "0512bb38-d531-4acf-9e7e-0add90816068": {
+    "domain": "vs_code",
+    "success_rate": 0.4196,
+    "total_runs": 112,
+    "successful_trajectories": 47,
+    "tier": "easy",
+    "budget": {
+      "min_elements": 6,
+      "max_elements": 8,
+      "min_categories": 3,
+      "max_categories": 4,
+      "description": "SUBSTANTIAL noise budget: add 6-8 noise elements across 3-4 categories. Stress-test the agent: multiple background apps, delayed notifications, filesystem clutter, and (where applicable) window geometry offsets."
+    }
+  }
+}

@@ -1,0 +1,230 @@
+{
+  "id": "2ad9387a-65d8-4e33-ad5b-7580065a27ca",
+  "snapshot": "chrome",
+  "instruction": "Can you make a new folder for me on the bookmarks bar in my internet browser? Let's call it 'Favorites.'",
+  "source": "https://www.youtube.com/watch?v=IN-Eq_UripQ",
+  "config": [
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "google-chrome",
+          "--remote-debugging-port=1337"
+        ]
+      }
+    },
+    {
+      "type": "launch",
+      "parameters": {
+        "command": [
+          "socat",
+          "tcp-listen:9222,fork",
+          "tcp:localhost:1337"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "chrome"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "launch",
+        "parameters": {
+          "command": [
+            "pkill",
+            "chrome"
+          ]
+        }
+      },
+      {
+        "type": "launch",
+        "parameters": {
+          "command": [
+            "google-chrome",
+            "--remote-debugging-port=1337"
+          ]
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 3
+        }
+      }
+    ],
+    "func": "is_expected_bookmarks",
+    "result": {
+      "type": "bookmarks"
+    },
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "type": "bookmark_bar_folders_names",
+        "names": [
+          "Favorites"
+        ]
+      }
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "rubric_version": 2,
+    "trigger_mode": "action_triggered_probabilistic",
+    "tier": "easy",
+    "success_rate_used": 0.455,
+    "total_recovery_cost": 6,
+    "elements": [
+      {
+        "id": "n0",
+        "category": "passive_notification",
+        "severity": "low",
+        "recovery_cost": 0,
+        "recovery_actions": [],
+        "touches_target_app": false,
+        "once": false,
+        "description": "Random app/contact/subject toast; many variants.",
+        "command": [
+          "bash",
+          "-c",
+          "A=(Slack Email WhatsApp Calendar Teams Discord SMS Signal LinkedIn Twitter Reddit News System Weather Spotify YouTube Reminders Zoom Mail Drive); P=(Alex Maya Tom Priya Kenji Sarah Diego Yuki Ahmed Elena Jordan Sam Riley Chen Lee Park Kim Garcia Brown Wilson); S=(\"Can we chat briefly?\" \"Review this PR when you can\" \"Meeting moved to 3pm\" \"Urgent: please check\" \"Happy birthday!\" \"New message incoming\" \"Reminder: deadline tomorrow\" \"Security alert verified\" \"New version 22.1 available\" \"Ping me when free\" \"Daily digest ready\" \"Weekly summary attached\" \"Standup starts soon\" \"Coffee at 2?\" \"Quick favor please\" \"Update ready to install\"); a=${A[$((RANDOM % ${#A[@]}))]}; p=${P[$((RANDOM % ${#P[@]}))]}; s=${S[$((RANDOM % ${#S[@]}))]}; zenity --notification --window-icon=info --text \"$a — $p: $s\" 2>/dev/null &"
+        ]
+      },
+      {
+        "id": "n1",
+        "category": "passive_notification",
+        "severity": "low",
+        "recovery_cost": 0,
+        "recovery_actions": [],
+        "touches_target_app": false,
+        "once": false,
+        "description": "Random system-event toast.",
+        "command": [
+          "bash",
+          "-c",
+          "T=(\"Security updates are ready to install\" \"Wi-Fi reconnected to office network\" \"VPN status: connected\" \"Disk usage at 78%% of capacity\" \"Battery at 15%% — consider plugging in\" \"Bluetooth device paired\" \"Screen brightness auto-adjusted\" \"New external display detected\" \"System backup completed\" \"Time zone updated\" \"Keyboard layout switched\" \"Printer added successfully\" \"Software updater finished\" \"Location service enabled\" \"Firewall rule updated\"); m=${T[$((RANDOM % ${#T[@]}))]}; zenity --notification --window-icon=info --text \"System — $m\" 2>/dev/null &"
+        ]
+      },
+      {
+        "id": "n2",
+        "category": "target_window_shrink",
+        "severity": "medium",
+        "recovery_cost": 1,
+        "recovery_actions": [
+          "drag Chrome's bottom-right corner to resize back to full size"
+        ],
+        "touches_target_app": true,
+        "once": true,
+        "description": "Shrink Chrome to a randomized width/height at a randomized position.",
+        "command": [
+          "bash",
+          "-c",
+          "W=$((RANDOM % 500 + 650)); H=$((RANDOM % 350 + 450)); X=$((RANDOM % 400 + 80)); Y=$((RANDOM % 200 + 60)); wmctrl -r 'Google Chrome' -e \"0,$X,$Y,$W,$H\" 2>/dev/null || true"
+        ]
+      },
+      {
+        "id": "n3",
+        "category": "target_partial_overlap",
+        "severity": "medium",
+        "recovery_cost": 1,
+        "recovery_actions": [
+          "click on the visible portion of Chrome or on Chrome in the taskbar"
+        ],
+        "touches_target_app": true,
+        "once": true,
+        "description": "Random non-target app opens, positions itself randomly overlapping part of Chrome, pinned above.",
+        "command": [
+          "bash",
+          "-c",
+          "PAIR=(\"gedit|gedit\" \"nautilus /home/user|Nautilus\" \"gnome-calculator|Calculator\" \"gnome-system-monitor|System Monitor\"); p=${PAIR[$((RANDOM % ${#PAIR[@]}))]}; cmd=\"${p%%|*}\"; title=\"${p##*|}\"; eval \"$cmd >/dev/null 2>&1 & disown\"; sleep 0.5; OX=$((RANDOM % 700 + 100)); OY=$((RANDOM % 400 + 80)); OW=$((RANDOM % 300 + 500)); OH=$((RANDOM % 200 + 400)); wmctrl -r \"$title\" -e \"0,$OX,$OY,$OW,$OH\" 2>/dev/null; wmctrl -r \"$title\" -b add,above 2>/dev/null;"
+        ]
+      },
+      {
+        "id": "n4",
+        "category": "modal_dialog",
+        "severity": "medium",
+        "recovery_cost": 1,
+        "recovery_actions": [
+          "click the dialog button to dismiss"
+        ],
+        "touches_target_app": false,
+        "once": true,
+        "description": "Random title/text/style modal.",
+        "command": [
+          "bash",
+          "-c",
+          "TTL=(\"Software Updates\" \"Backup Manager\" \"Download Manager\" \"Certificate Manager\" \"Storage Alert\" \"Network Settings\" \"Privacy Notice\" \"Subscription Renewal\" \"License Expiry\"); TXT=(\"Updates are ready to install.\" \"Your scheduled backup has finished.\" \"Download has completed successfully.\" \"A certificate expires in 7 days.\" \"Disk space is running low (under 20%% free).\" \"Wi-Fi has reconnected.\" \"Consent to telemetry updated.\" \"Subscription renews automatically next month.\" \"License valid until next quarter.\" \"New features available in the latest release.\"); t=${TTL[$((RANDOM % ${#TTL[@]}))]}; x=${TXT[$((RANDOM % ${#TXT[@]}))]}; style=(info info question warning); s=${style[$((RANDOM % ${#style[@]}))]}; zenity --$s --title \"$t\" --text \"$x\" --width=340 >/dev/null 2>&1 &"
+        ]
+      },
+      {
+        "id": "n5",
+        "category": "non_target_focus_steal",
+        "severity": "medium",
+        "recovery_cost": 1,
+        "recovery_actions": [
+          "click Chrome to regain focus"
+        ],
+        "touches_target_app": false,
+        "once": false,
+        "description": "Random non-target app steals focus.",
+        "command": [
+          "bash",
+          "-c",
+          "n=$RANDOM; APPS=(\"gedit /tmp/scratch_$n.txt\" \"gedit --new-window\" \"gnome-terminal --geometry=80x20\" \"nautilus /home/user\" \"nautilus /tmp\" \"gnome-calculator\" \"gnome-text-editor\" \"xeyes\"); cmd=${APPS[$((RANDOM % ${#APPS[@]}))]}; $cmd >/dev/null 2>&1 & disown"
+        ]
+      },
+      {
+        "id": "n6",
+        "category": "non_target_occlusion",
+        "severity": "high",
+        "recovery_cost": 2,
+        "recovery_actions": [
+          "Alt-Tab to cycle back to Chrome",
+          "click on Chrome to restore focus"
+        ],
+        "touches_target_app": false,
+        "once": true,
+        "description": "Random non-target app opens, maximizes, and pins above-all — fully covers Chrome.",
+        "command": [
+          "bash",
+          "-c",
+          "PAIR=(\"gedit|gedit\" \"nautilus /home/user|Nautilus\" \"gnome-calculator|Calculator\" \"gnome-system-monitor|System Monitor\" \"gnome-text-editor|Text Editor\"); p=${PAIR[$((RANDOM % ${#PAIR[@]}))]}; cmd=\"${p%%|*}\"; title=\"${p##*|}\"; eval \"$cmd >/dev/null 2>&1 & disown\"; sleep 0.6; wmctrl -r \"$title\" -b add,maximized_vert,maximized_horz 2>/dev/null; wmctrl -r \"$title\" -b add,above 2>/dev/null;"
+        ]
+      },
+      {
+        "id": "n7",
+        "category": "background_window_open",
+        "severity": "low",
+        "recovery_cost": 0,
+        "recovery_actions": [],
+        "touches_target_app": false,
+        "once": false,
+        "description": "Random background app launches.",
+        "command": [
+          "bash",
+          "-c",
+          "APPS=(\"gnome-calculator\" \"gnome-system-monitor\" \"nautilus /tmp\" \"xeyes\"); cmd=${APPS[$((RANDOM % ${#APPS[@]}))]}; $cmd >/dev/null 2>&1 & disown"
+        ]
+      },
+      {
+        "id": "n8",
+        "category": "filesystem_clutter",
+        "severity": "low",
+        "recovery_cost": 0,
+        "recovery_actions": [],
+        "touches_target_app": false,
+        "once": false,
+        "description": "Touch 3 randomly-named files in a randomly-chosen directory.",
+        "command": [
+          "bash",
+          "-c",
+          "BASE=(/home/user/Desktop /tmp /home/user/Documents); DIRS=(\"draft\" \"todo\" \"notes\" \"ideas\" \"scratch\" \"review\" \"meeting\" \"agenda\" \"quick\"); EXT=(txt md log bak tmp); d=${BASE[$((RANDOM % ${#BASE[@]}))]}; for _ in 1 2 3; do n=${DIRS[$((RANDOM % ${#DIRS[@]}))]}_$RANDOM.${EXT[$((RANDOM % ${#EXT[@]}))]}; mkdir -p \"$d\" 2>/dev/null; touch \"$d/$n\" 2>/dev/null || true; done"
+        ]
+      }
+    ]
+  }
+}

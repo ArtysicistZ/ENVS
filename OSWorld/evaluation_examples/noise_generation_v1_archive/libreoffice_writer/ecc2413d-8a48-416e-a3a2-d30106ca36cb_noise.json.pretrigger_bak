@@ -1,0 +1,142 @@
+{
+  "id": "ecc2413d-8a48-416e-a3a2-d30106ca36cb",
+  "snapshot": "libreoffice_writer",
+  "instruction": "Hey, can you throw in a blank page right after this one?",
+  "source": "https://www.quora.com/How-can-I-insert-a-blank-page-on-libreoffice",
+  "config": [
+    {
+      "type": "download",
+      "parameters": {
+        "files": [
+          {
+            "url": "https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/libreoffice_writer/ecc2413d-8a48-416e-a3a2-d30106ca36cb/Sample_Statutory_Declaration.docx",
+            "path": "/home/user/Desktop/Sample_Statutory_Declaration.docx"
+          }
+        ]
+      }
+    },
+    {
+      "type": "open",
+      "parameters": {
+        "path": "/home/user/Desktop/Sample_Statutory_Declaration.docx"
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 90 + 15)) && notify-send 'Email' 'FW: Contract review — please check attached' && sleep $((RANDOM % 10 + 5)) && notify-send 'Calendar' 'Team stand-up starts in 5 minutes') >/dev/null 2>&1 &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 20 + 5)) && gedit 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 35 + 10)) && wmctrl -a 'LibreOffice Writer' 2>/dev/null && DISPLAY=:0 python3 -c \"import pyautogui; pyautogui.press('f5')\") &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(sleep $((RANDOM % 25 + 15)) && wmctrl -r 'LibreOffice Writer' -e 0,100,50,1440,900 2>/dev/null) &"
+        ]
+      }
+    },
+    {
+      "type": "execute",
+      "parameters": {
+        "command": [
+          "bash",
+          "-c",
+          "(while true; do sleep $((RANDOM % 60 + 20)); touch /home/user/Downloads/download_$RANDOM.tmp; done) >/dev/null 2>&1 &"
+        ]
+      }
+    }
+  ],
+  "trajectory": "trajectories/",
+  "related_apps": [
+    "libreoffice_writer"
+  ],
+  "evaluator": {
+    "postconfig": [
+      {
+        "type": "activate_window",
+        "parameters": {
+          "window_name": "Sample_Statutory_Declaration.docx - LibreOffice Writer",
+          "strict": true
+        }
+      },
+      {
+        "type": "sleep",
+        "parameters": {
+          "seconds": 0.5
+        }
+      },
+      {
+        "type": "execute",
+        "parameters": {
+          "command": [
+            "python",
+            "-c",
+            "import pyautogui; import time; pyautogui.hotkey('ctrl', 's'); time.sleep(0.5); "
+          ]
+        }
+      }
+    ],
+    "func": "contains_page_break",
+    "expected": {
+      "type": "rule",
+      "rules": {
+        "page_break_count": 5
+      }
+    },
+    "result": {
+      "type": "vm_file",
+      "path": "/home/user/Desktop/Sample_Statutory_Declaration.docx",
+      "dest": "Sample_Statutory_Declaration.docx"
+    }
+  },
+  "proxy": false,
+  "fixed_ip": false,
+  "possibility_of_env_change": "low",
+  "noise_meta": {
+    "generated_by": "noise_generation/generate_noise.py",
+    "model": "claude-sonnet-4-6",
+    "tier": "medium",
+    "success_rate_used": 0.2321,
+    "categories_applied": [
+      "random_notifications",
+      "background_apps",
+      "panel_toggle",
+      "window_geometry",
+      "filesystem_clutter"
+    ],
+    "noise_element_count": 5,
+    "added_step_indices": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ]
+  }
+}
