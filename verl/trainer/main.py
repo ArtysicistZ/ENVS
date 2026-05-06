@@ -23,9 +23,9 @@ python -m verl.trainer.main config=configs/8gpu_a100_n8_env16.yaml
 python -m verl.trainer.main config=configs/8gpu_a100_n8_env32.yaml
 python -m verl.trainer.main config=configs/16gpu_a100_n8_env48.yaml
 
-sudo -E /home/kevinzyz/yincheng/arpo/.venv/bin/python -m verl.trainer.main config=configs/8gpu_a100_n8_env32.yaml
+sudo -E .venv/bin/python -m verl.trainer.main config=configs/8gpu_a100_n8_env32.yaml
 
-sudo -E /home/kevinzyz/yincheng/arpo/.venv/bin/python -m verl.trainer.main config=configs/inference_306tasks_n8_env64.yaml
+sudo -E .venv/bin/python -m verl.trainer.main config=configs/inference_306tasks_n8_env64.yaml
 
 bash scripts/training/run_smoke_remote_env_8gpu_a100.sh
 

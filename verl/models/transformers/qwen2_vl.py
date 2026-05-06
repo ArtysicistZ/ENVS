@@ -272,7 +272,7 @@ def qwen_2_mixed_modality_forward(
         if attention_mask is not None:
             attention_mask = attention_mask.to(inputs_embeds.device)
 
-    # if we get 4D attention mask we cannot calculate rope deltas anymore. TODO @raushan fixme
+    # if we get 4D attention mask we cannot calculate rope deltas anymore. TODO: fixme
     if position_ids is None and (attention_mask is None or attention_mask.ndim == 2):
         # calculate RoPE index once per generation in the pre-fill stage only
         if (cache_position is not None and cache_position[0] == 0) or self.rope_deltas is None:

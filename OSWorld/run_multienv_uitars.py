@@ -109,7 +109,7 @@ def config() -> argparse.Namespace:
     # logging related
     parser.add_argument("--result_dir", type=str, default="./results")
     parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to run in parallel")
-    parser.add_argument("--server_ip", type=str, default="http://10.1.1.3")
+    parser.add_argument("--server_ip", type=str, default="http://127.0.0.1")
     parser.add_argument("--server_port", type=int, default=9000)
     parser.add_argument("--trial-id", type=str, default="0")
     args = parser.parse_args()

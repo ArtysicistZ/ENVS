@@ -16,7 +16,7 @@ build/
 # Environment
 .env
 venv/
-# Repo-local symlink to the shared virtualenv in ~/hansenzuishuai/.venv
+# Repo-local symlink to a shared virtualenv
 .venv/
 .venv
 *.venv/
@@ -68,20 +68,23 @@ models--*/
 # Temporary files
 *.tmp
 
-# Internal docs, configs, and tests (untracked for submission)
+# Internal docs, configs, and tests
 docs/
 configs/
 tests/
 
-# Internal eval task lists & local README (untracked for submission)
+# Internal eval task lists & local README
 OSWorld/evaluation_examples/test_*.json
 OSWorld/evaluation_examples/mcts_rerun_low23.json
 OSWorld/evaluation_examples/noise_overrides.json
 OSWorld/evaluation_examples/README.md
 
-# Internal scripts (untracked for submission — keep only scripts/servers/)
+# Internal scripts
 scripts/*
 !scripts/servers/
+
+# Stale rebase backup snapshots
+*.from_main
 
 # Keep structure but not large files
 !.gitkeep

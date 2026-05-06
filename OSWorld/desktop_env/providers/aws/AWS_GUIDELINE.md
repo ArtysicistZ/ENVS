@@ -100,7 +100,7 @@ If you are logged into the actual OSWorld desktop VM and want to start the new
 overlay-backed reset stack directly on that VM, run:
 
 ```bash
-bash /home/kevinzyz/yincheng/arpo/OSWorld/desktop_env/providers/aws/scripts/start_local_reset_stack.sh
+bash <REPO_ROOT>/OSWorld/desktop_env/providers/aws/scripts/start_local_reset_stack.sh
 ```
 
 This wrapper will:
@@ -146,13 +146,13 @@ much faster.
 If you want to disable auto-provisioning and fail immediately instead, run:
 
 ```bash
-OSWORLD_PROVISION_DESKTOP=0 bash /home/kevinzyz/yincheng/arpo/OSWorld/desktop_env/providers/aws/scripts/start_local_reset_stack.sh
+OSWORLD_PROVISION_DESKTOP=0 bash <REPO_ROOT>/OSWorld/desktop_env/providers/aws/scripts/start_local_reset_stack.sh
 ```
 
 If you prefer the raw one-liner, it is:
 
 ```bash
-sudo bash /home/kevinzyz/yincheng/arpo/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh
+sudo bash <REPO_ROOT>/OSWorld/desktop_env/providers/aws/scripts/install_resetd.sh
 ```
 
 Then verify:
