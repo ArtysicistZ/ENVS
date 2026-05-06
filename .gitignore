@@ -79,6 +79,76 @@ OSWorld/evaluation_examples/mcts_rerun_low23.json
 OSWorld/evaluation_examples/noise_overrides.json
 OSWorld/evaluation_examples/README.md
 
+# Internal scripts (untracked for submission — keep only canonical reproducibility kit)
+
+# Whole subdirectories
+scripts/testing/
+scripts/research/
+scripts/debug/
+scripts/analysis/
+
+# scripts/mcts/ — non-canonical
+scripts/mcts/smoke_*.py
+scripts/mcts/test_*.py
+scripts/mcts/run_rerun3_all_rounds.sh
+scripts/mcts/run_sweep4_2rounds.sh
+scripts/mcts/run_v3_round2_all_rounds.sh
+scripts/mcts/count_v3_noisy_steps.py
+scripts/mcts/probe_noise_visibility.py
+scripts/mcts/run_mcts_profiling.py
+scripts/mcts/prepare_v3_noisy_aligned.py
+scripts/mcts/prepare_v3_noisy_combined.py
+scripts/mcts/prepare_v3_noisy_metadata.py
+scripts/mcts/prepare_v2_subsample_fraction.py
+scripts/mcts/run_mcts_sft_v2.1_base_30pct.sh
+scripts/mcts/run_mcts_sft_v2.1_base_30pct_train_only.sh
+scripts/mcts/prepare_kto_audit_batches.py
+scripts/mcts/prepare_v2_audit_batches.py
+
+# scripts/training/ — non-canonical
+scripts/training/smoke_all_tasks.py
+scripts/training/run_training_with_wandb.py
+scripts/training/run_arpo_8gpu_noise_full.sh
+scripts/training/run_arpo_noise_mcts_sft_v2.1_base_30pct.sh
+scripts/training/run_arpo_noise_mcts_sft_v2.1_sparse.sh
+scripts/training/train_uitars_2b_arpo.sh
+scripts/training/start_remote_env_aws.sh
+
+# scripts/utils/ — non-canonical (keep clear_ray_logs.sh)
+scripts/utils/check_gpu_ray.py
+scripts/utils/check_multimodal_sp_actor.py
+scripts/utils/verify_data_and_remote_env.py
+
+# scripts/ top level — non-canonical (keep train_mcts_sft_v2.py)
+scripts/orchestrate_*.sh
+scripts/launch_46_arpo_after_evals.sh
+scripts/eval_new_arpo_after_training.sh
+scripts/rsync_45pct_to_46.sh
+scripts/run_sft_v2.sh
+scripts/run_sft_v2.1.sh
+scripts/run_sft_with_eval.sh
+scripts/run_mcts_sft_eval.sh
+scripts/run_sft_lr_sweep.sh
+scripts/train_mcts_kto.py
+scripts/extract_kto_negatives.py
+scripts/extract_kto_remove_negatives.py
+scripts/prepare_kto_audit_batches.py
+scripts/precompute_ref_logps.py
+scripts/train_mcts_sft.py
+scripts/train_sft.py
+scripts/select_sft_trajectories.py
+scripts/train_mcts_nsft.py
+
+# scripts/servers/ — non-canonical (keep remote_env_server.py + start_containers.py)
+scripts/servers/uitars_2b_server.py
+scripts/servers/uitars_7b_server.py
+
+# scripts/utils/ — additional non-canonical
+scripts/utils/model_merger.py
+
+# .from_main backup files (rebase leftovers)
+*.from_main
+
 # Keep structure but not large files
 !.gitkeep
 upstream_arpo/
