@@ -35,7 +35,7 @@ for url in http://10.100.4.6:15001 http://10.100.4.8:15001; do
     ALL_OK=0
     continue
   fi
-  state=$(echo "$resp" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(f"{d.get(\"healthy\")}/{d.get(\"target_pool_size\")}")' 2>/dev/null || echo 'parse-fail')
+  state=$(echo "$resp" | python3 -c 'import json,sys; d=json.load(sys.stdin); h=d.get("healthy"); t=d.get("target_pool_size"); print(str(h)+"/"+str(t))' 2>/dev/null || echo 'parse-fail')
   if [[ "$state" != "48/48" ]]; then
     echo "  ✗ $url: $state (expected 48/48)"
     ALL_OK=0
@@ -73,12 +73,12 @@ if [[ ! -f "$SR_FILE" ]]; then
 fi
 
 # ─── Activate venv + Ray + env tuning ──────────────────────────────────────
-if [[ -f /home/kevinzyz/hansenzuishuai/.venv/bin/activate ]]; then
+if [[ -f "${ROOT_DIR}/.venv/bin/activate" ]]; then
   # shellcheck disable=SC1091
-  source /home/kevinzyz/hansenzuishuai/.venv/bin/activate
+  source "${ROOT_DIR}/.venv/bin/activate"
 fi
 
-export RAY_memory_usage_threshold="${RAY_memory_usage_threshold:-0.85}"
+export RAY_memory_usage_threshold="${RAY_memory_usage_threshold:-0.95}"
 export RAY_memory_monitor_refresh_ms="${RAY_memory_monitor_refresh_ms:-0}"
 export PYTHONUNBUFFERED=1
 export HYDRA_FULL_ERROR=1

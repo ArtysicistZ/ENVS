@@ -189,8 +189,44 @@ def main():
         remote_server_urls=cfg["remote_server_urls"],
         output_dir=cfg["output_dir"],
         save_full_tree=cfg.get("save_full_tree", False),
+        # Noise config (v3)
+        enable_noise=cfg.get("enable_noise", False),
+        noise_mode=cfg.get("noise_mode", "runtime_library"),
+        noise_branch_probability=cfg.get("noise_branch_probability", 0.8),
+        noise_min_fire_step=cfg.get("noise_min_fire_step", 3),
+        noise_min_task_buffer=cfg.get("noise_min_task_buffer", 4),
+        noise_sr_file=cfg.get("noise_sr_file", ""),
     )
-    orchestrator = MCTSOrchestrator(config, vllm_pool, processor, tokenizer)
+
+    # Load per-task clean SR for noise fire count decisions
+    task_sr_map: dict = {}
+    sr_file = cfg.get("noise_sr_file", "")
+    if sr_file:
+        sr_path = os.path.join(PROJ_ROOT, sr_file)
+        if os.path.exists(sr_path):
+            with open(sr_path) as f:
+                sr_data = json.load(f)
+            # Handle both formats: {task_id: {success_rate: ...}} and {results: [...]}
+            if isinstance(sr_data, dict) and "results" not in sr_data:
+                for tid, info in sr_data.items():
+                    if isinstance(info, dict):
+                        task_sr_map[tid] = float(info.get("success_rate", 0))
+                    else:
+                        task_sr_map[tid] = float(info)
+            elif isinstance(sr_data, dict) and "results" in sr_data:
+                for r in sr_data["results"]:
+                    task_sr_map[r["task_id"]] = float(r.get("success_rate", 0))
+            logger.info("Loaded clean SR for %d tasks from %s", len(task_sr_map), sr_path)
+        else:
+            logger.warning("noise_sr_file not found: %s", sr_path)
+
+    if config.enable_noise:
+        logger.info("Noisy MCTS enabled: branch_prob=%.2f, min_fire_step=%d, min_buffer=%d",
+                     config.noise_branch_probability, config.noise_min_fire_step,
+                     config.noise_min_task_buffer)
+
+    orchestrator = MCTSOrchestrator(config, vllm_pool, processor, tokenizer,
+                                     task_sr_map=task_sr_map)
 
     # Run tasks
     task_workers = workers[:cfg["vms_per_task"]]
@@ -204,6 +240,25 @@ def main():
         logger.info("Task %d/%d: [%s] %s — %s",
                      task_idx + 1, len(all_tasks), domain, tid[:11], instruction)
         logger.info("=" * 70)
+
+        # Inject noise fields into task_config so env.reset() initializes noise_scheduler.
+        # Uses CRN within this task (all VMs see the same noise schedule); per-branch
+        # diversity would require a /env/reset-with-noise call when spawning children,
+        # which is a separate follow-up. For smoke tests + phase-1 collection this is fine.
+        if config.enable_noise:
+            tid = task_config.get("id", "")
+            sr = float(task_sr_map.get(tid, 0.5))
+            task_config = dict(task_config)
+            task_config["enable_noise"] = True
+            task_config["noise_mode"] = config.noise_mode
+            task_config["noise_probability"] = 0.1
+            task_config["noise_step_seed"] = hash((tid, task_idx)) & 0xFFFFFFFF
+            task_config["noise_success_rate"] = sr
+            task_config["noise_observed_sr"] = sr
+            task_config["noise_max_steps"] = int(config.max_steps)
+            task_config["noise_use_heldout"] = False
+            logger.info("[noise] task_config stamped: sr=%.3f, seed=%d", sr,
+                         task_config["noise_step_seed"])
 
         # Reset all VMs
         t0 = time.time()

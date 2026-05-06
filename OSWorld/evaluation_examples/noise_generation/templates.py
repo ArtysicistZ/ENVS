@@ -115,11 +115,12 @@ from app_browser_os_extra import (
     browser_install_extension_banner, browser_not_responding_banner,
     browser_close_multiple_tabs, browser_clear_browsing_data,
     browser_reopen_closed_tabs, browser_proxy_reconnect_required,
+    browser_proxy_auth_refresh, browser_dns_probe_recovering,
     os_disk_almost_full, os_wifi_connection_dialog, os_print_dialog_stuck,
     os_software_updater_banner, os_unattended_upgrades_notice,
     os_antivirus_scan_notice, os_firewall_block_notice,
     os_storage_quota_approaching, os_mail_arrived_toast,
-    os_vpn_tunnel_reconnecting,
+    os_vpn_tunnel_reconnecting, os_secure_gateway_flap,
     os_power_adapter_disconnected,
 )
 
@@ -1171,6 +1172,8 @@ TEMPLATE_CATALOG: List[Dict] = [
     {"name": "browser_clear_browsing_data","fn":browser_clear_browsing_data, "cost": 1, "category": "browser_overlay",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
     {"name": "browser_reopen_closed_tabs", "fn":browser_reopen_closed_tabs,  "cost": 1, "category": "browser_overlay",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
     {"name": "browser_proxy_reconnect_required","fn":browser_proxy_reconnect_required,"cost":2,"category":"network_proxy_event","touches_target":False,"once_default":True,"needs_target":False,"tier_group":3},
+    {"name": "browser_proxy_auth_refresh", "fn": browser_proxy_auth_refresh, "cost": 2, "category": "network_proxy_event", "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 3},
+    {"name": "browser_dns_probe_recovering", "fn": browser_dns_probe_recovering, "cost": 2, "category": "network_proxy_event", "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 3},
     {"name": "os_disk_almost_full",        "fn": os_disk_almost_full,        "cost": 1, "category": "os_device_event",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
     {"name": "os_wifi_connection_dialog",  "fn": os_wifi_connection_dialog,  "cost": 1, "category": "os_device_event",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
     {"name": "os_print_dialog_stuck",      "fn": os_print_dialog_stuck,      "cost": 1, "category": "os_device_event",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
@@ -1181,6 +1184,7 @@ TEMPLATE_CATALOG: List[Dict] = [
     {"name": "os_storage_quota_approaching","fn":os_storage_quota_approaching,"cost": 1, "category": "os_device_event",     "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 2},
     {"name": "os_mail_arrived_toast",      "fn": os_mail_arrived_toast,      "cost": 0, "category": "ambient_notification","touches_target": False, "once_default": False,"needs_target": False, "tier_group": 2},
     {"name": "os_vpn_tunnel_reconnecting", "fn": os_vpn_tunnel_reconnecting, "cost": 2, "category": "network_proxy_event", "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 3},
+    {"name": "os_secure_gateway_flap", "fn": os_secure_gateway_flap, "cost": 2, "category": "network_proxy_event", "touches_target": False, "once_default": True, "needs_target": False, "tier_group": 3},
     {"name": "os_power_adapter_disconnected","fn":os_power_adapter_disconnected,"cost":0,"category":"ambient_notification", "touches_target": False, "once_default": False,"needs_target": False, "tier_group": 2},
 
     # ═══ DIVERSE RECOVERY PATHS ─────────────────────────────────────────

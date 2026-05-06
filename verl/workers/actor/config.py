@@ -76,6 +76,8 @@ class ActorConfig:
     clip_ratio_high: float = 0.3
     clip_ratio_dual: float = 3.0
     ppo_epochs: int = 1
+    entropy_coef: float = 0.0
+    noisy_entropy_coef: float = 0.0
     padding_free: bool = False
     ulysses_sequence_parallel_size: int = 1
     use_torch_compile: bool = True

@@ -570,7 +570,8 @@ class DataParallelPPOActor(BasePPOActor):
                         metrics["actor/kl_loss"] = kl_loss.detach().item()
                         metrics["actor/kl_coef"] = self.config.kl_coef
 
-                    loss = pg_loss / gradient_accumulation
+                    entropy_coef = self.config.noisy_entropy_coef if self.config.noisy_entropy_coef > 0 else self.config.entropy_coef
+                    loss = (pg_loss - entropy_coef * entropy_loss) / gradient_accumulation
                     # Free any intermediates before backward to maximize headroom for
                     # the gradient allocation (~11 GiB for logits gradient with 40K+ tokens).
                     del log_probs  # breaks ref; autograd still holds what it needs via SavedVariables
@@ -587,6 +588,7 @@ class DataParallelPPOActor(BasePPOActor):
                         "actor/pg_clipfrac_higher": pg_clipfrac_higher.detach().item(),
                         "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
                         "actor/entropy_loss": entropy_loss.detach().item(),
+                        "actor/entropy_coef": float(entropy_coef),
                         "actor/ppo_kl": ppo_kl.detach().item(),
                     }
                     append_to_dict(metrics, batch_metrics)

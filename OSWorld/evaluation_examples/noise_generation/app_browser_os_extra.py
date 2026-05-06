@@ -237,6 +237,67 @@ MSG="The network tunnel was interrupted.\nChrome is retrying through the secure 
 """)
 
 
+def browser_proxy_auth_refresh() -> str:
+    """Simulate an authenticated proxy session expiring and refreshing.
+    Recovery is mostly temporal: browser traffic fails briefly, then recovers. Cost 2."""
+    return _c(r"""
+TITLE="Proxy authentication expired";
+MSG="The secure browsing proxy needs to refresh credentials.
+Requests may fail briefly until the session is renewed.";
+(
+  fuser -k 18888/tcp 2>/dev/null || true;
+  pkill -f '/tmp/mini_proxy.py' 2>/dev/null || true;
+  zenity --warning --title "$TITLE" --text "$MSG" --width=430 >/dev/null 2>&1 &
+  (
+    sleep $((RANDOM % 7 + 12));
+    if [ -f /tmp/mini_proxy.py ]; then
+      nohup python3 /tmp/mini_proxy.py >/tmp/mini_proxy_noise.log 2>&1 &
+    fi
+    zenity --notification --window-icon=info --text "Secure proxy session refreshed" 2>/dev/null &
+  ) >/dev/null 2>&1 &
+) >/dev/null 2>&1 &
+""")
+
+
+def browser_dns_probe_recovering() -> str:
+    """Cause a short DNS-resolution style outage via the proxy path, then recover. Cost 2."""
+    return _c(r"""
+(
+  fuser -k 18888/tcp 2>/dev/null || true;
+  pkill -f '/tmp/mini_proxy.py' 2>/dev/null || true;
+  zenity --error --title "DNS probe started" --text "Temporary name resolution failure detected.
+Chrome will retry once the secure route stabilizes." --width=430 >/dev/null 2>&1 &
+  (
+    sleep $((RANDOM % 5 + 7));
+    if [ -f /tmp/mini_proxy.py ]; then
+      nohup python3 /tmp/mini_proxy.py >/tmp/mini_proxy_noise.log 2>&1 &
+    fi
+  ) >/dev/null 2>&1 &
+) >/dev/null 2>&1 &
+""")
+
+
+def os_secure_gateway_flap() -> str:
+    """Simulate a corporate secure gateway route flap with a recoverable reconnect. Cost 2."""
+    return _c(r"""
+GATEWAYS=("Secure Gateway" "Remote Access Edge" "Work Tunnel" "Enterprise Relay");
+g=${GATEWAYS[$((RANDOM % ${#GATEWAYS[@]}))]};
+(
+  fuser -k 18888/tcp 2>/dev/null || true;
+  pkill -f '/tmp/mini_proxy.py' 2>/dev/null || true;
+  zenity --warning --title "$g instability" --text "$g detected route instability.
+Re-establishing protected network path..." --width=420 >/dev/null 2>&1 &
+  (
+    sleep $((RANDOM % 6 + 9));
+    if [ -f /tmp/mini_proxy.py ]; then
+      nohup python3 /tmp/mini_proxy.py >/tmp/mini_proxy_noise.log 2>&1 &
+    fi
+    zenity --notification --window-icon=info --text "$g stabilized" 2>/dev/null &
+  ) >/dev/null 2>&1 &
+) >/dev/null 2>&1 &
+""")
+
+
 def os_vpn_tunnel_reconnecting() -> str:
     """Simulate a VPN/proxy tunnel drop with a short reconnect window.
     Recoverable by waiting or retrying after the tunnel comes back. Cost 2."""

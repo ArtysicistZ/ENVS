@@ -61,6 +61,18 @@ class MCTSConfig:
     # ---- Task file ----
     task_file: str = "OSWorld/evaluation_examples/test_all_300tasks_noproxy_softreset_clean.json"
 
+    # ---- Noise (v3: per-branch random noise) ----
+    enable_noise: bool = False
+    noise_mode: str = "runtime_library"
+    noise_branch_probability: float = 0.8   # 80% noisy, 20% clean control
+    noise_min_fire_step: int = 3            # no noise in first N steps
+    noise_min_task_buffer: int = 4          # min steps after recovery for task completion
+    noise_sr_file: str = ""                 # collection_results.json with per-task clean SR
+    # Fire count per clean SR:
+    #   SR < 0.15  → 0 fires (protect very hard tasks)
+    #   SR 0.15–0.60 → 1 fire (any element, feasibility-constrained placement)
+    #   SR > 0.60  → 2 fires (sequential, non-overlapping recovery windows)
+
     # ---- Output ----
     output_dir: str = "checkpoints/mcts_trajectories"
     save_full_tree: bool = False      # v2: save full tree JSON (all nodes + Q-values)

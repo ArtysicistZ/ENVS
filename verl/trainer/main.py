@@ -157,10 +157,10 @@ def main():
         else:
             # Single-node: start fresh local cluster. Clear RAY_ADDRESS to avoid
             # connecting to a stale cluster whose session dir may have been removed.
+            # Only strip RAY_ADDRESS — preserve other RAY_* vars (e.g. RAY_TMPDIR
+            # for /mnt-backed sessions on hosts with small /tmp).
             ray_address = "local"
-            for key in list(os.environ):
-                if key.startswith("RAY_"):
-                    os.environ.pop(key, None)
+            os.environ.pop("RAY_ADDRESS", None)
         ray.init(
             address=ray_address,
             runtime_env={"env_vars": {

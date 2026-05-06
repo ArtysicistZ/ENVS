@@ -40,12 +40,16 @@ DOCKER_NETWORK = os.environ.get("OSWORLD_DOCKER_NETWORK", "osworld-net")
 CONTAINER_SERVER_PORT = 5000   # osworld-server (Flask)
 CONTAINER_RESETD_PORT = 5001   # osworld-resetd (Flask)
 
-# Per-container resource limits (tune via env vars for your host)
-# Memory: desktop stack + Chrome + apps ≈ 3-4 GB per container.
-# At 64 containers with 6 GB limit each → 384 GB max (the limit is per-container
-# ceiling, not a reservation; actual RSS is typically 3-4 GB).
-CONTAINER_MEM_LIMIT = os.environ.get("OSWORLD_CONTAINER_MEM_LIMIT", "6g")
-CONTAINER_MEMSWAP_LIMIT = os.environ.get("OSWORLD_CONTAINER_MEMSWAP_LIMIT", "8g")
+# Per-container resource limits (tune via env vars for your host).
+# Memory: desktop stack + Chrome + apps ≈ 3-4 GB baseline. Noise templates can
+# open GIMP + gedit + nautilus + Chromium simultaneously alongside the agent's
+# task app (e.g. LibreOffice Impress). The old 6 GiB limit caused Docker
+# OOM-kills mid-rollout, which cascaded into NCCL timeouts on the trainer side.
+# Raised to 12 GiB (swap 16 GiB). At 48 containers × 12 GiB = 576 GiB ceiling
+# (host has ~1.7 TB total). RSS typically stays around 3-5 GiB per container
+# so the ceiling is rarely hit — it's headroom for noise + task co-existence.
+CONTAINER_MEM_LIMIT = os.environ.get("OSWORLD_CONTAINER_MEM_LIMIT", "0")  # 0 = no limit
+CONTAINER_MEMSWAP_LIMIT = os.environ.get("OSWORLD_CONTAINER_MEMSWAP_LIMIT", "0")  # 0 = no limit
 # CPU: fractional CPUs per container.  0 = no limit (Docker default).
 CONTAINER_CPUS = float(os.environ.get("OSWORLD_CONTAINER_CPUS", "0"))
 # /tmp tmpfs size per container.  Overlay session dirs need ~50 MB; 512 MB gives
@@ -313,9 +317,9 @@ class DockerProvider(Provider):
             shm_size="256m",
             restart_policy={"Name": "unless-stopped"},
         )
-        if CONTAINER_MEM_LIMIT:
+        if CONTAINER_MEM_LIMIT and CONTAINER_MEM_LIMIT != "0":
             run_kwargs["mem_limit"] = CONTAINER_MEM_LIMIT
-        if CONTAINER_MEMSWAP_LIMIT:
+        if CONTAINER_MEMSWAP_LIMIT and CONTAINER_MEMSWAP_LIMIT != "0":
             run_kwargs["memswap_limit"] = CONTAINER_MEMSWAP_LIMIT
         if CONTAINER_CPUS > 0:
             run_kwargs["nano_cpus"] = int(CONTAINER_CPUS * 1e9)

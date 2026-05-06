@@ -16,6 +16,7 @@ The main entry point to run the PPO algorithm
 """
 
 import os
+from datetime import timedelta
 from typing import Literal, Optional, Union
 from contextlib import nullcontext
 
@@ -106,8 +107,10 @@ class FSDPWorker(Worker):
             local_rank = int(
                 os.environ.get("LOCAL_RANK", os.environ.get("RAY_LOCAL_RANK", os.environ.get("RANK", "0"))))
             torch.cuda.set_device(local_rank)
-            # Do NOT pass device_id — eager connect is incompatible with NCCL over TCP sockets
-            dist.init_process_group(backend="nccl")
+            # Do NOT pass device_id — eager connect is incompatible with NCCL over TCP sockets.
+            # timeout=2h: rollout phases can take >10 min on slow OSWorld tasks; default 600s
+            # NCCL watchdog kills the process group when one rank lags behind others (2026-04-27).
+            dist.init_process_group(backend="nccl", timeout=timedelta(hours=2))
 
         # improve numerical stability
         torch.backends.cuda.matmul.allow_tf32 = False

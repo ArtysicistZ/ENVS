@@ -134,6 +134,90 @@ def fires_for_sr(sr: float, rng: random.Random) -> int:
     return rng.randint(3, 5)
 
 
+def fires_for_sr_mcts(sr: float) -> int:
+    """MCTS collection fire count — adaptive to task difficulty.
+
+    Unlike ``fires_for_sr`` (used in ARPO training with CRN), this function
+    is deterministic (no rng) because each MCTS branch gets its own seed.
+
+    Buckets:
+      SR < 0.15  → 0 fires (very hard task: noise would only produce failures)
+      SR 0.15–0.60 → 1 fire (recoverable single disruption)
+      SR > 0.60  → 2 fires (easy task can handle sequential disruptions)
+    """
+    if sr < 0.15:
+        return 0
+    if sr <= 0.60:
+        return 1
+    return 2
+
+
+def fires_for_task_eval(task_id: str) -> int:
+    """Deterministic fire count for noisy evaluation: always 1 per task.
+
+    Every task in the 300-task eval gets exactly one held-out noise fire.
+    We dropped the prior 80/20 noisy/clean hash-partition because a 56-task
+    within-run clean control has almost no statistical power at n=1, and
+    external clean baselines (e.g. sft_v1/eval_baseline_greedy) serve that
+    role far better. The `task_id` argument is kept for call-site
+    compatibility and for future per-task customization.
+    """
+    return 1 if task_id else 0
+
+
+def feasibility_constrained_fire_steps(
+    count: int,
+    max_steps: int,
+    element_costs: List[int],
+    rng: random.Random,
+    min_fire_step: int = 3,
+    min_task_buffer: int = 4,
+) -> List[int]:
+    """Place ``count`` fire steps such that recovery is always feasible.
+
+    Each fire must leave enough remaining steps for recovery AND task work:
+      fire_step <= max_steps - recovery_cost - min_task_buffer
+
+    For 2 fires the windows are non-overlapping: fire 1 in the first half,
+    fire 2 in the second half (after fire 1's recovery window).
+
+    Returns sorted fire-step indices, possibly fewer than ``count`` if
+    feasibility cannot be satisfied for all elements.
+    """
+    if count <= 0 or max_steps <= 0 or not element_costs:
+        return []
+
+    steps: List[int] = []
+
+    if count == 1:
+        cost = element_costs[0]
+        hi = max_steps - cost - min_task_buffer
+        if hi < min_fire_step:
+            return []  # element too costly for this horizon
+        steps.append(rng.randint(min_fire_step, hi))
+
+    elif count >= 2:
+        # Fire 1: first half of the rollout
+        cost1 = element_costs[0]
+        mid = max_steps // 2
+        hi1 = min(mid, max_steps - cost1 - min_task_buffer)
+        if hi1 < min_fire_step:
+            return []  # first element infeasible
+        step1 = rng.randint(min_fire_step, hi1)
+        steps.append(step1)
+
+        # Fire 2: second half, after fire 1's recovery window
+        cost2 = element_costs[1] if len(element_costs) > 1 else element_costs[0]
+        lo2 = step1 + cost1 + 2  # +2 for perception + execution gap
+        hi2 = max_steps - cost2 - min_task_buffer
+        if lo2 > hi2:
+            # Second fire infeasible — return only the first
+            return steps
+        steps.append(rng.randint(lo2, hi2))
+
+    return sorted(steps)
+
+
 def bucket_spaced_fire_steps(count: int, max_steps: int, rng: random.Random) -> List[int]:
     """Pick `count` fire-step indices in `[0, max_steps)` with bucket-based
     spacing to prevent harmful clumping (e.g. 5 fires all in steps 0-4).
@@ -306,23 +390,30 @@ class RuntimeNoiseSampler:
         max_steps: int,
         avoid_categories: Optional[Set[str]] = None,
         use_heldout: bool = False,
+        is_eval: bool = False,
     ) -> List[Dict]:
         """v4 deterministic fire schedule.
 
         Returns a list of materialized noise elements, each with an extra
         `fire_step` field giving the agent step index at which it should fire.
-        Count is determined by `fires_for_sr(sr)`; fire-step indices are
-        bucket-spaced uniformly within `[0, max_steps)` so the rollout is not
-        front-loaded with a clump of noise.
+        Count is determined by `fires_for_sr(sr)` (or `fires_for_task_eval` when
+        ``is_eval=True``); fire-step indices are bucket-spaced uniformly within
+        `[0, max_steps)` so the rollout is not front-loaded with a clump of noise.
 
-        Determinism: all randomness (count, fire steps, element selection) goes
+        Determinism: all randomness (fire steps, element selection) goes
         through `self.rng`. With Fix A's `(task_id, training_step)` seed, all
-        n rollouts in a GRPO group get the SAME schedule.
+        n rollouts in a GRPO group get the SAME schedule. When ``is_eval=True``,
+        the count is a pure function of task_id (SR-independent) and the seed
+        is expected to be fixed (noise_step_seed=0), making the schedule
+        identical across every eval run.
 
-        Hard-task protection: SR < 0.10 returns []; the sampler is a no-op
-        and `noise_enabled` will be False on the env side.
+        Hard-task protection (training only): SR < 0.10 returns [].
+        Eval: ~20% of tasks (by md5-hash partition) return []; the rest fire once.
         """
-        count = fires_for_sr(sr, self.rng)
+        if is_eval:
+            count = fires_for_task_eval(task_json.get("id", ""))
+        else:
+            count = fires_for_sr(sr, self.rng)
         if count <= 0 or max_steps <= 0:
             return []
 
@@ -380,4 +471,5 @@ __all__ = [
     "HELDOUT_TEMPLATE_NAMES",
     "TIER_COST_CAP",
     "tier_for_success_rate",
+    "fires_for_task_eval",
 ]

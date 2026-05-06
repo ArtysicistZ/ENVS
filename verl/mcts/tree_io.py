@@ -119,6 +119,15 @@ def _serialize_node(node: TreeNode) -> Dict[str, Any]:
         # Used to slice the correct prefix from parent during reconstruction.
         # For root: 0 (no parent).
         "parent_steps_at_branch": getattr(node, "parent_steps_at_branch", 0),
+
+        # Noise metadata (v3 noisy MCTS — empty/defaults for clean collection)
+        "noise_enabled": getattr(node, "noise_enabled", False),
+        "noise_seed": getattr(node, "noise_seed", 0),
+        "noise_fire_count": getattr(node, "noise_fire_count", 0),
+        "noise_fire_steps": list(getattr(node, "noise_fire_steps", [])),
+        "noise_events_fired": list(getattr(node, "noise_events_fired", [])),
+        "noise_recovery_events": list(getattr(node, "noise_recovery_events", [])),
+        "noise_total_recovery_cost": getattr(node, "noise_total_recovery_cost", 0),
     }
 
 

@@ -1,0 +1,163 @@
+{
+  "n_paired_tasks": 86,
+  "rollouts_per_task": 8,
+  "totals": {
+    "sft_pass1_mean": 0.3866279069767442,
+    "arpo_pass1_mean": 0.4055232558139535,
+    "sft_pass8_count": 71,
+    "arpo_pass8_count": 74
+  },
+  "transitions_pass8": {
+    "PP": 63,
+    "FP": 11,
+    "PF": 8,
+    "FF": 4
+  },
+  "H1_within_success_rollouts": {
+    "sft": {
+      "n_unique_fns": 3.819548872180451,
+      "n_unique_coord_clusters": 6.319548872180451,
+      "max_run": 4.7781954887218046,
+      "n_self_correct": 0.3157894736842105,
+      "bandf": 1.0263157894736843,
+      "first3_bad": 1.4248120300751879,
+      "recover_rate": 0.935166570923543,
+      "n": 10.169172932330827
+    },
+    "n_sft_rollouts": 266,
+    "arpo": {
+      "n_unique_fns": 3.802867383512545,
+      "n_unique_coord_clusters": 6.211469534050179,
+      "max_run": 4.763440860215054,
+      "n_self_correct": 0.3225806451612903,
+      "bandf": 1.103942652329749,
+      "first3_bad": 1.3799283154121864,
+      "recover_rate": 0.9348242090368074,
+      "n": 10.186379928315413
+    },
+    "n_arpo_rollouts": 279
+  },
+  "H1_within_fail_rollouts": {
+    "sft": {
+      "n_unique_fns": 3.4549763033175354,
+      "n_unique_coord_clusters": 6.983412322274882,
+      "max_run": 5.845971563981043,
+      "n_self_correct": 0.9715639810426541,
+      "bandf": 2.0473933649289098,
+      "first3_bad": 1.3601895734597156,
+      "recover_rate": 0.8572528302307715,
+      "n": 13.315165876777252
+    },
+    "n_sft_rollouts": 422,
+    "arpo": {
+      "n_unique_fns": 3.4180929095354524,
+      "n_unique_coord_clusters": 7.0513447432762835,
+      "max_run": 6.1222493887530565,
+      "n_self_correct": 0.9682151589242054,
+      "bandf": 1.8484107579462103,
+      "first3_bad": 1.374083129584352,
+      "recover_rate": 0.8507921549483262,
+      "n": 13.317848410757946
+    },
+    "n_arpo_rollouts": 409
+  },
+  "H1_paired_success_tasks_only": {
+    "n_tasks": 63,
+    "sft": {
+      "n_unique_fns": 3.7905138339920947,
+      "n_unique_coord_clusters": 6.2727272727272725,
+      "max_run": 4.798418972332016,
+      "n_self_correct": 0.3241106719367589,
+      "bandf": 1.023715415019763,
+      "first3_bad": 1.4308300395256917,
+      "recover_rate": 0.9363799715690472,
+      "n": 10.031620553359684
+    },
+    "arpo": {
+      "n_unique_fns": 3.809338521400778,
+      "n_unique_coord_clusters": 6.346303501945525,
+      "max_run": 4.832684824902723,
+      "n_self_correct": 0.3229571984435798,
+      "bandf": 1.0311284046692606,
+      "first3_bad": 1.4124513618677044,
+      "recover_rate": 0.9373390498390498,
+      "n": 10.17509727626459
+    },
+    "n_sft_rollouts": 253,
+    "n_arpo_rollouts": 257
+  },
+  "H1_regression_cohort": {
+    "n_tasks": 8,
+    "sft_success_rollouts": {
+      "n_unique_fns": 4.384615384615385,
+      "n_unique_coord_clusters": 7.230769230769231,
+      "max_run": 4.384615384615385,
+      "n_self_correct": 0.15384615384615385,
+      "bandf": 1.0769230769230769,
+      "first3_bad": 1.3076923076923077,
+      "recover_rate": 0.9129520052596976,
+      "n": 12.846153846153847
+    },
+    "n_sft_rollouts": 13,
+    "arpo_fail_rollouts": {
+      "n_unique_fns": 3.5,
+      "n_unique_coord_clusters": 7.15625,
+      "max_run": 5.609375,
+      "n_self_correct": 0.828125,
+      "bandf": 1.96875,
+      "first3_bad": 1.328125,
+      "recover_rate": 0.8386753501507599,
+      "n": 13.71875
+    },
+    "n_arpo_rollouts": 64
+  },
+  "H2_wandering": {
+    "steps_sft_success": 10.169172932330827,
+    "steps_arpo_success": 10.186379928315413,
+    "steps_sft_fail": 13.315165876777252,
+    "steps_arpo_fail": 13.317848410757946,
+    "paired_both_fail_sft": 14.75,
+    "paired_both_fail_arpo": 14.90625
+  },
+  "H3_first3": {
+    "marginal_clean": 0.37727272727272726,
+    "n_clean": 220,
+    "marginal_dirty": 0.39965397923875434,
+    "n_dirty": 1156
+  },
+  "H4_cross_rollout_entropy": {
+    "sft_mean": 0.6934857995014759,
+    "arpo_mean": 0.6773198926524101,
+    "paired_sft_minus_arpo": 0.01616590684906592,
+    "by_cohort": {
+      "PP (both pass)": {
+        "sft": 0.6904866539162385,
+        "arpo": 0.657801248941177,
+        "n": 63
+      },
+      "PF (regression)": {
+        "sft": 0.6961459588899541,
+        "arpo": 0.739951856006558,
+        "n": 8
+      },
+      "FP (gain)": {
+        "sft": 0.7610329695447002,
+        "arpo": 0.8082071057921424,
+        "n": 11
+      },
+      "FF (both fail)": {
+        "sft": 0.5496473060731399,
+        "arpo": 0.49953476826177123,
+        "n": 4
+      }
+    }
+  },
+  "H5_pass8_minus_pass1": {
+    "sft_all": 0.438953488372093,
+    "arpo_all": 0.45494186046511625,
+    "sft_solvable_only": 0.5316901408450704,
+    "arpo_solvable_only": 0.5287162162162162,
+    "n_sft_solvable": 71,
+    "n_arpo_solvable": 74
+  }
+}

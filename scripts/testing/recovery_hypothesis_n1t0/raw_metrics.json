@@ -1,0 +1,53 @@
+{
+  "n_paired_tasks": 86,
+  "transitions": {
+    "P->P": 30,
+    "F->F": 25,
+    "F->P": 17,
+    "P->F": 14
+  },
+  "H1": {
+    "cohort_unique_fns": {
+      "SFT_pass": 3.727272727272727,
+      "ARPO_pass": 3.6808510638297873,
+      "SFT_fail": 3.0952380952380953,
+      "ARPO_fail": 2.6666666666666665
+    },
+    "cohort_recover_rate": {
+      "SFT_pass": 0.8868777862963909,
+      "ARPO_pass": 0.8959230471425593,
+      "SFT_fail": 0.6470393427710501,
+      "ARPO_fail": 0.6265154361308207
+    },
+    "regression_pair": {
+      "unique_fns_sft": 3.7857142857142856,
+      "unique_fns_arpo": 2.857142857142857,
+      "unique_clusters_sft": 6.357142857142857,
+      "unique_clusters_arpo": 4.714285714285714,
+      "self_correct_sft": 0.8571428571428571,
+      "self_correct_arpo": 1.7142857142857142,
+      "recover_rate_sft": 0.8655895691609977,
+      "recover_rate_arpo": 0.6905197976626548,
+      "bandf_sft": 1.4285714285714286,
+      "bandf_arpo": 2.7857142857142856
+    }
+  },
+  "H2": {
+    "steps_sft_fail": 13.785714285714286,
+    "steps_arpo_fail": 14.384615384615385,
+    "steps_sft_pass": 11.113636363636363,
+    "steps_arpo_pass": 9.808510638297872,
+    "steps_paired_both_fail_sft": 13.76,
+    "steps_paired_both_fail_arpo": 14.72
+  },
+  "H3": {
+    "marginal_success_clean3": 0.5555555555555556,
+    "marginal_success_dirty3": 0.5241379310344828,
+    "regress_first3_sft": 1.4285714285714286,
+    "regress_first3_arpo": 1.5,
+    "gain_first3_sft": 1.2352941176470589,
+    "gain_first3_arpo": 1.1764705882352942,
+    "n_clean": 27,
+    "n_dirty": 145
+  }
+}

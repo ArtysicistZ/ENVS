@@ -37,6 +37,7 @@ class MCTSEnvClient:
         self.remote_server_url = remote_server_url.rstrip("/")
         self.step_counter = 0
         self.is_done = False
+        self.last_noise_burden = None
 
     def _post(self, path: str, json_body: dict, timeout: float = 60) -> dict:
         url = f"{self.remote_server_url}{path}"
@@ -69,16 +70,28 @@ class MCTSEnvClient:
         self.is_done = True
         return {"env_idx": self.worker_idx, "obs_messages": None, "is_done": True}
 
-    def step(self, prediction: str) -> dict:
-        """Execute one action on the VM."""
+    def step(self, prediction: str, noise_probability: float = 0.0) -> dict:
+        """Execute one action on the VM.
+
+        Args:
+            prediction: action string to execute.
+            noise_probability: passed through to env server (v4: ignored by
+                deterministic scheduler, kept for back-compat).
+        """
         try:
             resp = self._post(
                 "/env/step",
-                {"prediction": prediction, "slot_id": self.slot_id},
+                {
+                    "prediction": prediction,
+                    "slot_id": self.slot_id,
+                    "noise_probability": noise_probability,
+                },
                 timeout=self.STEP_TIMEOUT,
             )
             self.is_done = resp.get("is_done", False)
             self.step_counter += 1
+            # Capture noise burden if present (v3 noisy MCTS)
+            self.last_noise_burden = resp.get("noise_burden")
             return resp
         except Exception as e:
             logger.error("Step failed for slot %d: %s", self.slot_id, e)

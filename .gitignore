@@ -68,6 +68,17 @@ models--*/
 # Temporary files
 *.tmp
 
+# Internal docs, configs, and tests (untracked for submission)
+docs/
+configs/
+tests/
+
+# Internal eval task lists & local README (untracked for submission)
+OSWorld/evaluation_examples/test_*.json
+OSWorld/evaluation_examples/mcts_rerun_low23.json
+OSWorld/evaluation_examples/noise_overrides.json
+OSWorld/evaluation_examples/README.md
+
 # Keep structure but not large files
 !.gitkeep
 upstream_arpo/

@@ -63,6 +63,8 @@ class AlgorithmConfig:
     kl_horizon: float = 0.0
     kl_target: float = 0.0
     enable_replay: bool = False
+    entropy_coef: float = 0.0
+    noise_entropy_coef: float = 0.0
 
     # Opt-in noise system (see docs/noise_generating/RESEARCH_FRAMING.md).
     # Inert when enable_noise=False — clean training/eval is byte-identical
@@ -90,6 +92,11 @@ class AlgorithmConfig:
     # Eval-time flag: sampler draws from held-out OOD template catalog.
     noise_use_heldout: bool = False
 
+    # Noisy eval path: when True and is_val=True, the trainer builds a
+    # deterministic per-task noise schedule (fires_for_task_eval) and ships
+    # it pre-assembled as task_config["noise_meta"]. Identical across runs.
+    noise_validate_with_noise: bool = False
+
 
 @dataclass
 class TrainerConfig:
@@ -112,6 +119,7 @@ class TrainerConfig:
     load_checkpoint_path: Optional[str] = None
     replay_data_path: Optional[str] = None  # path to pre-collected replay trajectories (.pt)
     save_trajectories: bool = False  # save compact episode trajectories to JSONL for SFT
+    save_all_trajectories: bool = False  # if True, save failed (eval_result==0) episodes too
 
     def post_init(self):
         if self.save_checkpoint_path is None:
@@ -142,6 +150,10 @@ class PPOConfig:
         self.worker.actor.use_kl_loss = self.algorithm.use_kl_loss
         self.worker.actor.kl_penalty = self.algorithm.kl_penalty
         self.worker.actor.kl_coef = self.algorithm.kl_coef
+        self.worker.actor.entropy_coef = self.algorithm.entropy_coef
+        self.worker.actor.noisy_entropy_coef = self.algorithm.noise_entropy_coef
+        self.worker.actor.entropy_coef = self.algorithm.entropy_coef
+        self.worker.actor.noisy_entropy_coef = self.algorithm.noise_entropy_coef
 
     def deep_post_init(self):
         recursive_post_init(self)
