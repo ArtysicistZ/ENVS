@@ -152,6 +152,19 @@ def fires_for_sr_mcts(sr: float) -> int:
     return 2
 
 
+def fires_for_task_eval(task_id: str) -> int:
+    """Deterministic fire count for noisy evaluation: always 1 per task.
+
+    Every task in the 300-task eval gets exactly one held-out noise fire.
+    We dropped the prior 80/20 noisy/clean hash-partition because a 56-task
+    within-run clean control has almost no statistical power at n=1, and
+    external clean baselines (e.g. sft_v1/eval_baseline_greedy) serve that
+    role far better. The `task_id` argument is kept for call-site
+    compatibility and for future per-task customization.
+    """
+    return 1 if task_id else 0
+
+
 def feasibility_constrained_fire_steps(
     count: int,
     max_steps: int,
@@ -377,23 +390,30 @@ class RuntimeNoiseSampler:
         max_steps: int,
         avoid_categories: Optional[Set[str]] = None,
         use_heldout: bool = False,
+        is_eval: bool = False,
     ) -> List[Dict]:
         """v4 deterministic fire schedule.
 
         Returns a list of materialized noise elements, each with an extra
         `fire_step` field giving the agent step index at which it should fire.
-        Count is determined by `fires_for_sr(sr)`; fire-step indices are
-        bucket-spaced uniformly within `[0, max_steps)` so the rollout is not
-        front-loaded with a clump of noise.
+        Count is determined by `fires_for_sr(sr)` (or `fires_for_task_eval` when
+        ``is_eval=True``); fire-step indices are bucket-spaced uniformly within
+        `[0, max_steps)` so the rollout is not front-loaded with a clump of noise.
 
-        Determinism: all randomness (count, fire steps, element selection) goes
+        Determinism: all randomness (fire steps, element selection) goes
         through `self.rng`. With Fix A's `(task_id, training_step)` seed, all
-        n rollouts in a GRPO group get the SAME schedule.
+        n rollouts in a GRPO group get the SAME schedule. When ``is_eval=True``,
+        the count is a pure function of task_id (SR-independent) and the seed
+        is expected to be fixed (noise_step_seed=0), making the schedule
+        identical across every eval run.
 
-        Hard-task protection: SR < 0.10 returns []; the sampler is a no-op
-        and `noise_enabled` will be False on the env side.
+        Hard-task protection (training only): SR < 0.10 returns [].
+        Eval: ~20% of tasks (by md5-hash partition) return []; the rest fire once.
         """
-        count = fires_for_sr(sr, self.rng)
+        if is_eval:
+            count = fires_for_task_eval(task_json.get("id", ""))
+        else:
+            count = fires_for_sr(sr, self.rng)
         if count <= 0 or max_steps <= 0:
             return []
 
@@ -451,4 +471,5 @@ __all__ = [
     "HELDOUT_TEMPLATE_NAMES",
     "TIER_COST_CAP",
     "tier_for_success_rate",
+    "fires_for_task_eval",
 ]

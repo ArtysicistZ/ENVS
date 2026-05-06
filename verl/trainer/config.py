@@ -92,6 +92,11 @@ class AlgorithmConfig:
     # Eval-time flag: sampler draws from held-out OOD template catalog.
     noise_use_heldout: bool = False
 
+    # Noisy eval path: when True and is_val=True, the trainer builds a
+    # deterministic per-task noise schedule (fires_for_task_eval) and ships
+    # it pre-assembled as task_config["noise_meta"]. Identical across runs.
+    noise_validate_with_noise: bool = False
+
 
 @dataclass
 class TrainerConfig:
@@ -114,6 +119,7 @@ class TrainerConfig:
     load_checkpoint_path: Optional[str] = None
     replay_data_path: Optional[str] = None  # path to pre-collected replay trajectories (.pt)
     save_trajectories: bool = False  # save compact episode trajectories to JSONL for SFT
+    save_all_trajectories: bool = False  # if True, save failed (eval_result==0) episodes too
 
     def post_init(self):
         if self.save_checkpoint_path is None:

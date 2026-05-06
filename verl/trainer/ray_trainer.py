@@ -442,6 +442,63 @@ class RayPPOTrainer:
         Different training steps draw different schedules — diversity preserved
         across the curriculum, locked within each GRPO group.
         """
+        algo = self.config.algorithm
+        _eval_flag = bool(getattr(algo, "noise_validate_with_noise", False))
+        print(f"[noise-eval][DEBUG] _annotate_task_configs_with_noise entry: "
+              f"is_val={is_val} validate_flag={_eval_flag} n_tasks={len(task_configs)}", flush=True)
+        if is_val and _eval_flag:
+            # Deterministic eval path: build the noise schedule client-side and
+            # ship it pre-assembled as task_config["noise_meta"]. The remote env
+            # server's _build_noise_meta() returns it verbatim (bypasses the
+            # server's own sampler, which doesn't know about fires_for_task_eval).
+            #
+            # Schedule shape:
+            #   - fire count: fires_for_task_eval(task_id)  -> 0 (20%) or 1 (80%)
+            #   - noise catalog: held-out (24 templates never seen in training)
+            #   - RNG seed: md5(f"{task_id}|0")  -> identical across every run
+            import hashlib
+            from OSWorld.evaluation_examples.noise_generation.runtime_sampler import (
+                RuntimeNoiseSampler,
+            )
+            max_steps = int(getattr(self.config.env, "max_steps", 15))
+            fire_count = 0
+            noise_count = 0
+            for tc in task_configs:
+                if not isinstance(tc, dict):
+                    continue
+                tid = tc.get("id") or tc.get("task_id")
+                if not tid:
+                    continue
+                rng_seed = int(hashlib.md5(f"{tid}|0".encode("utf-8")).hexdigest()[:8], 16)
+                sampler = RuntimeNoiseSampler(rng_seed=rng_seed)
+                schedule = sampler.sample_fire_schedule(
+                    task_json=tc, sr=0.0, max_steps=max_steps,
+                    use_heldout=True, is_eval=True,
+                )
+                if schedule:
+                    total_cost = sum(int(e.get("recovery_cost", 0)) for e in schedule)
+                    tc["enable_noise"] = True
+                    tc["noise_mode"] = "runtime_library"
+                    tc["noise_meta"] = {
+                        "trigger_mode": "deterministic_schedule_v4_eval",
+                        "success_rate_used": 0.0,
+                        "observed_sr_used": 0.0,
+                        "fires_count": len(schedule),
+                        "fire_steps": [int(e["fire_step"]) for e in schedule],
+                        "total_recovery_cost": total_cost,
+                        "elements": schedule,
+                    }
+                    tc["noise_max_steps"] = max_steps
+                    noise_count += 1
+                    fire_count += len(schedule)
+                else:
+                    tc["enable_noise"] = False
+            print(
+                f"[noise-eval] stamped {noise_count} noisy / "
+                f"{len(task_configs) - noise_count} clean tasks, "
+                f"{fire_count} total fires (heldout catalog, seed=0)"
+            )
+            return
         if self.noise_curriculum is None:
             return
         if is_val:
@@ -781,6 +838,10 @@ class RayPPOTrainer:
             task_configs = batch_dict
             num_tasks = len(task_configs)
             assert num_tasks <= len(self.env_workers)
+            # Deterministic eval-noise stamping (no-op unless
+            # algorithm.noise_validate_with_noise=True). Must run BEFORE reset
+            # so each env reset sees the pre-built noise_meta.
+            self._annotate_task_configs_with_noise(task_configs, is_val=True)
             task_configs_total.extend(task_configs) # record task
 
             futures = [
@@ -866,7 +927,9 @@ class RayPPOTrainer:
                                            fallback_fn=lambda idx: 0.0)
             eval_results_total.extend(eval_results)
 
-            # --- Trajectory saving (if enabled) — only successful episodes ---
+            # --- Trajectory saving (if enabled) ---
+            # Default: only successful episodes (eval_result > 0).
+            # If trainer.save_all_trajectories=True, save failed episodes too (for diagnosis).
             if getattr(self.config.trainer, 'save_trajectories', False):
                 from verl.utils.trajectory_io import TrajectoryWriter
                 if not hasattr(self, '_traj_writer'):
@@ -878,12 +941,15 @@ class RayPPOTrainer:
                         os.remove(_traj_path)
                         print(f"[val] Removed stale trajectory file for clean resume: {_traj_path}")
                     self._traj_writer = TrajectoryWriter(_traj_path)
-                # Only fetch trajectories for successful episodes (eval_result > 0)
-                _success_indices = [i for i, score in enumerate(eval_results) if score > 0]
-                if _success_indices:
+                _save_all = getattr(self.config.trainer, 'save_all_trajectories', False)
+                if _save_all:
+                    _fetch_indices = list(range(len(eval_results)))
+                else:
+                    _fetch_indices = [i for i, score in enumerate(eval_results) if score > 0]
+                if _fetch_indices:
                     _limit_images = getattr(self.config.worker.rollout, 'limit_images', 8)
                     _traj_futures = [self.env_workers[i].get_compact_trajectory.remote(_limit_images)
-                                     for i in _success_indices]
+                                     for i in _fetch_indices]
                     _trajs = _ray_get_robust(_traj_futures, timeout=120, label="val_traj",
                                              fallback_fn=lambda idx: None)
                     _saved = 0
@@ -891,7 +957,8 @@ class RayPPOTrainer:
                         if _traj is not None and _traj.get("steps"):
                             self._traj_writer.write(_traj)
                             _saved += 1
-                    print(f"[val] Batch {batch_idx}: saved {_saved}/{len(_success_indices)} successful trajectories")
+                    _label = "all" if _save_all else "successful"
+                    print(f"[val] Batch {batch_idx}: saved {_saved}/{len(_fetch_indices)} {_label} trajectories")
 
             # Store scores
             scores = eval_results
@@ -985,7 +1052,8 @@ class RayPPOTrainer:
                     _n_saved = sum(1 for _ in _f)
             except Exception:
                 _n_saved = "?"
-            print(f"[val] Trajectory file closed: {_n_saved} successful episodes saved to {_traj_path}")
+            _label_close = "all (success+failed)" if getattr(self.config.trainer, 'save_all_trajectories', False) else "successful"
+            print(f"[val] Trajectory file closed: {_n_saved} {_label_close} episodes saved to {_traj_path}")
 
         self._maybe_log_val_generations(sample_inputs, sample_outputs, sample_labels, sample_scores)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()

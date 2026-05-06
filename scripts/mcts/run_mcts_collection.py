@@ -241,6 +241,25 @@ def main():
                      task_idx + 1, len(all_tasks), domain, tid[:11], instruction)
         logger.info("=" * 70)
 
+        # Inject noise fields into task_config so env.reset() initializes noise_scheduler.
+        # Uses CRN within this task (all VMs see the same noise schedule); per-branch
+        # diversity would require a /env/reset-with-noise call when spawning children,
+        # which is a separate follow-up. For smoke tests + phase-1 collection this is fine.
+        if config.enable_noise:
+            tid = task_config.get("id", "")
+            sr = float(task_sr_map.get(tid, 0.5))
+            task_config = dict(task_config)
+            task_config["enable_noise"] = True
+            task_config["noise_mode"] = config.noise_mode
+            task_config["noise_probability"] = 0.1
+            task_config["noise_step_seed"] = hash((tid, task_idx)) & 0xFFFFFFFF
+            task_config["noise_success_rate"] = sr
+            task_config["noise_observed_sr"] = sr
+            task_config["noise_max_steps"] = int(config.max_steps)
+            task_config["noise_use_heldout"] = False
+            logger.info("[noise] task_config stamped: sr=%.3f, seed=%d", sr,
+                         task_config["noise_step_seed"])
+
         # Reset all VMs
         t0 = time.time()
         logger.info("Resetting %d VMs...", len(task_workers))

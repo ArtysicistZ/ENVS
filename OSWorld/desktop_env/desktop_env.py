@@ -408,6 +408,7 @@ class DesktopEnv(gym.Env):
         success_rate = float(task_config.get("noise_success_rate", 0.0))
         observed_sr = float(task_config.get("noise_observed_sr", success_rate))
         use_heldout = bool(task_config.get("noise_use_heldout", False))
+        is_eval = bool(task_config.get("noise_is_eval", False))
 
         # max_steps controls how the fire-step indices are bucket-spread.
         # The env's max_steps is exposed via the rollout config; default 15.
@@ -417,21 +418,32 @@ class DesktopEnv(gym.Env):
         # `self._traj_no` — so that all `n` rollouts of the same task at the
         # same training step draw IDENTICAL count, fire-step indices, and
         # template selection. The trainer stamps `noise_step_seed = global_step`.
-        sampler = RuntimeNoiseSampler(
-            rng_seed=hash((task_config.get("id"), task_config.get("noise_step_seed", 0))) & 0xFFFFFFFF
-        )
+        # Training uses Python's `hash` (fast; all rollouts share one process).
+        # Eval uses md5 because eval processes launch separately; we need the
+        # schedule to be byte-identical across runs. Trainer stamps
+        # noise_step_seed=0 for eval.
+        if is_eval:
+            import hashlib
+            tid = task_config.get("id", "") or ""
+            step_seed = int(task_config.get("noise_step_seed", 0))
+            seed_key = f"{tid}|{step_seed}".encode("utf-8")
+            rng_seed = int(hashlib.md5(seed_key).hexdigest()[:8], 16)
+        else:
+            rng_seed = hash((task_config.get("id"), task_config.get("noise_step_seed", 0))) & 0xFFFFFFFF
+        sampler = RuntimeNoiseSampler(rng_seed=rng_seed)
         schedule = sampler.sample_fire_schedule(
             task_json=task_config,
             sr=observed_sr,
             max_steps=max_steps,
             use_heldout=use_heldout,
+            is_eval=is_eval,
         )
         if not schedule:
             return None
 
         total_cost = sum(int(e.get("recovery_cost", 0)) for e in schedule)
         return {
-            "trigger_mode": "deterministic_schedule_v4",
+            "trigger_mode": "deterministic_schedule_v4_eval" if is_eval else "deterministic_schedule_v4",
             "success_rate_used": success_rate,
             "observed_sr_used": observed_sr,
             "fires_count": len(schedule),
