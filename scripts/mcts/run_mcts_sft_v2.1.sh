@@ -78,7 +78,6 @@ echo "  GPU memory freed."
 echo ""
 echo "[Step 3/3] Running n8 evaluation on 300 tasks..."
 echo "  Model: ${EPOCH_MODEL}"
-echo "  Envs: 112 (4 servers)"
 echo ""
 
 sudo -E ${PYTHON} -m verl.trainer.main \

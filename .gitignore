@@ -86,6 +86,7 @@ scripts/testing/
 scripts/research/
 scripts/debug/
 scripts/analysis/
+scripts/eval_visual/
 
 # scripts/mcts/ — non-canonical
 scripts/mcts/smoke_*.py
