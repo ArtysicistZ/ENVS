@@ -208,14 +208,6 @@ ENVS borrows the branching structure of tree search but not its standard machine
 We therefore replace adaptive selection with explicit cost gates: a per-task branch budget, a per-step branch cap, late-step deferral, and a hard step cutoff. ENVS uses no learned value function, no UCB/PUCT, and no edge visit statistics. Its job is training-time trajectory discovery: finding executable paths
 that succeed under the \textsc{OSWorld} evaluator and converting them to supervised data.
 
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.65\linewidth]{behavior-gated.pdf}
-\caption{Behavioral-disagreement-gated search. ENVS branches over executable GUI behaviors rather than token-level action variants.}
-\label{fig:behavioral-branching}
-\end{figure}
-
-
 \subsection{Environment verification and successful-leaf filtering}
 After search, the OSWorld task oracle assigns each leaf trajectory a binary reward $R(\tau) \in {0,1}$. Failed trajectories are discarded; successful trajectories are decomposed into per-step supervised examples,
 

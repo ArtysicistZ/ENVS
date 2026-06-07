@@ -37,41 +37,39 @@
 \@writefile{toc}{\contentsline {section}{\numberline {3}ENVS: Environment-Native Verified Search}{4}{section.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Behavioral-disagreement-gated search}{4}{subsection.3.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.2}VM-bounded search in live desktop environments}{4}{subsection.3.2}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Behavioral-disagreement-gated search. ENVS branches over executable GUI behaviors rather than token-level action variants.}}{4}{figure.caption.6}\protected@file@percent }
-\newlabel{fig:behavioral-branching}{{3}{4}{Behavioral-disagreement-gated search. ENVS branches over executable GUI behaviors rather than token-level action variants}{figure.caption.6}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Environment verification and successful-leaf filtering}{5}{subsection.3.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Global balancing of action-level supervision}{5}{subsection.3.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Environment verification and successful-leaf filtering}{4}{subsection.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Global balancing of action-level supervision}{4}{subsection.3.4}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {4}\textsc  {OSWorld-Noisy}: Held-out Desktop Perturbations}{5}{section.4}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Perturbation templates}{5}{subsection.4.1}\protected@file@percent }
 \newlabel{sec:noise:library}{{4.1}{5}{Perturbation templates}{subsection.4.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Schedule sampler}{5}{subsection.4.2}\protected@file@percent }
 \citation{cobbe2020procgen,jiang2021plr,dennis2020paired,parkerholder2022accel}
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Schedule sampler}{6}{subsection.4.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Train/evaluation split}{6}{subsection.4.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Injection sites}{6}{subsection.4.4}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {5}Experiments and Results}{6}{section.5}\protected@file@percent }
 \newlabel{sec:experiments}{{5}{6}{Experiments and Results}{section.5}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Experimental protocol}{6}{subsection.5.1}\protected@file@percent }
 \newlabel{sec:exp_protocol}{{5.1}{6}{Experimental protocol}{subsection.5.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Main results on \textsc  {OSWorld} and \textsc  {OSWorld-Noisy}}{7}{subsection.5.2}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Main results on \textsc  {OSWorld} and \textsc  {OSWorld-Noisy}. We report pass@8 success rate (\%) on the trained 86-task subset, the held-out subset, and overall, with absolute pp gain over the base policy in parentheses. The trained subset is selected following the ARPO protocol as the tasks on which the base policy occasionally succeeds. Each training method is evaluated only on its matched eval condition. Bold marks the column maximum within each block.}}{7}{table.caption.7}\protected@file@percent }
-\newlabel{tab:main-results}{{1}{7}{Main results on \textsc {OSWorld} and \textsc {OSWorld-Noisy}. We report pass@8 success rate (\%) on the trained 86-task subset, the held-out subset, and overall, with absolute pp gain over the base policy in parentheses. The trained subset is selected following the ARPO protocol as the tasks on which the base policy occasionally succeeds. Each training method is evaluated only on its matched eval condition. Bold marks the column maximum within each block}{table.caption.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Main results on \textsc  {OSWorld} and \textsc  {OSWorld-Noisy}}{6}{subsection.5.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Main results on \textsc  {OSWorld} and \textsc  {OSWorld-Noisy}. We report pass@8 success rate (\%) on the trained 86-task subset, the held-out subset, and overall, with absolute pp gain over the base policy in parentheses. The trained subset is selected following the ARPO protocol as the tasks on which the base policy occasionally succeeds. Each training method is evaluated only on its matched eval condition. Bold marks the column maximum within each block.}}{7}{table.caption.6}\protected@file@percent }
+\newlabel{tab:main-results}{{1}{7}{Main results on \textsc {OSWorld} and \textsc {OSWorld-Noisy}. We report pass@8 success rate (\%) on the trained 86-task subset, the held-out subset, and overall, with absolute pp gain over the base policy in parentheses. The trained subset is selected following the ARPO protocol as the tasks on which the base policy occasionally succeeds. Each training method is evaluated only on its matched eval condition. Bold marks the column maximum within each block}{table.caption.6}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Compute efficiency}{7}{subsection.5.3}\protected@file@percent }
 \newlabel{sec:compute}{{5.3}{7}{Compute efficiency}{subsection.5.3}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Per-method compute decomposition. ENVS rows split SFT GPU-hours from offline trajectory-collection GPU-hours; ARPO fuses rollout collection and policy updates on the training cluster (Collect column dashed). The parenthetical in the Total column is the relative cost reduction vs the matched ARPO baseline; negative is better. Bold marks the column minimum within each block.}}{8}{table.caption.8}\protected@file@percent }
-\newlabel{tab:compute}{{2}{8}{Per-method compute decomposition. ENVS rows split SFT GPU-hours from offline trajectory-collection GPU-hours; ARPO fuses rollout collection and policy updates on the training cluster (Collect column dashed). The parenthetical in the Total column is the relative cost reduction vs the matched ARPO baseline; negative is better. Bold marks the column minimum within each block}{table.caption.8}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Data efficiency}{8}{subsection.5.4}\protected@file@percent }
-\newlabel{fig:data-volume}{{\caption@xref {fig:data-volume}{ on input line 455}}{8}{Data efficiency}{figure.caption.9}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Clean \textsc  {OSWorld} pass@8 as a function of ENVS training data volume. The 30\% subset already matches ARPO-clean, while gains saturate near the full dataset.}}{8}{figure.caption.9}\protected@file@percent }
-\newlabel{fig:data-efficiency}{{4}{8}{Clean \textsc {OSWorld} pass@8 as a function of ENVS training data volume. The 30\% subset already matches ARPO-clean, while gains saturate near the full dataset}{figure.caption.9}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Per-method compute decomposition. ENVS rows split SFT GPU-hours from offline trajectory-collection GPU-hours; ARPO fuses rollout collection and policy updates on the training cluster (Collect column dashed). The parenthetical in the Total column is the relative cost reduction vs the matched ARPO baseline; negative is better. Bold marks the column minimum within each block.}}{7}{table.caption.7}\protected@file@percent }
+\newlabel{tab:compute}{{2}{7}{Per-method compute decomposition. ENVS rows split SFT GPU-hours from offline trajectory-collection GPU-hours; ARPO fuses rollout collection and policy updates on the training cluster (Collect column dashed). The parenthetical in the Total column is the relative cost reduction vs the matched ARPO baseline; negative is better. Bold marks the column minimum within each block}{table.caption.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Data efficiency}{7}{subsection.5.4}\protected@file@percent }
+\newlabel{fig:data-volume}{{\caption@xref {fig:data-volume}{ on input line 447}}{8}{Data efficiency}{figure.caption.8}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Clean \textsc  {OSWorld} pass@8 as a function of ENVS training data volume. The 30\% subset already matches ARPO-clean, while gains saturate near the full dataset.}}{8}{figure.caption.8}\protected@file@percent }
+\newlabel{fig:data-efficiency}{{3}{8}{Clean \textsc {OSWorld} pass@8 as a function of ENVS training data volume. The 30\% subset already matches ARPO-clean, while gains saturate near the full dataset}{figure.caption.8}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Clean versus noisy trajectory collection}{8}{subsection.5.5}\protected@file@percent }
 \newlabel{sec:clean-vs-noisy}{{5.5}{8}{Clean versus noisy trajectory collection}{subsection.5.5}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Cross-evaluation of every trained policy on both the clean and noisy $300$-task pools. Values are pass@8 in percent. Bold marks the column maximum. ARPO-noisy is the weakest learned policy and is matched by ARPO-clean's cross-condition transfer; ENVS-noisy reaches parity with ENVS-clean on both conditions.}}{9}{table.caption.10}\protected@file@percent }
-\newlabel{tab:clean-vs-noisy}{{3}{9}{Cross-evaluation of every trained policy on both the clean and noisy $300$-task pools. Values are pass@8 in percent. Bold marks the column maximum. ARPO-noisy is the weakest learned policy and is matched by ARPO-clean's cross-condition transfer; ENVS-noisy reaches parity with ENVS-clean on both conditions}{table.caption.10}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}Auxiliary visual-reasoning capability retention}{9}{subsection.5.6}\protected@file@percent }
-\newlabel{sec:diversity}{{5.6}{9}{Auxiliary visual-reasoning capability retention}{subsection.5.6}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Auxiliary visual-reasoning performance, grouped by capability channel. All scores are canonical benchmark accuracy (\%) under VLMEvalKit deterministic decoding; no runtime perturbation is applied at evaluation. Bold marks the best of the three per row. Noisy ENVS matches or exceeds clean ENVS on every benchmark.}}{9}{table.caption.11}\protected@file@percent }
-\newlabel{tab:aux}{{4}{9}{Auxiliary visual-reasoning performance, grouped by capability channel. All scores are canonical benchmark accuracy (\%) under VLMEvalKit deterministic decoding; no runtime perturbation is applied at evaluation. Bold marks the best of the three per row. Noisy ENVS matches or exceeds clean ENVS on every benchmark}{table.caption.11}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{10}{section.6}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Cross-evaluation of every trained policy on both the clean and noisy $300$-task pools. Values are pass@8 in percent. Bold marks the column maximum. ARPO-noisy is the weakest learned policy and is matched by ARPO-clean's cross-condition transfer; ENVS-noisy reaches parity with ENVS-clean on both conditions.}}{8}{table.caption.9}\protected@file@percent }
+\newlabel{tab:clean-vs-noisy}{{3}{8}{Cross-evaluation of every trained policy on both the clean and noisy $300$-task pools. Values are pass@8 in percent. Bold marks the column maximum. ARPO-noisy is the weakest learned policy and is matched by ARPO-clean's cross-condition transfer; ENVS-noisy reaches parity with ENVS-clean on both conditions}{table.caption.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}Auxiliary visual-reasoning capability retention}{8}{subsection.5.6}\protected@file@percent }
+\newlabel{sec:diversity}{{5.6}{8}{Auxiliary visual-reasoning capability retention}{subsection.5.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Auxiliary visual-reasoning performance, grouped by capability channel. All scores are canonical benchmark accuracy (\%) under VLMEvalKit deterministic decoding; no runtime perturbation is applied at evaluation. Bold marks the best of the three per row. Noisy ENVS matches or exceeds clean ENVS on every benchmark.}}{9}{table.caption.10}\protected@file@percent }
+\newlabel{tab:aux}{{4}{9}{Auxiliary visual-reasoning performance, grouped by capability channel. All scores are canonical benchmark accuracy (\%) under VLMEvalKit deterministic decoding; no runtime perturbation is applied at evaluation. Bold marks the best of the three per row. Noisy ENVS matches or exceeds clean ENVS on every benchmark}{table.caption.10}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{9}{section.6}\protected@file@percent }
 \bibstyle{plainnat}
 \bibdata{references}
 \bibcite{anthony2017expert}{{1}{2017}{{Anthony et~al.}}{{Anthony, Tian, and Barber}}}
@@ -120,44 +118,44 @@
 \bibcite{zhang2020robust_rl}{{44}{2020}{{Zhang et~al.}}{{Zhang, Chen, Boning, and Hsieh}}}
 \bibcite{zhang2025clpo}{{45}{2025}{{Zhang et~al.}}{{Zhang, Sun, Zhang, Guo, and Guo}}}
 \bibcite{zhou2023webarena}{{46}{2024}{{Zhou et~al.}}{{Zhou, Xu, Zhu, Zhou, Lo, Sridhar, Cheng, Ou, Fried, Alon, Yu, and Neubig}}}
-\@writefile{toc}{\contentsline {section}{\numberline {A}Preliminaries}{13}{appendix.A}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}GUI agents as partially observed control}{13}{subsection.A.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {A}Preliminaries}{12}{appendix.A}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}GUI agents as partially observed control}{12}{subsection.A.1}\protected@file@percent }
 \citation{dong2025agentic_arpo,lu2025arpo_gui}
-\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}Sparse terminal verification in GUI environments}{14}{subsection.A.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {B}Additional implementation details}{14}{appendix.B}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {B.1}Noise template catalog}{14}{subsection.B.1}\protected@file@percent }
-\newlabel{app:noise}{{B.1}{14}{Noise template catalog}{subsection.B.1}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Expanded taxonomy of \textsc  {OSWorld-Noisy} perturbations. Counts are generator entries; one generator can produce many concrete events through internal randomization.}}{14}{table.caption.13}\protected@file@percent }
-\newlabel{tab:noise-taxonomy-full}{{5}{14}{Expanded taxonomy of \textsc {OSWorld-Noisy} perturbations. Counts are generator entries; one generator can produce many concrete events through internal randomization}{table.caption.13}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {B.2}Noise scheduling}{15}{subsection.B.2}\protected@file@percent }
-\newlabel{app:noise-scheduling}{{B.2}{15}{Noise scheduling}{subsection.B.2}{}}
-\@writefile{toc}{\contentsline {paragraph}{Fire count.}{15}{section*.14}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Step placement.}{15}{section*.15}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Determinism.}{15}{section*.16}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {C}Evaluation pool construction}{15}{appendix.C}\protected@file@percent }
-\newlabel{app:eval-pool}{{C}{15}{Evaluation pool construction}{appendix.C}{}}
-\@writefile{toc}{\contentsline {paragraph}{Filter~1: soft-reset stability ($-13$).}{15}{section*.17}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Filter~2: proxy-free reachability ($-55$).}{15}{section*.18}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Train / eval relationship.}{15}{section*.20}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Per-app composition of the evaluation pool. The 300-task pool preserves all $10$ \textsc  {OSWorld} application categories. Exclusions are concentrated in \texttt  {chrome} and \texttt  {multi\_apps}; both are dominated by browser- and network-mediated tasks affected by Filter~2.}}{16}{table.caption.19}\protected@file@percent }
-\newlabel{tab:eval-pool-breakdown}{{6}{16}{Per-app composition of the evaluation pool. The 300-task pool preserves all $10$ \textsc {OSWorld} application categories. Exclusions are concentrated in \texttt {chrome} and \texttt {multi\_apps}; both are dominated by browser- and network-mediated tasks affected by Filter~2}{table.caption.19}{}}
-\@writefile{toc}{\contentsline {paragraph}{Exact list.}{16}{section*.21}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {D}Structural Advantages of \textsc  {ENVS}}{16}{appendix.D}\protected@file@percent }
-\newlabel{app:envs-vs-rl}{{D}{16}{Structural Advantages of \textsc {ENVS}}{appendix.D}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {D.1}Gradient Degeneracy}{16}{subsection.D.1}\protected@file@percent }
-\newlabel{app:rl:gradient}{{D.1}{16}{Gradient Degeneracy}{subsection.D.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}Sparse terminal verification in GUI environments}{13}{subsection.A.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {B}Additional implementation details}{13}{appendix.B}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.1}Noise template catalog}{13}{subsection.B.1}\protected@file@percent }
+\newlabel{app:noise}{{B.1}{13}{Noise template catalog}{subsection.B.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Expanded taxonomy of \textsc  {OSWorld-Noisy} perturbations. Counts are generator entries; one generator can produce many concrete events through internal randomization.}}{13}{table.caption.12}\protected@file@percent }
+\newlabel{tab:noise-taxonomy-full}{{5}{13}{Expanded taxonomy of \textsc {OSWorld-Noisy} perturbations. Counts are generator entries; one generator can produce many concrete events through internal randomization}{table.caption.12}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.2}Noise scheduling}{14}{subsection.B.2}\protected@file@percent }
+\newlabel{app:noise-scheduling}{{B.2}{14}{Noise scheduling}{subsection.B.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{Fire count.}{14}{section*.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Step placement.}{14}{section*.14}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Determinism.}{14}{section*.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {C}Evaluation pool construction}{14}{appendix.C}\protected@file@percent }
+\newlabel{app:eval-pool}{{C}{14}{Evaluation pool construction}{appendix.C}{}}
+\@writefile{toc}{\contentsline {paragraph}{Filter~1: soft-reset stability ($-13$).}{14}{section*.16}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Filter~2: proxy-free reachability ($-55$).}{14}{section*.17}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Train / eval relationship.}{14}{section*.19}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Per-app composition of the evaluation pool. The 300-task pool preserves all $10$ \textsc  {OSWorld} application categories. Exclusions are concentrated in \texttt  {chrome} and \texttt  {multi\_apps}; both are dominated by browser- and network-mediated tasks affected by Filter~2.}}{15}{table.caption.18}\protected@file@percent }
+\newlabel{tab:eval-pool-breakdown}{{6}{15}{Per-app composition of the evaluation pool. The 300-task pool preserves all $10$ \textsc {OSWorld} application categories. Exclusions are concentrated in \texttt {chrome} and \texttt {multi\_apps}; both are dominated by browser- and network-mediated tasks affected by Filter~2}{table.caption.18}{}}
+\@writefile{toc}{\contentsline {paragraph}{Exact list.}{15}{section*.20}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {D}Structural Advantages of \textsc  {ENVS}}{15}{appendix.D}\protected@file@percent }
+\newlabel{app:envs-vs-rl}{{D}{15}{Structural Advantages of \textsc {ENVS}}{appendix.D}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {D.1}Gradient Degeneracy}{15}{subsection.D.1}\protected@file@percent }
+\newlabel{app:rl:gradient}{{D.1}{15}{Gradient Degeneracy}{subsection.D.1}{}}
 \citation{cui2025entropy}
-\@writefile{toc}{\contentsline {subsection}{\numberline {D.2}Entropy Collapse}{17}{subsection.D.2}\protected@file@percent }
-\newlabel{app:rl:entropy}{{D.2}{17}{Entropy Collapse}{subsection.D.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {D.2}Entropy Collapse}{16}{subsection.D.2}\protected@file@percent }
+\newlabel{app:rl:entropy}{{D.2}{16}{Entropy Collapse}{subsection.D.2}{}}
 \citation{schulman2017ppo}
 \citation{liu2025prorl}
 \citation{yu2025dapo}
-\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Held-out per-state action entropy ($H_{\text  {action}}$, in bits) and effective number of action categories ($2^{H_{\text  {action}}}$) on $54$ states ($12$ tasks $\times \ 5$ early steps each, stratified by base-policy success-count tier). For each policy, $K = 8$ samples at temperature $T = 1$ are drawn at every state, and Shannon entropy is computed over the joint action-type and quantised spatial-coordinate fingerprint. Pass@8 reproduced from Table~\ref {tab:main-results}.}}{18}{table.caption.22}\protected@file@percent }
-\newlabel{tab:rl:entropy}{{7}{18}{Held-out per-state action entropy ($H_{\text {action}}$, in bits) and effective number of action categories ($2^{H_{\text {action}}}$) on $54$ states ($12$ tasks $\times \ 5$ early steps each, stratified by base-policy success-count tier). For each policy, $K = 8$ samples at temperature $T = 1$ are drawn at every state, and Shannon entropy is computed over the joint action-type and quantised spatial-coordinate fingerprint. Pass@8 reproduced from Table~\ref {tab:main-results}}{table.caption.22}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {D.3}Instability: Non-convexity and Drift}{18}{subsection.D.3}\protected@file@percent }
-\newlabel{app:rl:stability}{{D.3}{18}{Instability: Non-convexity and Drift}{subsection.D.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {D.4}Rollout Coupling}{19}{subsection.D.4}\protected@file@percent }
-\newlabel{app:rl:cost}{{D.4}{19}{Rollout Coupling}{subsection.D.4}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {E}Limitations}{19}{appendix.E}\protected@file@percent }
-\newlabel{app:limitations}{{E}{19}{Limitations}{appendix.E}{}}
-\gdef \@abspage@last{19}
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Held-out per-state action entropy ($H_{\text  {action}}$, in bits) and effective number of action categories ($2^{H_{\text  {action}}}$) on $54$ states ($12$ tasks $\times \ 5$ early steps each, stratified by base-policy success-count tier). For each policy, $K = 8$ samples at temperature $T = 1$ are drawn at every state, and Shannon entropy is computed over the joint action-type and quantised spatial-coordinate fingerprint. Pass@8 reproduced from Table~\ref {tab:main-results}.}}{17}{table.caption.21}\protected@file@percent }
+\newlabel{tab:rl:entropy}{{7}{17}{Held-out per-state action entropy ($H_{\text {action}}$, in bits) and effective number of action categories ($2^{H_{\text {action}}}$) on $54$ states ($12$ tasks $\times \ 5$ early steps each, stratified by base-policy success-count tier). For each policy, $K = 8$ samples at temperature $T = 1$ are drawn at every state, and Shannon entropy is computed over the joint action-type and quantised spatial-coordinate fingerprint. Pass@8 reproduced from Table~\ref {tab:main-results}}{table.caption.21}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {D.3}Instability: Non-convexity and Drift}{17}{subsection.D.3}\protected@file@percent }
+\newlabel{app:rl:stability}{{D.3}{17}{Instability: Non-convexity and Drift}{subsection.D.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {D.4}Rollout Coupling}{18}{subsection.D.4}\protected@file@percent }
+\newlabel{app:rl:cost}{{D.4}{18}{Rollout Coupling}{subsection.D.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {E}Limitations}{18}{appendix.E}\protected@file@percent }
+\newlabel{app:limitations}{{E}{18}{Limitations}{appendix.E}{}}
+\gdef \@abspage@last{18}
