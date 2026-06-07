@@ -119,7 +119,7 @@ def fires_for_sr(sr: float, rng: random.Random) -> int:
     rolls. The count is sampled from `rng` so that all `n` rollouts of the
     same `(task_id, training_step)` group get the same count (CRN with Fix A).
 
-    Buckets (per user spec, 2026-04-14):
+    Buckets (v4 spec):
       SR ≥ 0.50 → 3-5 fires per rollout (easy task can absorb noise)
       SR 0.25-0.50 → 1-3 fires
       SR 0.10-0.25 → exactly 1 fire

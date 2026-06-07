@@ -361,7 +361,7 @@ class DataProto:
         Returns:
             DataProto: the DataProto with the selected batch_keys and meta_info_keys
         """
-        # TODO (zhangchi.usc1992) whether to copy
+        # TODO: whether to copy
         if batch_keys is not None:
             batch_keys = tuple(batch_keys)
             sub_batch = self.batch.select(*batch_keys)

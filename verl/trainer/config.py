@@ -104,7 +104,7 @@ class TrainerConfig:
     max_steps: Optional[int] = None
     project_name: str = "easy_r1"
     experiment_name: str = "demo"
-    wandb_entity: Optional[str] = None  # e.g. "hanszhu05" or team name; runs go to this account when set
+    wandb_entity: Optional[str] = None  # W&B team/user account; runs logged to this entity when set
     logger: Tuple[str] = ("console", "wandb")
     nnodes: int = 1
     n_gpus_per_node: int = 8
