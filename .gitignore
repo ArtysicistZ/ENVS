@@ -69,7 +69,6 @@ models--*/
 *.tmp
 
 # Internal docs, configs, and tests
-docs/
 configs/
 tests/
 
