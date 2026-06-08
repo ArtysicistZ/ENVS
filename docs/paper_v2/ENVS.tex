@@ -96,28 +96,28 @@ Kevin Zhang$^{2}$ \quad Teresa Xiaotao Shang$^{1}$ \quad Shanghang Zhang$^{2}$\\
       \addplot[mark=*, mark size=1.8pt, color=blue!72!black, only marks]
         coordinates {(184,26.7)};
 
-      % --- ENVS data-efficiency sweep (red): %data * 68 GPU-h
-      %       30% -> 20.4 GPU-h, pass@8 = 27.0
-      %       60% -> 40.8 GPU-h, pass@8 = 29.3
-      %       75% -> 51.0 GPU-h, pass@8 = 30.7
-      %      100% -> 68.0 GPU-h, pass@8 = 30.3  (headline ENVS)
+      % --- ENVS data-efficiency sweep (red): %data * 138 GPU-h
+      %       30% -> 41.4  GPU-h, pass@8 = 27.0
+      %       60% -> 82.8  GPU-h, pass@8 = 29.3
+      %       75% -> 103.5 GPU-h, pass@8 = 30.7
+      %      100% -> 138.0 GPU-h, pass@8 = 30.3  (headline ENVS)
       \addplot[color=red!55!black, line width=0.7pt, mark=none, densely dashed]
-        coordinates {(20.4,27.0) (40.8,29.3) (51,30.7) (68,30.3)};
+        coordinates {(41.4,27.0) (82.8,29.3) (103.5,30.7) (138,30.3)};
       \addplot[mark=*, mark size=1.8pt, color=red!75!black, only marks]
-        coordinates {(20.4,27.0) (40.8,29.3) (51,30.7) (68,30.3)};
+        coordinates {(41.4,27.0) (82.8,29.3) (103.5,30.7) (138,30.3)};
 
-      % --- Improvement arrow: ARPO-clean -> ENVS-clean (solid Stealth head)
+      % --- Improvement arrow: ARPO-clean -> ENVS-75% (Pareto-dominant point)
       \draw[-{Stealth[length=4.5pt, width=4pt]},
             line width=0.9pt, green!42!black]
-        (axis cs:174,27.05) -- (axis cs:78,30.05);
+        (axis cs:175,26.95) -- (axis cs:113,30.00);
       \node[font=\scriptsize\bfseries, text=green!35!black, anchor=north]
-        at (axis cs:100,27.9) {$2.7\times$ less compute};
+        at (axis cs:115,28.1) {$1.8\times$ less compute};
 
       % --- Inline labels
       \node[anchor=west,  font=\scriptsize, text=black!55]      at (axis cs:5,22.7)  {base};
       \node[anchor=south, font=\scriptsize, text=blue!50!black] at (axis cs:184,27.4) {ARPO};
       \node[anchor=south west, font=\scriptsize\bfseries, text=red!55!black]
-        at (axis cs:70,30.5) {\textsc{ENVS}};
+        at (axis cs:65,30.5) {\textsc{ENVS}};
 
       % --- Compact method legend (south-east): 3 colored dots
       \node[draw=gray!45, rounded corners=2pt, fill=white,
@@ -137,12 +137,12 @@ Kevin Zhang$^{2}$ \quad Teresa Xiaotao Shang$^{1}$ \quad Shanghang Zhang$^{2}$\\
 \end{subfigure}
 \end{minipage}
 \caption{\textbf{\textsc{ENVS} dominates the compute--accuracy frontier on \textsc{OSWorld}.}
-\textbf{(a)} Each marker is a trained policy at pass@8 on the 300-task clean \textsc{OSWorld} pool; $x$-axis is training compute in A100 GPU-hours. The red curve traces \textsc{ENVS}'s data-efficiency sweep at $30/60/75/100\%$ of collected trajectories. \textsc{ENVS} reaches $30.3$ vs.\ ARPO's $26.7$ at $\sim$$2.7\times$ less compute, and already matches ARPO with only $30\%$ of its data.}
+\textbf{(a)} Each marker is a trained policy at pass@8 on the 300-task clean \textsc{OSWorld} pool; $x$-axis is training compute in A100 GPU-hours. The red curve traces \textsc{ENVS}'s data-efficiency sweep at $30/60/75/100\%$ of collected trajectories. At $75\%$ data, \textsc{ENVS} reaches $30.7$ vs.\ ARPO's $26.7$ at $\sim$$1.8\times$ less compute, and already matches ARPO with only $30\%$ of its data.}
 \label{fig:teaser}
 \end{figure}
 
 \begin{abstract}
-As multimodal agents move from interface understanding to real software control, successful trajectory discovery in live desktop environments becomes a key challenge. GUI tasks require long-horizon sequences of precise mouse and keyboard actions, while feedback is sparse, delayed, and costly to obtain through VM rollouts. We propose Environment-Native Verified Search (\textsc{ENVS}), a training-time search-and-filter pipeline that uses the environment to construct verified supervision before policy optimization: it branches over behaviorally distinct GUI actions in live \textsc{OSWorld} VMs, verifies successful leaves, and trains from globally balanced step-level supervision. To evaluate robustness under realistic desktop interruptions, we also introduce \textsc{OSWorld-Noisy}, a dynamic benchmark for recoverable desktop interruptions that preserves the original tasks while testing whether agents can refocus, dismiss, wait, or recover under live perturbations. On the 300-task \textsc{OSWorld} pool, \textsc{ENVS} reaches 30.3 pass@8 on original evaluations and 29.0 on \textsc{OSWorld-Noisy}, outperforming matched ARPO-style online RL while reducing compute from 184--192 to 68--73 GPU-hours; even with only 30\% of its search data, \textsc{ENVS} reaches 27.0 pass@8, exceeding ARPO from the base model. Training from noisy environments also better preserves visual-reasoning abilities on auxiliary benchmarks, including \textsc{OSWorld-G Refusal} (16.7 vs. 1.9) and \textsc{BLINK Functional Correspondence} (26.2 vs. 23.1).
+As multimodal agents move from interface understanding to real software control, successful trajectory discovery in live desktop environments becomes a key challenge. GUI tasks require long-horizon sequences of precise mouse and keyboard actions, while feedback is sparse, delayed, and costly to obtain through VM rollouts. We propose Environment-Native Verified Search (\textsc{ENVS}), a training-time search-and-filter pipeline that uses the environment to construct verified supervision before policy optimization: it branches over behaviorally distinct GUI actions in live \textsc{OSWorld} VMs, verifies successful leaves, and trains from globally balanced step-level supervision. To evaluate robustness under realistic desktop interruptions, we also introduce \textsc{OSWorld-Noisy}, a dynamic benchmark for recoverable desktop interruptions that preserves the original tasks while testing whether agents can refocus, dismiss, wait, or recover under live perturbations. On the 300-task \textsc{OSWorld} pool, \textsc{ENVS} reaches 30.3 pass@8 on original evaluations and 29.0 on \textsc{OSWorld-Noisy}, outperforming matched ARPO-style online RL while reducing compute from 184--192 to 138--153 GPU-hours; even with only 30\% of its search data, \textsc{ENVS} reaches 27.0 pass@8, exceeding ARPO from the base model. Training from noisy environments also better preserves visual-reasoning abilities on auxiliary benchmarks, including \textsc{OSWorld-G Refusal} (16.7 vs. 1.9) and \textsc{BLINK Functional Correspondence} (26.2 vs. 23.1).
 
 \end{abstract}
 
@@ -164,7 +164,7 @@ Our main findings are:
 \begin{itemize}[leftmargin=*, itemsep=0.15em, topsep=0.15em, parsep=0pt, partopsep=0pt]
     \item \textbf{Clean performance:} \textsc{ENVS} reaches 30.3 pass@8 on \textsc{OSWorld}, improving UI-TARS-1.5 from 22.7 and outperforming completed ARPO-style baselines at 26.7--29.0.
     \item \textbf{Noisy robustness:} On \textsc{OSWorld-Noisy}, \textsc{ENVS} reaches 29.0 pass@8, compared with 20.3 for UI-TARS-1.5 and 21.7 for noisy ARPO from the base model.
-    % \item \textbf{Compute efficiency:} \textsc{ENVS} reduces matched ARPO compute from 184--192 to 68--73 GPU-hours, a 62--63\% reduction.
+    % \item \textbf{Compute efficiency:} \textsc{ENVS} reduces matched ARPO compute from 184--192 to 138--153 GPU-hours, a 20--25\% reduction.
     \item \textbf{Data quality:} A 30\%-data \textsc{ENVS} variant reaches 27.0 pass@8, matching or exceeding ARPO from the base model.
     \item \textbf{Robustness trade-off:} Clean collection performs best on clean \textsc{OSWorld}, while noisy collection slightly improves \textsc{OSWorld-Noisy} and better preserves auxiliary capabilities, e.g., \textsc{OSWorld-G Refusal} (16.7 vs. 1.9).
 \end{itemize}
@@ -397,19 +397,17 @@ than broad held-out transfer.
 \subsection{Compute efficiency}
 \label{sec:compute}
 
-ENVS uses 68--73 total GPU-hours, compared with 184--192 for matched
-ARPO baselines, a 2.6--2.8$\times$ reduction (Table~\ref{tab:compute}).
+ENVS uses 138--153 total GPU-hours, compared with 184--192 for matched
+ARPO baselines (Table~\ref{tab:compute}).
 The saving comes from decoupling collection from optimization: ENVS
-collects verified trajectories once and reuses them across SFT variants,
-whereas ARPO collects fresh on-policy rollouts inside each training run.
+collects verified trajectories once and trains only successful trajectories with one-epoch SFT,
+whereas ARPO collects fresh on-policy rollouts inside each training run, updating policy with all trajectories.
 
 \begin{table}[H]
   \caption{Per-method compute decomposition. ENVS rows split SFT
   GPU-hours from offline trajectory-collection GPU-hours; ARPO fuses
   rollout collection and policy updates on the training cluster (Collect
-  column dashed). The parenthetical in the Total column is the relative
-  cost reduction vs the matched ARPO baseline; negative is better.
-  Bold marks the column minimum within each block.}
+  column dashed). Bold marks the column minimum within each block.}
   \label{tab:compute}
   \centering
   \small
@@ -419,11 +417,11 @@ whereas ARPO collects fresh on-policy rollouts inside each training run.
     \midrule
     \multicolumn{5}{l}{\textit{Clean-trained}} \\
     UI-TARS-1.5-7B  & + ARPO           & $184$       & ---           & $184$                       \\
-    UI-TARS-1.5-7B  & + ENVS           & $31$        & $37$          & $\mathbf{68\,(-63\%)}$      \\
+    UI-TARS-1.5-7B  & + ENVS           & $31$        & $107$         & $\mathbf{138}$              \\
     \midrule
     \multicolumn{5}{l}{\textit{Noisy-trained}} \\
     UI-TARS-1.5-7B  & + ARPO           & $192$       & ---           & $192$                       \\
-    UI-TARS-1.5-7B  & + ENVS           & $32$        & $41$          & $\mathbf{73\,(-62\%)}$      \\
+    UI-TARS-1.5-7B  & + ENVS           & $32$        & $121$         & $\mathbf{153}$              \\
     \bottomrule
   \end{tabular}
 
@@ -566,7 +564,7 @@ trains from globally balanced trajectories.
 
 Across completed \textsc{OSWorld} experiments, \textsc{ENVS}
 outperforms ARPO-style online RL on clean and noisy evaluation while
-using substantially less compute. The reduced-data result shows that a
+using less compute. The reduced-data result shows that a
 small set of rich, diverse, environment-verified trajectories can reach
 online-RL-level performance, suggesting that carefully constructed SFT
 data can recover much of the benefit of RL without repeated on-policy
