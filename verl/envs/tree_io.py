@@ -1,4 +1,4 @@
-"""Full MCTS tree serialization for v2 collection.
+"""Full ENVS tree serialization for v2 collection.
 
 Saves the complete tree as a proper tree structure where each node stores
 ONLY its own steps (actions + screenshots executed after branching from parent).
@@ -8,13 +8,13 @@ To reconstruct the full root-to-node path for any node, walk up the parent
 chain and concatenate each ancestor's steps in order.
 
 Usage:
-    from verl.mcts.tree_io import save_mcts_tree, load_mcts_tree, reconstruct_trajectory
+    from verl.envs.tree_io import save_envs_tree, load_envs_tree, reconstruct_trajectory
 
-    # After MCTS collection:
-    save_mcts_tree(tree, task_config, "mcts_trees/task_abc.json")
+    # After ENVS collection:
+    save_envs_tree(tree, task_config, "envs_trees/task_abc.json")
 
     # Later, to reconstruct any node's full trajectory:
-    tree_data = load_mcts_tree("mcts_trees/task_abc.json")
+    tree_data = load_envs_tree("envs_trees/task_abc.json")
     traj = reconstruct_trajectory(tree_data, "node_005")
     # traj has standard SFT fields: task_id, instruction, eval_result, limit_images, steps
 """
@@ -24,20 +24,20 @@ import os
 import random as _random
 from typing import Any, Dict, List, Optional, Tuple
 
-from verl.mcts.tree import MCTSTree, TreeNode
+from verl.envs.tree import ENVSTree, TreeNode
 
 
 # ================================================================
 # Saving
 # ================================================================
 
-def save_mcts_tree(
-    tree: MCTSTree,
+def save_envs_tree(
+    tree: ENVSTree,
     task_config: Dict[str, Any],
     output_path: str,
     limit_images: int = 3,
 ) -> Dict[str, Any]:
-    """Serialize the full MCTS tree to JSON.
+    """Serialize the full ENVS tree to JSON.
 
     Each node stores ONLY its own steps — no duplication of parent data.
     The tree structure is preserved via parent_id / children_ids.
@@ -120,7 +120,7 @@ def _serialize_node(node: TreeNode) -> Dict[str, Any]:
         # For root: 0 (no parent).
         "parent_steps_at_branch": getattr(node, "parent_steps_at_branch", 0),
 
-        # Noise metadata (v3 noisy MCTS — empty/defaults for clean collection)
+        # Noise metadata (v3 noisy ENVS — empty/defaults for clean collection)
         "noise_enabled": getattr(node, "noise_enabled", False),
         "noise_seed": getattr(node, "noise_seed", 0),
         "noise_fire_count": getattr(node, "noise_fire_count", 0),
@@ -131,7 +131,7 @@ def _serialize_node(node: TreeNode) -> Dict[str, Any]:
     }
 
 
-def _propagate_q_values(tree: MCTSTree) -> None:
+def _propagate_q_values(tree: ENVSTree) -> None:
     """Back-propagate Q-values from leaves to root.
 
     Q(leaf) = eval_score (1.0 for success, 0.0 for failure)
@@ -153,8 +153,8 @@ def _propagate_q_values(tree: MCTSTree) -> None:
 # Loading
 # ================================================================
 
-def load_mcts_tree(path: str) -> Dict[str, Any]:
-    """Load a saved MCTS tree from JSON."""
+def load_envs_tree(path: str) -> Dict[str, Any]:
+    """Load a saved ENVS tree from JSON."""
     with open(path) as f:
         return json.load(f)
 
@@ -233,7 +233,7 @@ def reconstruct_trajectory(
         "eval_result": node["eval_score"] if node["eval_score"] is not None else 0.0,
         "limit_images": tree_data["limit_images"],
         "steps": steps,
-        # MCTS metadata
+        # ENVS metadata
         "node_id": node_id,
         "parent_id": node["parent_id"],
         "q_value": node.get("q_value"),

@@ -1,17 +1,17 @@
-"""MCTS-specific trajectory format.
+"""ENVS-specific trajectory format.
 
 Produces a STRICT SUPERSET of the standard trajectory_io format:
 the existing SFT pipeline (trajectory_sft.py, expand_episode, select_sft_trajectories.py)
 reads only task_id, instruction, eval_result, limit_images, steps — and ignores unknown fields.
-So MCTS trajectories are directly compatible with the SFT pipeline.
+So ENVS trajectories are directly compatible with the SFT pipeline.
 """
 
 from typing import Any, Dict, List, Optional
 
-from verl.mcts.tree import TreeNode
+from verl.envs.tree import TreeNode
 
 
-def make_mcts_trajectory(
+def make_envs_trajectory(
     node: TreeNode,
     task_config: Dict[str, Any],
     limit_images: int = 3,
@@ -51,7 +51,7 @@ def make_mcts_trajectory(
         "limit_images": limit_images,
         "steps": steps,
 
-        # MCTS-specific metadata (ignored by existing SFT pipeline)
+        # ENVS-specific metadata (ignored by existing SFT pipeline)
         "branch_path": branch_path,
         "tree_depth": _tree_depth(node),
         "diverged_at_step": diverged_at,
@@ -61,7 +61,7 @@ def make_mcts_trajectory(
         "node_id": node.node_id,
         "n_steps_executed": n_steps,
 
-        # Noise metadata (v3 noisy MCTS — empty for clean collection)
+        # Noise metadata (v3 noisy ENVS — empty for clean collection)
         "noise_enabled": node.noise_enabled,
         "noise_seed": node.noise_seed,
         "noise_fire_count": node.noise_fire_count,

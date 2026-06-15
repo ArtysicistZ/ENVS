@@ -401,18 +401,18 @@ class RayPPOTrainer:
             tier_max=algo.noise_tier_max,
         )
 
-        # Load per-task clean/MCTS success rates if available. We deliberately
+        # Load per-task clean/ENVS success rates if available. We deliberately
         # do NOT seed tiers here from success rate alone; the actual initial
         # tier is computed later in `_annotate_task_configs_with_noise()` from a
         # broader static prior (success rate + horizon/domain/UI fragility).
-        mcts_path = os.path.join(
-            os.getcwd(), "checkpoints", "mcts_trajectories_v2",
+        envs_path = os.path.join(
+            os.getcwd(), "checkpoints", "envs_trajectories_v2",
             "combined_all", "collection_results.json",
         )
-        if os.path.exists(mcts_path):
+        if os.path.exists(envs_path):
             try:
                 import json as _json
-                with open(mcts_path, "r", encoding="utf-8") as _f:
+                with open(envs_path, "r", encoding="utf-8") as _f:
                     _data = _json.load(_f)
                 _results = _data.get("results") if isinstance(_data, dict) else None
                 if isinstance(_results, list):
@@ -424,11 +424,11 @@ class RayPPOTrainer:
                             continue
                         self._noise_sr_by_task[tid] = sr
                         n_loaded += 1
-                    print(f"[noise] Loaded success-rate priors for {n_loaded} tasks from MCTS SR file")
+                    print(f"[noise] Loaded success-rate priors for {n_loaded} tasks from ENVS SR file")
             except Exception as _e:
-                print(f"[noise] Failed to seed from MCTS SR file: {_e}")
+                print(f"[noise] Failed to seed from ENVS SR file: {_e}")
         else:
-            print(f"[noise] MCTS SR file not found ({mcts_path}); curriculum starts at initial_tier={algo.noise_initial_tier} for all tasks")
+            print(f"[noise] ENVS SR file not found ({envs_path}); curriculum starts at initial_tier={algo.noise_initial_tier} for all tasks")
 
     def _annotate_task_configs_with_noise(self, task_configs: List[dict], is_val: bool = False) -> None:
         """Decorate each task_config dict in-place with noise_* fields that
@@ -513,7 +513,7 @@ class RayPPOTrainer:
             if not tid:
                 continue
             success_rate = float(self._noise_sr_by_task.get(tid, 0.0))
-            # When MCTS SR is missing for this task, fall back to the configured
+            # When ENVS SR is missing for this task, fall back to the configured
             # `noise_initial_tier` as the explicit tier — otherwise the seed
             # collapses to `tier=very_hard=0` (cost cap 0 → sampler returns []
             # → `_build_noise_meta` returns None → noise NEVER FIRES).
@@ -536,7 +536,7 @@ class RayPPOTrainer:
             if algo.noise_use_curriculum:
                 if not self.noise_curriculum.has_task(tid):
                     # Seed curriculum state with all three priors at once so
-                    # `get_sr` returns the MCTS SR (not 0.0) before any
+                    # `get_sr` returns the ENVS SR (not 0.0) before any
                     # rollouts have been observed.
                     self.noise_curriculum.seed_tier(
                         tid, static_seed_tier, static_seed_p,

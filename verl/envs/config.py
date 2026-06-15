@@ -1,12 +1,12 @@
-"""MCTS configuration dataclass."""
+"""ENVS configuration dataclass."""
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
-class MCTSConfig:
-    """Configuration for the MCTS trajectory collection system.
+class ENVSConfig:
+    """Configuration for the ENVS trajectory collection system.
 
     Key design: 40 VMs pre-setup per task, claimed on demand at branch points.
     The tree grows organically — VMs are allocated where the model is uncertain.
@@ -74,5 +74,5 @@ class MCTSConfig:
     #   SR > 0.60  → 2 fires (sequential, non-overlapping recovery windows)
 
     # ---- Output ----
-    output_dir: str = "checkpoints/mcts_trajectories"
+    output_dir: str = "checkpoints/envs_trajectories"
     save_full_tree: bool = False      # v2: save full tree JSON (all nodes + Q-values)

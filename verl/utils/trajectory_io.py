@@ -1,4 +1,4 @@
-"""Efficient trajectory serialization for SFT/MCTS training.
+"""Efficient trajectory serialization for SFT/ENVS training.
 
 Each episode is stored as a compact JSON object (one line in a JSONL file):
   {

@@ -19,7 +19,7 @@ class NoiseCurriculum:
     """Per-task capability-adaptive noise curriculum.
 
     Design goals:
-    - seed each task from a static prior (`initial_tier`, MCTS SR, etc.)
+    - seed each task from a static prior (`initial_tier`, ENVS SR, etc.)
     - adapt noise probability and tier from observed rollout success
     - keep the API aligned with `ray_trainer.py`
 
@@ -60,7 +60,7 @@ class NoiseCurriculum:
         """Live EMA of observed success rate for this task. Used by the v4
         SR-bucket mapping (`fires_for_sr`) to size the per-rollout noise
         budget. If the task has never been updated, returns the seeded value
-        (0.0 by default; trainer seeds from MCTS SR file at init)."""
+        (0.0 by default; trainer seeds from ENVS SR file at init)."""
         return self._get_state(task_id).sr_ema
 
     def seed_task(self, task_id: str, initial_tier: int, initial_probability: float | None = None,
@@ -74,7 +74,7 @@ class NoiseCurriculum:
         if initial_probability is not None:
             state.p_noise = self._clamp_p(initial_probability)
         if initial_sr is not None:
-            # Bootstrap sr_ema from a static prior (e.g. MCTS SR file). Marks
+            # Bootstrap sr_ema from a static prior (e.g. ENVS SR file). Marks
             # the state as initialized so subsequent `update()` blends instead
             # of overwriting on the first observation.
             state.sr_ema = max(0.0, min(1.0, float(initial_sr)))

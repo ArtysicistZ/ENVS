@@ -1,9 +1,9 @@
-"""Action clustering and branching decision logic for MCTS.
+"""Action clustering and branching decision logic for ENVS.
 
 Uses action fingerprinting (50px coordinate grid + content key) instead of
 spatial distance clustering. Singletons count as clusters (min_cluster_size=1).
 
-See docs/MCTS/ACTION_LEVEL_MCTS_SFT.md for the design.
+See docs/ENVS/ACTION_LEVEL_ENVS_SFT.md for the design.
 """
 
 import logging
@@ -155,7 +155,7 @@ def should_branch(
     candidates: List[str],
     step: int,
     node,  # TreeNode
-    config,  # MCTSConfig
+    config,  # ENVSConfig
 ) -> bool:
     """Branching decision with simplified gates.
 

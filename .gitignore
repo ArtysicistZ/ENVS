@@ -25,6 +25,10 @@ env/
 vmware_vm_data
 .ssh/
 
+# IDEs and editors
+.vscode/
+.idea/
+
 # Large data files
 OSWorld/vmware_vm_data/
 OSWorld/docker_vm_data/
@@ -77,10 +81,6 @@ OSWorld/evaluation_examples/test_*.json
 OSWorld/evaluation_examples/mcts_rerun_low23.json
 OSWorld/evaluation_examples/noise_overrides.json
 OSWorld/evaluation_examples/README.md
-
-# Internal scripts
-scripts/*
-!scripts/servers/
 
 # Stale rebase backup snapshots
 *.from_main

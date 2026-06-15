@@ -1,4 +1,4 @@
-"""MCTS tree data structures."""
+"""ENVS tree data structures."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class BranchBudget:
 
 @dataclass
 class TreeNode:
-    """A node in the MCTS tree.
+    """A node in the ENVS tree.
 
     Each node corresponds to one VM executing a trajectory. The node tracks
     the VM's action history, screenshots, and branching metadata.
@@ -178,8 +178,8 @@ class TreeNode:
         return False
 
 
-class MCTSTree:
-    """Manages the full MCTS tree for one task."""
+class ENVSTree:
+    """Manages the full ENVS tree for one task."""
 
     def __init__(self):
         self.roots: List[TreeNode] = []

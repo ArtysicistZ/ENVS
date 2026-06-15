@@ -1,4 +1,4 @@
-"""MCTS Orchestrator: the main loop for action-level MCTS trajectory collection.
+"""ENVS Orchestrator: the main loop for action-level ENVS trajectory collection.
 
 Architecture:
 - All VMs pre-setup for the same task at start (identical initial state)
@@ -23,22 +23,22 @@ if PROJ_ROOT not in sys.path:
     sys.path.insert(0, PROJ_ROOT)
     sys.path.insert(0, os.path.join(PROJ_ROOT, "OSWorld"))
 
-from verl.mcts.config import MCTSConfig
-from verl.mcts.tree import BranchBudget, MCTSTree, TreeNode
-from verl.mcts.clustering import (
+from verl.envs.config import ENVSConfig
+from verl.envs.tree import BranchBudget, ENVSTree, TreeNode
+from verl.envs.clustering import (
     cluster_by_fingerprint,
     compute_type_entropy,
     representative,
     should_branch,
 )
-from verl.mcts.trajectory_io import make_mcts_trajectory
+from verl.envs.trajectory_io import make_envs_trajectory
 from verl.trainer.gui_agent import add_box_token
 
-# Noise support (v3 noisy MCTS)
+# Noise support (v3 noisy ENVS)
 try:
     from OSWorld.evaluation_examples.noise_generation.runtime_sampler import (
         RuntimeNoiseSampler,
-        fires_for_sr_mcts,
+        fires_for_sr_envs,
         feasibility_constrained_fire_steps,
     )
     _NOISE_AVAILABLE = True
@@ -77,10 +77,10 @@ fail() # Use when you think the task is not feasible or cannot be completed.
 LIMIT_IMAGES = 3
 
 
-class MCTSOrchestrator:
-    """Orchestrates MCTS trajectory collection for one task."""
+class ENVSOrchestrator:
+    """Orchestrates ENVS trajectory collection for one task."""
 
-    def __init__(self, config: MCTSConfig, vllm_pool, processor, tokenizer,
+    def __init__(self, config: ENVSConfig, vllm_pool, processor, tokenizer,
                  task_sr_map: Optional[Dict[str, float]] = None):
         self.config = config
         self.vllm_pool = vllm_pool
@@ -90,7 +90,7 @@ class MCTSOrchestrator:
         self._task_sr_map: Dict[str, float] = task_sr_map or {}
 
     # ----------------------------------------------------------------
-    # Noise helpers (v3 noisy MCTS)
+    # Noise helpers (v3 noisy ENVS)
     # ----------------------------------------------------------------
 
     def _noise_fire_count_for_task(self, task_id: str) -> int:
@@ -98,7 +98,7 @@ class MCTSOrchestrator:
         sr = self._task_sr_map.get(task_id, 0.0)
         if not _NOISE_AVAILABLE or not self.config.enable_noise:
             return 0
-        return fires_for_sr_mcts(sr)
+        return fires_for_sr_envs(sr)
 
     def _should_branch_have_noise(self, rng) -> bool:
         """Decide if a branch gets noise (vs. clean control)."""
@@ -159,8 +159,8 @@ class MCTSOrchestrator:
         self,
         task_config: Dict[str, Any],
         env_workers: List,
-    ) -> Tuple[MCTSTree, List[Dict[str, Any]]]:
-        """Run MCTS exploration for one task.
+    ) -> Tuple[ENVSTree, List[Dict[str, Any]]]:
+        """Run ENVS exploration for one task.
 
         All env_workers are pre-setup with the same task.
         The tree grows on demand — VMs claimed when entropy demands branching.
@@ -169,7 +169,7 @@ class MCTSOrchestrator:
 
         instruction = task_config.get("instruction", "")
         waiting = list(range(len(env_workers)))  # all VMs available
-        tree = MCTSTree()
+        tree = ENVSTree()
         active_nodes: List[TreeNode] = []
         node_counter = [0]
 
@@ -399,7 +399,7 @@ class MCTSOrchestrator:
         for node in tree.all_nodes():
             if len(node.action_history) == 0:
                 continue
-            traj = make_mcts_trajectory(node, task_config, limit_images=self.config.limit_images)
+            traj = make_envs_trajectory(node, task_config, limit_images=self.config.limit_images)
             trajectories.append(traj)
 
         logger.info("Tree summary: %s", tree.summary())
@@ -537,7 +537,7 @@ class MCTSOrchestrator:
                     screenshot_b64 = _extract_screenshot_from_wire(obs_messages)
                     if screenshot_b64:
                         node.current_screenshot_b64 = screenshot_b64
-                # Capture noise burden (v3 noisy MCTS)
+                # Capture noise burden (v3 noisy ENVS)
                 noise_burden = result.get("noise_burden")
                 if noise_burden and node.noise_enabled:
                     fired_this_step = noise_burden.get("events_fired_this_step", 0)
@@ -559,7 +559,7 @@ class MCTSOrchestrator:
     # Evaluation
     # ================================================================
 
-    def _evaluate_nodes(self, tree: MCTSTree, env_workers, ray) -> None:
+    def _evaluate_nodes(self, tree: ENVSTree, env_workers, ray) -> None:
         """Evaluate all nodes that executed at least 1 step."""
         futures = {}
         for node in tree.all_nodes():

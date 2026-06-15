@@ -1,6 +1,6 @@
 """Lightweight HTTP client for the remote env server.
 
-This replaces RemoteEnvWorker for MCTS — no tokenizer/processor loading,
+This replaces RemoteEnvWorker for ENVS — no tokenizer/processor loading,
 no train tensor management. Just HTTP calls to reset/step/evaluate/replay.
 """
 
@@ -13,13 +13,13 @@ import requests
 logger = logging.getLogger(__name__)
 
 
-class MCTSEnvClient:
-    """Lightweight env client for MCTS. Talks directly to the remote env server.
+class ENVSEnvClient:
+    """Lightweight env client for ENVS. Talks directly to the remote env server.
 
     Unlike RemoteEnvWorker, this does NOT:
-    - Load a tokenizer or processor (MCTS handles inference in the driver)
+    - Load a tokenizer or processor (ENVS handles inference in the driver)
     - Manage train tensors (no FSDP/DataProto)
-    - Call process_message (MCTS builds vLLM inputs itself)
+    - Call process_message (ENVS builds vLLM inputs itself)
 
     It DOES:
     - reset, step, evaluate, replay, get_obs_screenshot
@@ -90,7 +90,7 @@ class MCTSEnvClient:
             )
             self.is_done = resp.get("is_done", False)
             self.step_counter += 1
-            # Capture noise burden if present (v3 noisy MCTS)
+            # Capture noise burden if present (v3 noisy ENVS)
             self.last_noise_burden = resp.get("noise_burden")
             return resp
         except Exception as e:
