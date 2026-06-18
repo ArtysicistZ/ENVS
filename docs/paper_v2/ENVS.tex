@@ -1,4 +1,5 @@
 \documentclass[11pt]{article}
+% \ifdefined\pdfoutput\pdfoutput=1\fi   % force pdfLaTeX on arXiv; no-op under XeLaTeX/LuaLaTeX
 
 % Page geometry
 \usepackage[letterpaper, margin=1in]{geometry}
@@ -24,6 +25,7 @@
 \usepackage{caption}
 \usepackage{subcaption}
 \captionsetup[table]{skip=4pt}
+\captionsetup[figure]{skip=4pt}   % tighten image -> caption gap for all figures (default 10pt)
 \renewcommand{\arraystretch}{0.98}
 
 % Math
@@ -37,107 +39,29 @@
 \usepackage{xcolor}
 \usepackage{graphicx}
 
-% Diagrams
-\usepackage{tikz}
-\usepackage{pgfplots}
-\pgfplotsset{compat=1.18}
-\usetikzlibrary{arrows.meta, positioning, fit, backgrounds}
 
-\title{ENVS: Environment-Native Verified Search for Long-Horizon GUI Agents
+\title{\vspace{-2.0em}ENVS: Environment-Native Verified Search for Long-Horizon GUI Agents
 }
 
 \author{
 Yincheng Zhou$^{1,*}$ \quad Athena Zhuoming Zhong$^{1,*}$ \quad Shijie Zhang$^{2,*}$\\
-Kevin Zhang$^{2}$ \quad Teresa Xiaotao Shang$^{1}$ \quad Shanghang Zhang$^{2}$\\[0.5em]
+Kevin Zhang$^{2}$ \quad Teresa Xiaotao Shang$^{1}$ \quad Shanghang Zhang$^{2,\dagger}$\\[0.5em]
 \textit{$^{1}$University of Pennsylvania \quad $^{2}$Peking University}\\[0.2em]
-\small $^{*}$Equal contribution.
+\small $^{*}$Equal contribution. \quad $^{\dagger}$Corresponding author.
 }
 \date{}
 \begin{document}
 \maketitle
+\vspace{-2.2em}     % tighten authors -> teaser gap (safe, unstarred)
 
 %====================================================================
-% TEASER (CVPR-style, before abstract):
-%   (a) compute--accuracy Pareto frontier
-%   (b) ENVS mechanism: discovery decoupled from optimization
-% Color: gray=base, red=ENVS (ours), blue=ARPO.
-% Marker: dot=clean, square=noisy.
+% TEASER (single combined image): (a) ENVS vs RL decoupling,
+% (b) compute--accuracy frontier, (c) OSWorld-Noisy interruptions.
 %====================================================================
 \begin{figure}[H]
 \centering
-\begin{minipage}{0.82\linewidth}
-\centering
-\begin{subfigure}[t]{0.58\linewidth}
-  \centering
-  \begin{tikzpicture}
-    \begin{axis}[
-      width=\linewidth,
-      height=5.1cm,
-      xlabel={\footnotesize Training compute (GPU-hours)},
-      ylabel={\footnotesize pass@8 on \textsc{OSWorld} (\%)},
-      xmin=-12, xmax=220,
-      ymin=18.5, ymax=33,
-      xtick={0,50,100,150,200},
-      ytick={20,24,28,32},
-      grid=major,
-      grid style={dashed, gray!22, line width=0.3pt},
-      axis line style={line width=0.5pt},
-      tick style={line width=0.4pt},
-      tick label style={font=\scriptsize},
-      label style={font=\footnotesize},
-      clip mode=individual,
-    ]
-
-      % --- BASE (gray)
-      \addplot[mark=*, mark size=1.8pt, color=black!55, only marks]
-        coordinates {(0,22.7)};
-
-      % --- ARPO (blue)
-      \addplot[mark=*, mark size=1.8pt, color=blue!72!black, only marks]
-        coordinates {(184,26.7)};
-
-      % --- ENVS data-efficiency sweep (red): %data * 138 GPU-h
-      %       30% -> 41.4  GPU-h, pass@8 = 27.0
-      %       60% -> 82.8  GPU-h, pass@8 = 29.3
-      %       75% -> 103.5 GPU-h, pass@8 = 30.7
-      %      100% -> 138.0 GPU-h, pass@8 = 30.3  (headline ENVS)
-      \addplot[color=red!55!black, line width=0.7pt, mark=none, densely dashed]
-        coordinates {(41.4,27.0) (82.8,29.3) (103.5,30.7) (138,30.3)};
-      \addplot[mark=*, mark size=1.8pt, color=red!75!black, only marks]
-        coordinates {(41.4,27.0) (82.8,29.3) (103.5,30.7) (138,30.3)};
-
-      % --- Improvement arrow: ARPO-clean -> ENVS-75% (Pareto-dominant point)
-      \draw[-{Stealth[length=4.5pt, width=4pt]},
-            line width=0.9pt, green!42!black]
-        (axis cs:175,26.95) -- (axis cs:113,30.00);
-      \node[font=\scriptsize\bfseries, text=green!35!black, anchor=north]
-        at (axis cs:115,28.1) {$1.8\times$ less compute};
-
-      % --- Inline labels
-      \node[anchor=west,  font=\scriptsize, text=black!55]      at (axis cs:5,22.7)  {base};
-      \node[anchor=south, font=\scriptsize, text=blue!50!black] at (axis cs:184,27.4) {ARPO};
-      \node[anchor=south west, font=\scriptsize\bfseries, text=red!55!black]
-        at (axis cs:65,30.5) {\textsc{ENVS}};
-
-      % --- Compact method legend (south-east): 3 colored dots
-      \node[draw=gray!45, rounded corners=2pt, fill=white,
-            fill opacity=0.92, text opacity=1,
-            inner sep=3pt, anchor=south east, font=\scriptsize]
-        at (axis cs:215,19) {
-          \begin{tabular}{@{}c@{\hspace{2pt}}l@{}}
-            \textcolor{black!55}{$\bullet$}      & base \\
-            \textcolor{blue!72!black}{$\bullet$} & ARPO \\
-            \textcolor{red!75!black}{$\bullet$}  & \textsc{ENVS} (ours)
-          \end{tabular}
-        };
-    \end{axis}
-  \end{tikzpicture}
-  \caption{Compute--accuracy frontier.}
-  \label{fig:teaser:pareto}
-\end{subfigure}
-\end{minipage}
-\caption{\textbf{\textsc{ENVS} dominates the compute--accuracy frontier on \textsc{OSWorld}.}
-\textbf{(a)} Each marker is a trained policy at pass@8 on the 300-task clean \textsc{OSWorld} pool; $x$-axis is training compute in A100 GPU-hours. The red curve traces \textsc{ENVS}'s data-efficiency sweep at $30/60/75/100\%$ of collected trajectories. At $75\%$ data, \textsc{ENVS} reaches $30.7$ vs.\ ARPO's $26.7$ at $\sim$$1.8\times$ less compute, and already matches ARPO with only $30\%$ of its data.}
+\includegraphics[width=1\linewidth]{teaser.png}
+\caption{\textsc{ENVS} decouples data collection from model training \textbf{(a)}, reaching higher accuracy at lower compute than online RL \textbf{(b)}; \textsc{OSWorld-Noisy} injects human-style interruptions to test robustness \textbf{(c)}.}
 \label{fig:teaser}
 \end{figure}
 
@@ -200,7 +124,7 @@ A \emph{step} is one action index in a trajectory. A \emph{node} is an environme
 
 \subsection{Behavioral-disagreement-gated search}
 
-At each live node, ENVS samples $K$ candidate next actions from a frozen policy and reduces each to a coarse behavior fingerprint: action type plus a discretization of its argument (quantized coordinates for clicks and drags, normalized text for typing, direction for scrolls, action type alone for zero-argument actions). Fingerprints are a cheap proxy, not a semantic equivalence — nearby clicks may hit different widgets, and distant clicks may hit the same large button. Candidates are bucketed by fingerprint: if all share one bucket, the node continues along that behavior; otherwise the majority bucket continues on the parent VM and each minority bucket spawns a child VM that replays the prefix and executes the divergent action. VM budget thus tracks behavioral divergence, not token noise.
+At each live node, ENVS samples $K$ candidate next actions from a frozen policy and reduces each to a coarse behavior fingerprint: action type plus a discretization of its argument (quantized coordinates for clicks and drags, normalized text for typing, direction for scrolls, action type alone for zero-argument actions). Fingerprints are a cheap proxy, not a semantic equivalence --- nearby clicks may hit different widgets, and distant clicks may hit the same large button. Candidates are bucketed by fingerprint, and the buckets are ranked by agreement: the number of sampled actions that fall in each bucket. The $k$ highest-agreement buckets, where $k$ is the per-step branch budget, are the \emph{majority} actions and are explored; all lower-ranked buckets are \emph{minority} actions and are pruned. If only one bucket is populated, the node continues along it; otherwise the single highest-agreement action is carried forward on the parent VM (so no VM is spent re-reaching the current state), and each remaining majority action spawns a child VM that replays the prefix and executes that divergent behavior. VM budget thus tracks behavioral divergence, not token noise.
 
 \subsection{VM-bounded search in live desktop environments}
 ENVS borrows the branching structure of tree search but not its standard machinery. Classical MCTS variants assume cheap, repeated simulations from abstract states and rely on UCB/PUCT selection with learned values~\citep{coulom2006mcts,kocsis2006uct,silver2016alphago,silver2017alphazero,schrittwieser2020muzero}. In OSWorld, each branch is a live VM trajectory (real clicks, typing, application latency, focus state, brittle desktop transitions) and revisiting an abstract state is not free.
@@ -444,7 +368,7 @@ quality, not only supervision volume.
 \begin{figure}[H]
 \label{fig:data-volume}
 \centering
-\includegraphics[width=0.5\linewidth]{data-efficiency.png}
+\includegraphics[width=0.45\linewidth]{data-efficiency.png}
 \caption{Clean \textsc{OSWorld} pass@8 as a function of ENVS training
 data volume. The 30\% subset already matches ARPO-clean, while gains
 saturate near the full dataset.}
@@ -868,7 +792,7 @@ $\pi_\theta = q$ on $\mathrm{supp}(q)$, so
 attained at the supervised optimum $\pi^* = q$. The converged per-state
 entropy therefore equals $H[q]$, which exceeds $H[\pi_0]$ whenever the
 empirical distribution $q$ is broader than $\pi_0$ at state $s$. Because
-branching retains the majority cluster and up to two minority clusters
+branching retains the $k=3$ highest-agreement action clusters (one on the parent VM and up to two on child VMs)
 drawn from $K = 32$ candidates, $|\mathrm{supp}(q)| \le 3$ at any
 branching state; when the surviving branches contribute roughly
 comparable mass to $q$ (a property of our search-leaf statistics rather

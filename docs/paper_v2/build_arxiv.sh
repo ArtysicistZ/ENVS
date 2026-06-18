@@ -6,18 +6,18 @@ set -e
 SOURCE_FILES=(
     ENVS.tex
     references.bib
+    teaser.png
     pipeline.png
     data-efficiency.png
-    behavior-gated.pdf
 )
 
 SUBMISSION_FILES=(
     ENVS.tex
     ENVS.bbl
     references.bib
+    teaser.png
     pipeline.png
     data-efficiency.png
-    behavior-gated.pdf
 )
 
 echo "=== Checking source files ==="

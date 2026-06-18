@@ -88,3 +88,4 @@ OSWorld/evaluation_examples/README.md
 # Keep structure but not large files
 !.gitkeep
 upstream_arpo/
+*_noise*/
