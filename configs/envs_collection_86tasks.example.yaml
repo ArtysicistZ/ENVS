@@ -1,0 +1,61 @@
+# ENVS Trajectory Collection — example config (86 doable tasks, 96 VMs, 8 GPUs)
+#
+# Copy this file to configs/envs_collection_86tasks.yaml and edit the env-server
+# endpoints (and any paths) to match your setup.
+#
+# All numeric values below are TUNABLE — adjust to your compute budget and task set.
+# Defaults reflect the 86-task collection run reported in the paper.
+#
+# Usage:
+#   python scripts/envs/run_envs_collection.py --config configs/envs_collection_86tasks.yaml
+#   python scripts/envs/run_envs_collection.py --config configs/envs_collection_86tasks.yaml --resume
+
+# ---- VMs ----
+vms_per_task: 96              # tunable: parallel VMs searched per task
+max_active_vms: 96            # tunable: cap on concurrently active VMs
+tasks_per_batch: 1           # tunable: tasks processed per batch
+
+# ---- Env servers ----
+# One entry per OSWorld env server (see scripts/servers/remote_env_server.py).
+# Point these at your own host(s); env_counts must sum to vms_per_task.
+remote_server_urls:
+  - "http://localhost:15001"
+remote_server_env_counts: [96]
+
+# ---- Probing ----
+probe_temperature: 1.0       # tunable: sampling temperature for candidate actions
+total_probe_budget: 80       # tunable: candidate actions sampled per node
+k_max: 64                    # tunable: max action clusters considered per node
+
+# ---- Branching ----
+spatial_grid_size: 50        # tunable: pixel grid for coordinate fingerprinting
+min_cluster_size: 1          # tunable: min agents in a cluster to count
+max_branch_per_explorer: 4   # tunable: max child branches a node may spawn
+child_branch_budget: 2       # tunable: branch budget k (majority actions explored)
+max_branches_per_step: 2     # tunable: max branches opened per step
+never_branch_after: 15       # tunable: stop branching after this step
+late_step_threshold: 10      # tunable: step index considered "late" for branching
+
+# ---- Replay ----
+replay_pause_sec: 1.0        # tunable: pause between replayed actions (seconds)
+
+# ---- Pruning ----
+stuck_repeat_limit: 3        # tunable: prune after this many repeated actions
+stuck_wait_limit: 2          # tunable: prune after this many wait/no-op actions
+
+# ---- Pipeline ----
+max_steps: 15                # tunable: max trajectory horizon
+
+# ---- GPU / Inference ----
+model_path: "ByteDance-Seed/UI-TARS-1.5-7B"
+tp: 8                        # tunable: number of vLLM engines (data-parallel)
+gpu_memory_utilization: 0.85 # tunable: vLLM GPU memory fraction
+max_model_len: 12000         # tunable: max context length
+limit_images: 3              # tunable: max screenshots kept per step
+generation_max_tokens: 512   # tunable: max tokens generated per action
+
+# ---- Task file ----
+task_file: "OSWorld/evaluation_examples/test_all_300tasks_noproxy_softreset_clean.json"
+
+# ---- Output ----
+output_dir: "checkpoints/envs_trajectories"

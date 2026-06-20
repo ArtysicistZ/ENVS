@@ -1,0 +1,44 @@
+# ENVS SFT v2.1 — example config (per-step deduplicated, power-scaled weighting)
+#
+# Copy this file to configs/envs_sft_v2.1.yaml and edit the data paths to point at
+# the trees / index / success file produced by the collection stage.
+#
+# All numeric values below are TUNABLE — adjust to your data and compute budget.
+# Defaults reflect the SFT run reported in the paper.
+#
+# Usage:
+#   torchrun --nproc_per_node=8 scripts/envs/train_envs_sft_v2.py \
+#       --config configs/envs_sft_v2.1.yaml
+
+# ---- Model ----
+model_path: "ByteDance-Seed/UI-TARS-1.5-7B"
+freeze_vision_tower: true
+bf16: true
+
+# ---- Data (v2 tree-based) ----
+tree_dir: "checkpoints/envs_trajectories_v2/combined_all/trees"
+task_index_path: "checkpoints/envs_trajectories_v2/combined_all/task_index.json"
+# mask is depreciated. Now all trajectories have mask as "keep."
+mask_path: "checkpoints/envs_trajectories_v2/combined_all/step_masks_v2.json"
+sr_path: "checkpoints/envs_trajectories_v2/combined_all/envs_success.jsonl"
+max_length: 12000             # tunable: max context length
+limit_images: 3               # tunable: max screenshots kept per step
+
+# ---- Weighting ----
+beta: 0.5                     # tunable: power exponent. 0=task-uniform, 0.5=sqrt, 1.0=linear Prop2Diff
+max_step_ratio: 2.0           # tunable: cap per-step weight at this x mean (prevents overfitting on very-hard tasks)
+
+# ---- Training ----
+output_dir: "checkpoints/envs_sft_v2.1/beta05_2e-6"
+num_epochs: 1                 # tunable: number of SFT epochs
+per_device_batch_size: 1      # tunable: per-GPU batch size
+gradient_accumulation_steps: 4    # tunable: effective_batch = per_device_batch_size x this x num_GPUs
+learning_rate: 2e-6           # tunable: peak learning rate
+lr_scheduler_type: "cosine"   # tunable: LR schedule
+warmup_ratio: 0.03            # tunable: fraction of steps for warmup
+weight_decay: 0.01            # tunable: weight decay
+max_grad_norm: 1.0            # tunable: gradient clipping norm
+logging_steps: 1              # tunable: log every N steps
+
+# ---- Infrastructure ----
+fsdp_offload: false           # tunable: offload FSDP params/grads to CPU

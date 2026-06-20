@@ -73,9 +73,7 @@ models--*/
 *.tmp
 
 # Internal docs, configs, and tests
-configs/
 tests/
-# Ignore all of docs/ except the README assets
 docs/*
 !docs/assets/
 

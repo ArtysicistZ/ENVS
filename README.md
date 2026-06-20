@@ -18,7 +18,7 @@ Yincheng Zhou<sup>1,&ast;</sup>, Athena Zhuoming Zhong<sup>1,&ast;</sup>, Shijie
 </p>
 
 <p align="center">
-  <img src="assets/teaser.png" width="100%" alt="ENVS teaser">
+  <img src="docs/assets/teaser.png" width="100%" alt="ENVS teaser">
 </p>
 
 **ENVS** treats the GUI environment itself as a source of supervision. Instead of optimizing a policy with on-policy RL rollouts, ENVS **searches** live OSWorld desktop VMs to discover successful trajectories, **verifies** them with the environment oracle, and **trains** a GUI agent with one-epoch SFT on globally balanced step-level supervision. It reaches **higher accuracy at lower compute** than matched online RL, and we release **OSWorld-Noisy**, a benchmark of recoverable desktop interruptions for testing robustness.
@@ -78,7 +78,7 @@ Yincheng Zhou<sup>1,&ast;</sup>, Athena Zhuoming Zhong<sup>1,&ast;</sup>, Shijie
 **Data efficiency.** 30% of the collected trajectories already reaches **27.0** pass@8 (≈ ARPO at full budget); gains saturate near the full dataset (**30.3**). Training from noisy environments also better preserves auxiliary visual reasoning, e.g. OSWorld-G Refusal **16.7 vs. 1.9** and BLINK Functional Correspondence **26.2 vs. 23.1**.
 
 <p align="center">
-  <img src="assets/data-efficiency.png" width="48%" alt="ENVS data efficiency">
+  <img src="docs/assets/data-efficiency.png" width="48%" alt="ENVS data efficiency">
 </p>
 
 ---
@@ -86,7 +86,7 @@ Yincheng Zhou<sup>1,&ast;</sup>, Athena Zhuoming Zhong<sup>1,&ast;</sup>, Shijie
 ## Method
 
 <p align="center">
-  <img src="assets/pipeline.png" width="100%" alt="ENVS pipeline">
+  <img src="docs/assets/pipeline.png" width="100%" alt="ENVS pipeline">
 </p>
 
 ENVS runs in two decoupled phases.
@@ -141,8 +141,8 @@ ENVS/
 │   └── evaluation_examples/
 │       ├── examples/           #   300 task definitions by domain
 │       └── noise_generation/   #   OSWorld-Noisy: 151 noise generators (templates, variants, ...)
-├── assets/                     # README figures
-└── docs/                       # Paper sources
+└── docs/
+    └── assets/                 # README figures
 ```
 
 ---
@@ -172,6 +172,14 @@ Key dependencies: `torch`, `vllm`, `ray`, `transformers`, `accelerate`, `pyautog
 ## Usage
 
 ENVS uses a **three-tier setup**: a driver (Ray + vLLM on the GPU node), one or more **remote env servers** (FastAPI, hosting the OSWorld Docker VMs), and the VMs themselves. Configure the server endpoints, model path, and budgets in `configs/envs_*.yaml`.
+
+First, copy the provided templates and fill in your own endpoints/paths and credentials:
+
+```bash
+cp configs/envs_collection_86tasks.example.yaml configs/envs_collection_86tasks.yaml
+cp configs/envs_sft_v2.1.example.yaml configs/envs_sft_v2.1.yaml
+cp .env.example .env   # then add your API keys
+```
 
 ### 1. Start the OSWorld env server(s)
 
