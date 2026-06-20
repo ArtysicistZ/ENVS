@@ -2,11 +2,11 @@
 
 <div align="center">
 
-Yincheng Zhou<sup>1,*</sup>, Athena Zhuoming Zhong<sup>1,*</sup>, Shijie Zhang<sup>2,*</sup>, Kevin Zhang<sup>2</sup>, Teresa Xiaotao Shang<sup>1</sup>, Shanghang Zhang<sup>2,†</sup>
+Yincheng Zhou<sup>1,&ast;</sup>, Athena Zhuoming Zhong<sup>1,&ast;</sup>, Shijie Zhang<sup>2,&ast;</sup>, Kevin Zhang<sup>2</sup>, Teresa Xiaotao Shang<sup>1</sup>, Shanghang Zhang<sup>2,&dagger;</sup>
 
 <sup>1</sup>University of Pennsylvania &nbsp;&nbsp; <sup>2</sup>Peking University
 
-<sup>*</sup>Equal contribution &nbsp;&nbsp; <sup>†</sup>Corresponding author
+<sup>&ast;</sup>Equal contribution &nbsp;&nbsp; <sup>&dagger;</sup>Corresponding author
 
 </div>
 
@@ -93,7 +93,9 @@ ENVS runs in two decoupled phases.
 
 **1. Environment-native verified search (collection).** For each task, many identical OSWorld VMs are reset to the same initial state. Starting from a frozen policy, at each node ENVS samples candidate next actions, reduces each to a coarse **behavior fingerprint** (action type + discretized arguments), and buckets candidates by fingerprint. The **$k$ highest-agreement buckets are the *majority* actions and are explored**; all lower-ranked buckets are *minority* actions and are pruned. The highest-agreement action continues on the parent VM, while the remaining majority actions spawn child VMs that replay the shared prefix and branch. After search, every leaf trajectory is scored by the **OSWorld task oracle** (binary reward $R(\tau) \in \{0, 1\}$); only verified successes are kept.
 
-**2. Curation + one-epoch SFT (training).** Verified trajectories are decomposed into per-step supervised examples, **deduplicated** over shared prefixes (each shared step trained once), and **reweighted** by a difficulty-aware per-task weight $w_i = \mathrm{clip}\!\big((1 - SR_i)^{\beta} / T_i,\ w_{\max}\big)$ that shifts gradient mass toward hard tasks and normalizes for trajectory length. The agent is then fine-tuned for a **single epoch**.
+**2. Curation + one-epoch SFT (training).** Verified trajectories are decomposed into per-step supervised examples, **deduplicated** over shared prefixes (each shared step trained once), and **reweighted** by a difficulty-aware per-task weight that shifts gradient mass toward hard tasks and normalizes for trajectory length. The agent is then fine-tuned for a **single epoch**.
+
+$$w_i = \mathrm{clip}\!\left(\frac{(1-\mathrm{SR}_i)^{\beta}}{T_i},\; w_{\max}\right)$$
 
 ### OSWorld-Noisy
 
