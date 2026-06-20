@@ -75,6 +75,9 @@ models--*/
 # Internal docs, configs, and tests
 configs/
 tests/
+# Ignore all of docs/ except the README assets
+docs/*
+!docs/assets/
 
 # Internal eval task lists & local README
 OSWorld/evaluation_examples/test_*.json
@@ -88,5 +91,3 @@ OSWorld/evaluation_examples/README.md
 # Keep structure but not large files
 !.gitkeep
 upstream_arpo/
-*_noise*/
-*paper*/
