@@ -230,11 +230,11 @@ Trains, frees GPU memory, then runs **pass@8** evaluation on the 300-task pool a
 ## Citation
 
 ```bibtex
-@article{zhou2025envs,
+@article{zhou2026envs,
   title   = {ENVS: Environment-Native Verified Search for Long-Horizon GUI Agents},
   author  = {Zhou, Yincheng and Zhong, Athena Zhuoming and Zhang, Shijie and
              Zhang, Kevin and Shang, Teresa Xiaotao and Zhang, Shanghang},
-  year    = {2025}
+  year    = {2026}
 }
 ```
 
