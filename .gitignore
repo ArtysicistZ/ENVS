@@ -74,6 +74,8 @@ models--*/
 
 # Internal docs, configs, and tests
 tests/
+docs/*
+!docs/assets/
 
 # Internal eval task lists & local README
 OSWorld/evaluation_examples/test_*.json
