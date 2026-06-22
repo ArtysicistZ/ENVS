@@ -95,7 +95,7 @@ ENVS runs in two decoupled phases.
 
 **2. Curation + one-epoch SFT (training).** Verified trajectories are decomposed into per-step supervised examples, **deduplicated** over shared prefixes (each shared step trained once), and **reweighted** by a difficulty-aware per-task weight that shifts gradient mass toward hard tasks and normalizes for trajectory length. The agent is then fine-tuned for a **single epoch**.
 
-$$w_i = \mathrm{clip}\!\left(\frac{(1-\mathrm{SR}_i)^{\beta}}{T_i},\; w_{\max}\right)$$
+$$w_i = \mathrm{clip}\left(\frac{(1-\mathrm{SR}_i)^{\beta}}{T_i}, w_{\max}\right)$$
 
 ### OSWorld-Noisy
 
