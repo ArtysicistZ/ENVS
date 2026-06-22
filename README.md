@@ -31,7 +31,7 @@ Yincheng Zhou<sup>1,&ast;</sup>, Athena Zhuoming Zhong<sup>1,&ast;</sup>, Shijie
 - **Branch only on behaviorally distinct actions.** At each step ENVS samples candidate actions, fingerprints them, and explores the **top-*k* highest-agreement (majority)** behaviors while pruning minority ones — turning a costly search into a tractable budgeted tree.
 - **Verified, globally balanced supervision.** Only oracle-verified successful leaves become training data, reweighted by task difficulty and deduplicated across shared prefixes.
 - **Stronger and cheaper than online RL.** **30.3 pass@8** on OSWorld vs. 26.7 for matched ARPO, at **138–153 GPU-h** vs. 184–192. With only **30%** of the search data, ENVS still reaches **27.0**.
-- **OSWorld-Noisy.** A new benchmark of **151 runtime noise generators** (3 tiers) that inject realistic, *recoverable* desktop interruptions while preserving the original tasks and evaluators.
+- **OSWorld-Noisy.** A new benchmark of **153 runtime noise generators** (3 tiers) that inject realistic, *recoverable* desktop interruptions while preserving the original tasks and evaluators.
 
 ---
 
@@ -99,7 +99,7 @@ $$w_i = \mathrm{clip}\left(\frac{(1-\mathrm{SR}_i)^{\beta}}{T_i}, w_{\max}\right
 
 ### OSWorld-Noisy
 
-OSWorld-Noisy preserves the original OSWorld tasks and evaluators but injects controlled, **recoverable** runtime interruptions. Its **151 generators** span three tiers:
+OSWorld-Noisy preserves the original OSWorld tasks and evaluators but injects controlled, **recoverable** runtime interruptions. Its **153 generators** span three tiers:
 
 <table align="center">
 <thead>
@@ -140,7 +140,7 @@ ENVS/
 ├── OSWorld/                    # OSWorld fork
 │   └── evaluation_examples/
 │       ├── examples/           #   300 task definitions by domain
-│       └── noise_generation/   #   OSWorld-Noisy: 151 noise generators (templates, variants, ...)
+│       └── noise_generation/   #   OSWorld-Noisy: 153 noise generators (templates, variants, ...)
 └── docs/
     └── assets/                 # README figures
 ```
