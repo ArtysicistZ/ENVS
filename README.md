@@ -70,7 +70,7 @@ Yincheng Zhou<sup>1,&ast;</sup>, Athena Zhuoming Zhong<sup>1,&ast;</sup>, Shijie
 <tr><th>Method</th><th align="right">Collect</th><th align="right">Train</th><th align="right">Total</th></tr>
 </thead>
 <tbody>
-<tr><td>ARPO (clean / noisy)</td><td align="right">—</td><td align="right">—</td><td align="right">184 / 192</td></tr>
+<tr><td>ARPO (clean / noisy)</td><td align="right">—</td><td align="right">184 / 192</td><td align="right">184 / 192</td></tr>
 <tr><td><b>ENVS (clean / noisy)</b></td><td align="right">107 / 121</td><td align="right">31 / 32</td><td align="right"><b>138 / 153</b></td></tr>
 </tbody>
 </table>
