@@ -28,7 +28,7 @@ Yincheng Zhou<sup>1,&ast;</sup>, Athena Zhuoming Zhong<sup>1,&ast;</sup>, Shijie
 ## Highlights
 
 - **Decoupled search-then-train.** Trajectory *discovery* (environment-native tree search) is separated from policy *optimization* (one-epoch SFT) — no rollouts inside the training loop.
-- **Branch only on behaviorally distinct actions.** At each step ENVS samples candidate actions, fingerprints them, and explores the **top-$k$ highest-agreement (majority)** behaviors while pruning minority ones — turning a costly search into a tractable budgeted tree.
+- **Branch only on behaviorally distinct actions.** At each step ENVS samples candidate actions, fingerprints them, and explores the **top-*k* highest-agreement (majority)** behaviors while pruning minority ones — turning a costly search into a tractable budgeted tree.
 - **Verified, globally balanced supervision.** Only oracle-verified successful leaves become training data, reweighted by task difficulty and deduplicated across shared prefixes.
 - **Stronger and cheaper than online RL.** **30.3 pass@8** on OSWorld vs. 26.7 for matched ARPO, at **138–153 GPU-h** vs. 184–192. With only **30%** of the search data, ENVS still reaches **27.0**.
 - **OSWorld-Noisy.** A new benchmark of **151 runtime noise generators** (3 tiers) that inject realistic, *recoverable* desktop interruptions while preserving the original tasks and evaluators.
@@ -91,7 +91,7 @@ Yincheng Zhou<sup>1,&ast;</sup>, Athena Zhuoming Zhong<sup>1,&ast;</sup>, Shijie
 
 ENVS runs in two decoupled phases.
 
-**1. Environment-native verified search (collection).** For each task, many identical OSWorld VMs are reset to the same initial state. Starting from a frozen policy, at each node ENVS samples candidate next actions, reduces each to a coarse **behavior fingerprint** (action type + discretized arguments), and buckets candidates by fingerprint. The **$k$ highest-agreement buckets are the *majority* actions and are explored**; all lower-ranked buckets are *minority* actions and are pruned. The highest-agreement action continues on the parent VM, while the remaining majority actions spawn child VMs that replay the shared prefix and branch. After search, every leaf trajectory is scored by the **OSWorld task oracle** (binary reward $R(\tau) \in \{0, 1\}$); only verified successes are kept.
+**1. Environment-native verified search (collection).** For each task, many identical OSWorld VMs are reset to the same initial state. Starting from a frozen policy, at each node ENVS samples candidate next actions, reduces each to a coarse **behavior fingerprint** (action type + discretized arguments), and buckets candidates by fingerprint. The **top-*k* highest-agreement buckets are the *majority* actions and are explored**; all lower-ranked buckets are *minority* actions and are pruned. The highest-agreement action continues on the parent VM, while the remaining majority actions spawn child VMs that replay the shared prefix and branch. After search, every leaf trajectory is scored by the **OSWorld task oracle** (binary reward $R(\tau) \in \{0, 1\}$); only verified successes are kept.
 
 **2. Curation + one-epoch SFT (training).** Verified trajectories are decomposed into per-step supervised examples, **deduplicated** over shared prefixes (each shared step trained once), and **reweighted** by a difficulty-aware per-task weight that shifts gradient mass toward hard tasks and normalizes for trajectory length. The agent is then fine-tuned for a **single epoch**.
 
@@ -200,7 +200,7 @@ python scripts/envs/run_envs_collection.py --config configs/envs_collection_86ta
 python scripts/envs/run_envs_collection.py --config configs/envs_collection_86tasks.yaml --resume
 ```
 
-Outputs verified successes to `checkpoints/envs_trajectories/envs_success.jsonl`, full trees under `trees/{task_id}.json`, and per-task metadata in `collection_results.json`. Key knobs in `configs/envs_collection_86tasks.yaml`: probe budget per node, per-explorer branch cap, child branch budget ($k$), number of vLLM engines, and `max_model_len`.
+Outputs verified successes to `checkpoints/envs_trajectories/envs_success.jsonl`, full trees under `trees/{task_id}.json`, and per-task metadata in `collection_results.json`. Key knobs in `configs/envs_collection_86tasks.yaml`: probe budget per node, per-explorer branch cap, child branch budget (*k*), number of vLLM engines, and `max_model_len`.
 
 ### 3. Train (one-epoch SFT, 8-GPU FSDP)
 
