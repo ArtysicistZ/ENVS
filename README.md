@@ -11,7 +11,7 @@ Yincheng Zhou<sup>1,&ast;</sup>, Athena Zhuoming Zhong<sup>1,&ast;</sup>, Shijie
 </div>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/arXiv-coming%20soon-b31b1b.svg" alt="arXiv"></a>
+  <a href="https://arxiv.org/abs/2606.22948"><img src="https://img.shields.io/badge/arXiv-2606.22948-b31b1b.svg" alt="arXiv"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-green.svg" alt="Python">
   <img src="https://img.shields.io/badge/model-UI--TARS--1.5--7B-orange.svg" alt="Model">
@@ -231,10 +231,14 @@ Trains, frees GPU memory, then runs **pass@8** evaluation on the 300-task pool a
 
 ```bibtex
 @article{zhou2026envs,
-  title   = {ENVS: Environment-Native Verified Search for Long-Horizon GUI Agents},
-  author  = {Zhou, Yincheng and Zhong, Athena Zhuoming and Zhang, Shijie and
-             Zhang, Kevin and Shang, Teresa Xiaotao and Zhang, Shanghang},
-  year    = {2026}
+  title         = {ENVS: Environment-Native Verified Search for Long-Horizon GUI Agents},
+  author        = {Zhou, Yincheng and Zhong, Athena Zhuoming and Zhang, Shijie and
+                   Zhang, Kevin and Shang, Teresa Xiaotao and Zhang, Shanghang},
+  year          = {2026},
+  journal       = {arXiv preprint arXiv:2606.22948},
+  eprint        = {2606.22948},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.AI}
 }
 ```
 
