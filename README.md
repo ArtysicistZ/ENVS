@@ -173,12 +173,11 @@ Key dependencies: `torch`, `vllm`, `ray`, `transformers`, `accelerate`, `pyautog
 
 ENVS uses a **three-tier setup**: a driver (Ray + vLLM on the GPU node), one or more **remote env servers** (FastAPI, hosting the OSWorld Docker VMs), and the VMs themselves. Configure the server endpoints, model path, and budgets in `configs/envs_*.yaml`.
 
-First, copy the provided templates and fill in your own endpoints/paths and credentials:
+First, copy the provided templates and fill in your own endpoints/paths:
 
 ```bash
 cp configs/envs_collection_86tasks.example.yaml configs/envs_collection_86tasks.yaml
 cp configs/envs_sft_v2.1.example.yaml configs/envs_sft_v2.1.yaml
-cp .env.example .env   # then add your API keys
 ```
 
 ### 1. Start the OSWorld env server(s)
